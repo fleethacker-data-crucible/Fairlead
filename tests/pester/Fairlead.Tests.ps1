@@ -153,7 +153,11 @@ Describe 'Repository rules' {
         ([regex]::Matches($proj, '<PackageReference Include="([^"]+)"') | ForEach-Object { $_.Groups[1].Value }) | Where-Object { $_ -ne 'Microsoft.NETFramework.ReferenceAssemblies' } | Should -BeNullOrEmpty
         $proj | Should -Match '<LangVersion>5</LangVersion>'
         @(Get-ChildItem -Path $script:Root -Recurse -File -Include *.dll, *.exe | Where-Object { $_.FullName -notmatch '\\(node_modules|dist|bin|obj|\.git)\\' }) | Should -BeNullOrEmpty
-        @(Get-ChildItem -Path (Join-Path $script:Root 'src\Fairlead.Core') -Recurse -Filter *.cs | Where-Object { $_.FullName -notmatch '\\(bin|obj)\\' -and (Get-Content $_.FullName -Raw) -match 'Newtonsoft|Assembly\.Load' }) | Should -BeNullOrEmpty
+        # Code lines only: comments may name Newtonsoft (the JSON model keeps its output identical to it).
+        $hits = foreach ($f in @(Get-ChildItem -Path (Join-Path $script:Root 'src\Fairlead.Core') -Recurse -Filter *.cs | Where-Object { $_.FullName -notmatch '\\(bin|obj)\\' })) {
+            Select-String -LiteralPath $f.FullName -Pattern '\bNewtonsoft\b|Assembly\.Load' | Where-Object { $_.Line.TrimStart() -notmatch '^//' } | ForEach-Object { $f.Name + ':' + $_.LineNumber }
+        }
+        @($hits) | Should -BeNullOrEmpty
     }
     It 'core C# files are ASCII (the .NET Framework compiler behind Add-Type may read BOM-less files as ANSI)' {
         foreach ($f in @(Get-ChildItem -Path (Join-Path $script:Root 'src\Fairlead.Core') -Recurse -Filter *.cs | Where-Object { $_.FullName -notmatch '\\(bin|obj)\\' })) {
