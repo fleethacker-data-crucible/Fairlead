@@ -1,6 +1,6 @@
 #requires -Version 5.1
 # Pester 5 tests for the PowerShell layer and the repository rules. Run: Invoke-Pester tests/pester
-# Needs a built Fairlead.Core.dll (dotnet build) or FAIRLEAD_CORE_DLL pointing at one.
+# The core is compiled from src\Fairlead.Core\*.cs in memory by Import-FairleadCore (Add-Type), as on the workstation.
 
 BeforeAll {
     $script:Root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
@@ -28,6 +28,26 @@ Describe 'Module surface' {
     It 'loads Fairlead.Core' {
         { Import-FairleadCore } | Should -Not -Throw
         ('Fairlead.Core.Facade' -as [type]) | Should -Not -BeNullOrEmpty
+    }
+    It 'compiles the core from source in memory and loads no DLL from disk' {
+        Import-FairleadCore
+        [string]::IsNullOrEmpty([Fairlead.Core.Facade].Assembly.Location) | Should -BeTrue -Because 'the workstation blocks loading custom DLL files'
+        $fromRepo = @([AppDomain]::CurrentDomain.GetAssemblies() | Where-Object { -not $_.IsDynamic -and $_.Location -and $_.Location.StartsWith($script:Root, [StringComparison]::OrdinalIgnoreCase) })
+        $fromRepo | Should -BeNullOrEmpty
+        $refs = @([Fairlead.Core.Facade].Assembly.GetReferencedAssemblies() | ForEach-Object { $_.Name })
+        foreach ($r in $refs) { @('mscorlib', 'System', 'System.Core', 'System.Net.Http', 'System.Security', 'System.Security.Cryptography.ProtectedData', 'System.Runtime', 'netstandard') | Should -Contain $r }
+        (Get-FairleadCoreLoadInfo) | Should -Not -BeNullOrEmpty
+    }
+    It 'lists the core source without build output folders' {
+        $src = Get-FairleadCoreSource -Root $script:Root
+        $src.Files.Count | Should -BeGreaterThan 20
+        @($src.Files | Where-Object { $_ -match '[\\/](bin|obj)[\\/]' }) | Should -BeNullOrEmpty
+    }
+    It 'says what is missing when the core source is not there' {
+        $tmp = Join-Path ([IO.Path]::GetTempPath()) ('fairlead-nosrc-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Force $tmp | Out-Null
+        try { { Get-FairleadCoreSource -Root $tmp } | Should -Throw '*core source folder*' }
+        finally { Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue }
     }
 }
 
@@ -126,6 +146,19 @@ Describe 'Repository rules' {
             [void][System.Management.Automation.Language.Parser]::ParseFile($f.FullName, [ref]$tokens, [ref]$errors)
             $errors | Should -BeNullOrEmpty -Because $f.FullName
             ($tokens | Where-Object { $_.Kind -in @('QuestionQuestion', 'QuestionQuestionEquals', 'AndAnd', 'OrOr', 'QuestionDot', 'QuestionLBracket') }) | Should -BeNullOrEmpty -Because $f.FullName
+        }
+    }
+    It 'the core references no third-party package and the repository holds no DLL' {
+        $proj = Get-Content (Join-Path $script:Root 'src\Fairlead.Core\Fairlead.Core.csproj') -Raw
+        ([regex]::Matches($proj, '<PackageReference Include="([^"]+)"') | ForEach-Object { $_.Groups[1].Value }) | Where-Object { $_ -ne 'Microsoft.NETFramework.ReferenceAssemblies' } | Should -BeNullOrEmpty
+        $proj | Should -Match '<LangVersion>5</LangVersion>'
+        @(Get-ChildItem -Path $script:Root -Recurse -File -Include *.dll, *.exe | Where-Object { $_.FullName -notmatch '\\(node_modules|dist|bin|obj|\.git)\\' }) | Should -BeNullOrEmpty
+        @(Get-ChildItem -Path (Join-Path $script:Root 'src\Fairlead.Core') -Recurse -Filter *.cs | Where-Object { $_.FullName -notmatch '\\(bin|obj)\\' -and (Get-Content $_.FullName -Raw) -match 'Newtonsoft|Assembly\.Load' }) | Should -BeNullOrEmpty
+    }
+    It 'core C# files are ASCII (the .NET Framework compiler behind Add-Type may read BOM-less files as ANSI)' {
+        foreach ($f in @(Get-ChildItem -Path (Join-Path $script:Root 'src\Fairlead.Core') -Recurse -Filter *.cs | Where-Object { $_.FullName -notmatch '\\(bin|obj)\\' })) {
+            $bytes = [IO.File]::ReadAllBytes($f.FullName)
+            ($bytes | Where-Object { $_ -gt 127 }).Count | Should -Be 0 -Because $f.FullName
         }
     }
     It 'only Providers\UpstreamClient.cs makes outbound HTTP calls' {

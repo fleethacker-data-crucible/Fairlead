@@ -6,16 +6,24 @@ namespace Fairlead.Core.Config
 {
     public sealed class ProviderPreset
     {
-        public string Id { get; set; } = string.Empty;
-        public string Name { get; set; } = string.Empty;
+        public string Id { get; set; }
+        public string Name { get; set; }
         public ProviderKind Kind { get; set; }
-        public string BaseUrl { get; set; } = string.Empty;
+        public string BaseUrl { get; set; }
         public bool Local { get; set; }
-        public string? ApiKeyEnv { get; set; }
+        public string ApiKeyEnv { get; set; }
         public bool NeedsKey { get; set; }
         /// <summary>Where to get a key, shown in the setup wizard.</summary>
-        public string? KeyUrl { get; set; }
-        public string Hint { get; set; } = string.Empty;
+        public string KeyUrl { get; set; }
+        public string Hint { get; set; }
+
+        public ProviderPreset()
+        {
+            Id = string.Empty;
+            Name = string.Empty;
+            BaseUrl = string.Empty;
+            Hint = string.Empty;
+        }
     }
 
     /// <summary>
@@ -43,18 +51,19 @@ namespace Fairlead.Core.Config
             new ProviderPreset { Id = "custom", Name = "Custom (OpenAI-compatible)", Kind = ProviderKind.OpenAi, BaseUrl = "http://127.0.0.1:8000/v1", Hint = "Any server that speaks /v1/chat/completions." },
         };
 
-        public static ProviderPreset? Find(string? id)
+        public static ProviderPreset Find(string id)
         {
             if (string.IsNullOrEmpty(id)) return null;
             return All.FirstOrDefault(p => string.Equals(p.Id, id, StringComparison.OrdinalIgnoreCase));
         }
 
-        public static ProviderConfig Create(string presetId, string? id = null)
+        public static ProviderConfig Create(string presetId, string id = null)
         {
-            var p = Find(presetId) ?? throw new ArgumentException("Unknown provider preset '" + presetId + "'.");
+            var p = Find(presetId);
+            if (p == null) throw new ArgumentException("Unknown provider preset '" + presetId + "'.");
             return new ProviderConfig
             {
-                Id = string.IsNullOrEmpty(id) ? p.Id : id!,
+                Id = string.IsNullOrEmpty(id) ? p.Id : id,
                 Name = p.Name,
                 Kind = p.Kind,
                 Preset = p.Id,

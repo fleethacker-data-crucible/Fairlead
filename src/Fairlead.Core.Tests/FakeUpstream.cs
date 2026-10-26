@@ -6,7 +6,7 @@ using System.Net.Http;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using Newtonsoft.Json.Linq;
+using Fairlead.Core.Serialization;
 
 namespace Fairlead.Core.Tests
 {
@@ -77,17 +77,17 @@ namespace Fairlead.Core.Tests
 
         public static string OpenAiChunk(string text)
         {
-            return "data: " + new JObject { ["id"] = "c", ["object"] = "chat.completion.chunk", ["choices"] = new JArray { new JObject { ["index"] = 0, ["delta"] = new JObject { ["content"] = text }, ["finish_reason"] = null } } }.ToString(Newtonsoft.Json.Formatting.None) + "\n\n";
+            return "data: " + new JObject { ["id"] = "c", ["object"] = "chat.completion.chunk", ["choices"] = new JArray { new JObject { ["index"] = 0, ["delta"] = new JObject { ["content"] = text }, ["finish_reason"] = null } } }.ToString(Formatting.None) + "\n\n";
         }
 
         public static string OpenAiFinish(string reason = "stop")
         {
-            return "data: " + new JObject { ["id"] = "c", ["object"] = "chat.completion.chunk", ["choices"] = new JArray { new JObject { ["index"] = 0, ["delta"] = new JObject(), ["finish_reason"] = reason } } }.ToString(Newtonsoft.Json.Formatting.None) + "\n\n";
+            return "data: " + new JObject { ["id"] = "c", ["object"] = "chat.completion.chunk", ["choices"] = new JArray { new JObject { ["index"] = 0, ["delta"] = new JObject(), ["finish_reason"] = reason } } }.ToString(Formatting.None) + "\n\n";
         }
 
         public static string OpenAiUsage(int input, int output)
         {
-            return "data: " + new JObject { ["id"] = "c", ["object"] = "chat.completion.chunk", ["choices"] = new JArray(), ["usage"] = new JObject { ["prompt_tokens"] = input, ["completion_tokens"] = output } }.ToString(Newtonsoft.Json.Formatting.None) + "\n\n";
+            return "data: " + new JObject { ["id"] = "c", ["object"] = "chat.completion.chunk", ["choices"] = new JArray(), ["usage"] = new JObject { ["prompt_tokens"] = input, ["completion_tokens"] = output } }.ToString(Formatting.None) + "\n\n";
         }
     }
 }

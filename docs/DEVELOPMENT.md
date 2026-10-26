@@ -13,29 +13,30 @@
 Launch-Fairlead.bat          the only launcher
 module/Fairlead/             PowerShell module (launcher, tray)
 scripts/                     Start-, Stop-Fairlead, process helpers, Register-FairleadStartup
-src/Fairlead.Core/           C# core (net48 + netstandard2.0)
-src/Fairlead.Core.Tests/     xUnit: translation, routing, breakers, gateway end to end over real sockets
+src/Fairlead.Core/           C# 5 core, shipped as source (the .csproj is only the C# 5 check build)
+src/Fairlead.Core.Tests/     xUnit (compiles the core .cs files): translation, routing, breakers, gateway over real sockets, Newtonsoft parity
 web/                         React + TypeScript admin UI (build.mjs → web/dist)
 tests/pester/                PowerShell tests and repository rules
 integrations/                per-tool setup and the hackathon worklist
 config/                      fairlead.env.example
 docs/                        this documentation and the shared Fleet standards
-build/                       Build-Fairlead.ps1 (test + bundle), New-FairleadBrand.ps1
+build/                       Build-Fairlead.ps1 (test + bundle), Test-FairleadAddType.ps1 (PS 5.1 compile check), New-FairleadBrand.ps1
 ```
 
 ## Build and test
 
 ```powershell
 build\Build-Fairlead.ps1                 # everything: core, tests, UI, Pester, bundle in dist\
-dotnet test Fairlead.sln                 # core on net8.0 and net48
+dotnet test Fairlead.sln                 # C# 5 check build, then the core on net8.0 and net48
+build\Test-FairleadAddType.ps1           # compile the core exactly as the launcher does (Windows PowerShell 5.1)
 cd web; npm install; npm run build       # UI only → web\dist
 cd web; npm test; npm run typecheck
 Invoke-Pester tests\pester
 ```
 
-Run from source: `dotnet build -c Release`, build the UI, then `.\Launch-Fairlead.bat --console --no-tray`. The
-module finds the DLL under `src\Fairlead.Core\bin\Release\net48` and the UI under `web\dist`. To keep your real
-config untouched while experimenting, set `FAIRLEAD_DATA_DIR` and `FAIRLEAD_PORT` first.
+Run from source: build the UI, then `.\Launch-Fairlead.bat --console --no-tray`. The module compiles
+`src\Fairlead.Core\**\*.cs` in memory (no build step for the core) and serves the UI from `web\dist`. To keep your
+real config untouched while experimenting, set `FAIRLEAD_DATA_DIR` and `FAIRLEAD_PORT` first.
 
 UI work: `cd web; npm run dev` rebuilds on save; reload the browser.
 
@@ -52,7 +53,13 @@ UI work: `cd web; npm run dev` rebuilds on save; reload the browser.
 ## Conventions
 
 - PowerShell must run on 5.1: no `??`, `?.`, `&&`/`||` pipeline chains (Pester checks the parse tokens), ASCII only.
-- Core must compile for `net48`: stick to the `netstandard2.0` API surface. Warnings are errors.
+- The core is C# 5 (the .NET Framework 4.8 compiler behind `Add-Type`): no `?.`, `=>` members, `$""`, `nameof`,
+  property initializers, `is T x` patterns, `when` filters, `throw` expressions or `await` in `catch`. Use
+  `token.At("name")` for a null-safe JSON lookup. `Fairlead.Core.csproj` (LangVersion 5, warnings are errors) and CI's
+  Add-Type check enforce it.
+- Framework assemblies only (`System`, `System.Core`, `System.Net.Http`, `System.Security`): no NuGet packages, no
+  third-party DLLs, no `Assembly.Load*`. Core `.cs` files are ASCII (Pester checks); write `"\u2026"`, not the
+  character.
 - Only `Providers/UpstreamClient.cs` makes outbound HTTP calls (Pester rule).
 - The browser never sees an API key, a key hash or the DPAPI blob; tests assert it.
 - Never show invented numbers: unknown prices, tokens and latencies render as "—".
@@ -62,4 +69,6 @@ UI work: `cd web; npm run dev` rebuilds on save; reload the browser.
 ## CI
 
 `.github/workflows/ci.yml` runs on the self-hosted Windows runner (`self-hosted, Windows, X64`): core build and
-tests on `net8.0` and `net48`, UI typecheck/tests/build, Pester on Windows PowerShell 5.1, and uploads the bundle.
+tests on `net8.0` and `net48`, the core compiled by Windows PowerShell 5.1 `Add-Type` (`Test-FairleadAddType.ps1`),
+UI typecheck/tests/build, Pester on Windows PowerShell 5.1, and uploads the bundle after checking it holds the core
+source and no DLL.

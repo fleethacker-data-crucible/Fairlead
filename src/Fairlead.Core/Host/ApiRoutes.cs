@@ -8,7 +8,7 @@ using Fairlead.Core.Gateway;
 using Fairlead.Core.Protocol;
 using Fairlead.Core.Providers;
 using Fairlead.Core.Resilience;
-using Newtonsoft.Json.Linq;
+using Fairlead.Core.Serialization;
 
 namespace Fairlead.Core.Host
 {
@@ -30,9 +30,9 @@ namespace Fairlead.Core.Host
         /// <summary>Anthropic's token counter, which Claude Code calls before long prompts. Estimated: no provider is asked.</summary>
         private Task<HttpResponse> CountTokens(HttpRequest r)
         {
-            ClientKey? client;
-            string? error;
-            if (!Engine.Authenticate(r, out client, out error)) return Task.FromResult(HttpResponse.Json(401, Translate.Error(Dialect.Anthropic, 401, error!).ToString(Newtonsoft.Json.Formatting.None)));
+            ClientKey client;
+            string error;
+            if (!Engine.Authenticate(r, out client, out error)) return Task.FromResult(HttpResponse.Json(401, Translate.Error(Dialect.Anthropic, 401, error).ToString(Formatting.None)));
             var body = Json.Body(r);
             var profile = Routing.RequestProfile.From(body, Dialect.Anthropic, false);
             return Task.FromResult(Json.Ok(new Dictionary<string, object> { { "input_tokens", profile.EstimatedTokens } }));
@@ -40,29 +40,29 @@ namespace Fairlead.Core.Host
 
         private Task<HttpResponse> ListModels(HttpRequest r)
         {
-            ClientKey? client;
-            string? error;
-            if (!Engine.Authenticate(r, out client, out error)) return Task.FromResult(HttpResponse.Json(401, Translate.Error(Dialect.OpenAi, 401, error!).ToString(Newtonsoft.Json.Formatting.None)));
+            ClientKey client;
+            string error;
+            if (!Engine.Authenticate(r, out client, out error)) return Task.FromResult(HttpResponse.Json(401, Translate.Error(Dialect.OpenAi, 401, error).ToString(Formatting.None)));
             var created = StartedAt.ToUnixTimeSeconds();
             var data = new JArray();
-            foreach (var m in ModelIds(client)) data.Add(new JObject { ["id"] = m.Key, ["object"] = "model", ["created"] = created, ["owned_by"] = m.Value, ["type"] = "model", ["display_name"] = m.Key });
+            foreach (var m in ModelIds(client)) data.Add(new JObject { { "id", m.Key }, { "object", "model" }, { "created", created }, { "owned_by", m.Value }, { "type", "model" }, { "display_name", m.Key } });
             // Both shapes in one: OpenAI clients read data[].id; Anthropic clients read data[].id plus has_more.
-            return Task.FromResult(Json.Ok(new JObject { ["object"] = "list", ["data"] = data, ["has_more"] = false }));
+            return Task.FromResult(Json.Ok(new JObject { { "object", "list" }, { "data", data }, { "has_more", false } }));
         }
 
         private Task<HttpResponse> GetModel(HttpRequest r)
         {
-            ClientKey? client;
-            string? error;
-            if (!Engine.Authenticate(r, out client, out error)) return Task.FromResult(HttpResponse.Json(401, Translate.Error(Dialect.OpenAi, 401, error!).ToString(Newtonsoft.Json.Formatting.None)));
+            ClientKey client;
+            string error;
+            if (!Engine.Authenticate(r, out client, out error)) return Task.FromResult(HttpResponse.Json(401, Translate.Error(Dialect.OpenAi, 401, error).ToString(Formatting.None)));
             var id = r.RouteValues["id"];
             var hit = ModelIds(client).FirstOrDefault(m => string.Equals(m.Key, id, StringComparison.OrdinalIgnoreCase));
-            if (hit.Key == null) return Task.FromResult(HttpResponse.Json(404, Translate.Error(Dialect.OpenAi, 404, "Unknown model '" + id + "'.").ToString(Newtonsoft.Json.Formatting.None)));
-            return Task.FromResult(Json.Ok(new JObject { ["id"] = hit.Key, ["object"] = "model", ["created"] = StartedAt.ToUnixTimeSeconds(), ["owned_by"] = hit.Value }));
+            if (hit.Key == null) return Task.FromResult(HttpResponse.Json(404, Translate.Error(Dialect.OpenAi, 404, "Unknown model '" + id + "'.").ToString(Formatting.None)));
+            return Task.FromResult(Json.Ok(new JObject { { "id", hit.Key }, { "object", "model" }, { "created", StartedAt.ToUnixTimeSeconds() }, { "owned_by", hit.Value } }));
         }
 
         /// <summary>Routes first (what tools should use), then every provider/model target.</summary>
-        private List<KeyValuePair<string, string>> ModelIds(ClientKey? client)
+        private List<KeyValuePair<string, string>> ModelIds(ClientKey client)
         {
             var cfg = Config.Current;
             var list = new List<KeyValuePair<string, string>>();
@@ -74,7 +74,7 @@ namespace Fairlead.Core.Host
             if (client != null && client.Routes.Count > 0) return list;
             foreach (var p in cfg.Providers.Where(x => x.Enabled))
             {
-                var models = p.Models.Select(m => m.Id).Concat((Health.Provider(p.Id)?.Models ?? new List<ModelInfo>()).Select(m => m.Id)).Distinct(StringComparer.OrdinalIgnoreCase);
+                var models = p.Models.Select(m => m.Id).Concat(DiscoveredModels(p.Id).Select(m => m.Id)).Distinct(StringComparer.OrdinalIgnoreCase);
                 foreach (var m in models) list.Add(new KeyValuePair<string, string>(p.Id + "/" + m, p.Id));
             }
             return list;
@@ -151,7 +151,7 @@ namespace Fairlead.Core.Host
             {
                 var key = Json.Read<string>(Json.Body(r), "provider");
                 if (string.IsNullOrEmpty(key)) foreach (var b in Breakers.All) b.Reset();
-                else Breakers.ResetProvider(key!);
+                else Breakers.ResetProvider(key);
                 return Task.FromResult(Json.Ok(new { reset = key ?? "all" }));
             });
 
@@ -170,7 +170,7 @@ namespace Fairlead.Core.Host
             Admin.Get("/api/metrics", r => Task.FromResult(Json.Ok(Metrics.Summary())));
             Admin.Get("/api/logs", r =>
             {
-                string? level;
+                string level;
                 r.QueryValues.TryGetValue("level", out level);
                 return Task.FromResult(Json.Ok(Log.Recent(300, string.IsNullOrEmpty(level) ? null : level)));
             });
@@ -213,11 +213,11 @@ namespace Fairlead.Core.Host
                         name = p.Name,
                         local = p.Local,
                         enabled = p.Enabled,
-                        reachable = h?.Reachable,
-                        authOk = h?.AuthOk,
-                        probeMs = h?.ProbeMs,
-                        lastError = h?.LastError,
-                        models = p.Models.Select(m => m.Id).Concat((h?.Models ?? new List<ModelInfo>()).Select(m => m.Id)).Distinct(StringComparer.OrdinalIgnoreCase).Count(),
+                        reachable = h == null ? null : h.Reachable,
+                        authOk = h == null ? null : h.AuthOk,
+                        probeMs = h == null ? null : h.ProbeMs,
+                        lastError = h == null ? null : h.LastError,
+                        models = p.Models.Select(m => m.Id).Concat(DiscoveredModels(p.Id).Select(m => m.Id)).Distinct(StringComparer.OrdinalIgnoreCase).Count(),
                         breaker = b == null ? "closed" : b.State(DateTimeOffset.UtcNow).ToString().ToLowerInvariant(),
                         keySource = SecretProtector.KeySource(p),
                     };
@@ -248,7 +248,7 @@ namespace Fairlead.Core.Host
                     p.Headers,
                     p.StreamUsage,
                     models = p.Models,
-                    discovered = Health.Provider(p.Id)?.Models ?? new List<ModelInfo>(),
+                    discovered = DiscoveredModels(p.Id),
                     keySource = SecretProtector.KeySource(p),
                     keyHint = SecretProtector.KeyHint(p),
                 }),
@@ -277,57 +277,67 @@ namespace Fairlead.Core.Host
                 try
                 {
                     var models = await Upstream.ListModelsAsync(existing ?? probe, CancellationToken.None, 2500).ConfigureAwait(false);
-                    return new { preset = preset.Id, name = preset.Name, baseUrl = probe.BaseUrl, running = true, configured = existing?.Id, models = models, error = (string?)null };
+                    return new { preset = preset.Id, name = preset.Name, baseUrl = probe.BaseUrl, running = true, configured = existing == null ? null : existing.Id, models = models, error = (string)null };
                 }
                 catch (UpstreamException ex)
                 {
-                    return new { preset = preset.Id, name = preset.Name, baseUrl = probe.BaseUrl, running = ex.Kind != FailureKind.Network && ex.Kind != FailureKind.Timeout, configured = existing?.Id, models = new List<ModelInfo>(), error = (string?)ex.Message };
+                    return new { preset = preset.Id, name = preset.Name, baseUrl = probe.BaseUrl, running = ex.Kind != FailureKind.Network && ex.Kind != FailureKind.Timeout, configured = existing == null ? null : existing.Id, models = new List<ModelInfo>(), error = (string)ex.Message };
                 }
             })).ConfigureAwait(false);
             return Json.Ok(found);
         }
 
+        /// <summary>The models the last probe found on a provider; empty before the first probe.</summary>
+        private List<ModelInfo> DiscoveredModels(string providerId)
+        {
+            var h = Health.Provider(providerId);
+            return h == null || h.Models == null ? new List<ModelInfo>() : h.Models;
+        }
+
         private Task<HttpResponse> SaveProvider(HttpRequest r)
         {
             var body = Json.Body(r);
-            var incoming = body["provider"] as JObject ?? throw new BadRequestException("Send { provider: {...}, apiKey?: string, clearKey?: bool }.");
-            var id = (string?)incoming["id"];
-            var preset = (string?)incoming["preset"];
+            var incoming = body["provider"] as JObject;
+            if (incoming == null) throw new BadRequestException("Send { provider: {...}, apiKey?: string, clearKey?: bool }.");
+            var id = (string)incoming["id"];
+            var preset = (string)incoming["preset"];
             var apiKey = Json.Read<string>(body, "apiKey");
             var clearKey = Json.Read<bool?>(body, "clearKey") == true;
-            ProviderConfig? saved = null;
+            ProviderConfig saved = null;
             Config.Update(c =>
             {
                 if (string.IsNullOrWhiteSpace(id))
                 {
                     if (string.IsNullOrWhiteSpace(preset)) throw new BadRequestException("A new provider needs a preset or an id.");
-                    id = UniqueId(c, preset!);
+                    id = UniqueId(c, preset);
                 }
-                var p = c.FindProvider(id!);
+                var p = c.FindProvider(id);
                 if (p == null)
                 {
-                    p = ProviderPresets.Find(preset) != null ? ProviderPresets.Create(preset!, id) : new ProviderConfig { Id = id! };
+                    p = ProviderPresets.Find(preset) != null ? ProviderPresets.Create(preset, id) : new ProviderConfig { Id = id };
                     c.Providers.Add(p);
                 }
                 var oldBase = p.BaseUrl;
-                if (incoming["name"] != null) p.Name = (string?)incoming["name"] ?? p.Name;
-                if (incoming["kind"] != null) p.Kind = ParseKind((string?)incoming["kind"]);
-                if (incoming["baseUrl"] != null) p.BaseUrl = ((string?)incoming["baseUrl"] ?? p.BaseUrl).Trim();
-                if (incoming["local"] != null) p.Local = (bool)incoming["local"]!;
-                if (incoming["enabled"] != null) p.Enabled = (bool)incoming["enabled"]!;
-                if (incoming["apiKeyEnv"] != null) p.ApiKeyEnv = string.IsNullOrWhiteSpace((string?)incoming["apiKeyEnv"]) ? null : ((string?)incoming["apiKeyEnv"])!.Trim();
-                if (incoming["timeoutSeconds"] != null) p.TimeoutSeconds = (int)incoming["timeoutSeconds"]!;
-                if (incoming["streamUsage"] != null) p.StreamUsage = (bool)incoming["streamUsage"]!;
-                if (incoming["headers"] is JObject headers) p.Headers = headers.ToObject<Dictionary<string, string>>() ?? new Dictionary<string, string>();
-                if (incoming["models"] is JArray models) p.Models = models.ToObject<List<ModelInfo>>() ?? new List<ModelInfo>();
+                if (incoming["name"] != null) p.Name = (string)incoming["name"] ?? p.Name;
+                if (incoming["kind"] != null) p.Kind = ParseKind((string)incoming["kind"]);
+                if (incoming["baseUrl"] != null) p.BaseUrl = ((string)incoming["baseUrl"] ?? p.BaseUrl).Trim();
+                if (incoming["local"] != null) p.Local = (bool)incoming["local"];
+                if (incoming["enabled"] != null) p.Enabled = (bool)incoming["enabled"];
+                if (incoming["apiKeyEnv"] != null) p.ApiKeyEnv = string.IsNullOrWhiteSpace((string)incoming["apiKeyEnv"]) ? null : ((string)incoming["apiKeyEnv"]).Trim();
+                if (incoming["timeoutSeconds"] != null) p.TimeoutSeconds = (int)incoming["timeoutSeconds"];
+                if (incoming["streamUsage"] != null) p.StreamUsage = (bool)incoming["streamUsage"];
+                var headers = incoming["headers"] as JObject;
+                if (headers != null) p.Headers = headers.ToObject<Dictionary<string, string>>() ?? new Dictionary<string, string>();
+                var models = incoming["models"] as JArray;
+                if (models != null) p.Models = models.ToObject<List<ModelInfo>>() ?? new List<ModelInfo>();
                 // A key typed in the browser may only go where the provider already pointed, or to a URL saved in this same call.
                 if (clearKey) p.ApiKeyProtected = null;
-                if (!string.IsNullOrWhiteSpace(apiKey)) p.ApiKeyProtected = SecretProtector.Protect(apiKey!.Trim());
+                if (!string.IsNullOrWhiteSpace(apiKey)) p.ApiKeyProtected = SecretProtector.Protect(apiKey.Trim());
                 if (!string.Equals(oldBase, p.BaseUrl, StringComparison.OrdinalIgnoreCase) && string.IsNullOrWhiteSpace(apiKey) && p.ApiKeyProtected != null && !string.IsNullOrEmpty(oldBase))
                     p.ApiKeyProtected = null; // never send a stored key to a new address without it being re-entered
                 saved = p;
             });
-            Breakers.ResetProvider(id!);
+            Breakers.ResetProvider(id);
             Health.Nudge();
             return Task.FromResult(Json.Ok(ConfigView(Config.Snapshot())));
         }
@@ -353,7 +363,8 @@ namespace Fairlead.Core.Host
 
         private async Task<HttpResponse> TestProvider(HttpRequest r)
         {
-            var p = Config.Current.FindProvider(r.RouteValues["id"]) ?? throw new NotFoundException("No provider " + r.RouteValues["id"] + ".");
+            var p = Config.Current.FindProvider(r.RouteValues["id"]);
+            if (p == null) throw new NotFoundException("No provider " + r.RouteValues["id"] + ".");
             var sw = System.Diagnostics.Stopwatch.StartNew();
             try
             {
@@ -372,11 +383,12 @@ namespace Fairlead.Core.Host
         private async Task<HttpResponse> DiscoverProvider(HttpRequest r)
         {
             var id = r.RouteValues["id"];
-            var p = Config.Current.FindProvider(id) ?? throw new NotFoundException("No provider " + id + ".");
+            var p = Config.Current.FindProvider(id);
+            if (p == null) throw new NotFoundException("No provider " + id + ".");
             var models = await Upstream.ListModelsAsync(p, CancellationToken.None, 10000).ConfigureAwait(false);
             Config.Update(c =>
             {
-                var target = c.FindProvider(id)!;
+                var target = c.FindProvider(id);
                 foreach (var m in models)
                 {
                     var existing = target.FindModel(m.Id);
@@ -393,11 +405,13 @@ namespace Fairlead.Core.Host
         private Task<HttpResponse> SaveRoute(HttpRequest r)
         {
             var body = Json.Body(r);
-            var route = (body["route"] as JObject)?.ToObject<RouteConfig>(Newtonsoft.Json.JsonSerializer.Create(Json.Settings)) ?? throw new BadRequestException("Send { route: {...}, previousId?: string }.");
+            var incoming = body["route"] as JObject;
+            var route = incoming == null ? null : incoming.ToObject<RouteConfig>(Json.Settings);
+            if (route == null) throw new BadRequestException("Send { route: {...}, previousId?: string }.");
             var previous = Json.Read<string>(body, "previousId");
             Config.Update(c =>
             {
-                var oldId = string.IsNullOrEmpty(previous) ? route.Id : previous!;
+                var oldId = string.IsNullOrEmpty(previous) ? route.Id : previous;
                 var index = c.Routes.FindIndex(x => string.Equals(x.Id, oldId, StringComparison.OrdinalIgnoreCase));
                 if (index >= 0) c.Routes[index] = route; else c.Routes.Add(route);
                 if (!string.Equals(oldId, route.Id, StringComparison.OrdinalIgnoreCase))
@@ -425,15 +439,16 @@ namespace Fairlead.Core.Host
         private Task<HttpResponse> SaveRouting(HttpRequest r)
         {
             var body = Json.Body(r);
-            var serializer = Newtonsoft.Json.JsonSerializer.Create(Json.Settings);
             Config.Update(c =>
             {
-                if (body["rules"] is JArray rules) c.Rules = rules.ToObject<List<RoutingRule>>(serializer) ?? new List<RoutingRule>();
-                if (body["aliases"] is JObject aliases) c.Aliases = aliases.ToObject<Dictionary<string, string>>() ?? new Dictionary<string, string>();
+                var rules = body["rules"] as JArray;
+                if (rules != null) c.Rules = rules.ToObject<List<RoutingRule>>(Json.Settings) ?? new List<RoutingRule>();
+                var aliases = body["aliases"] as JObject;
+                if (aliases != null) c.Aliases = aliases.ToObject<Dictionary<string, string>>() ?? new Dictionary<string, string>();
                 var d = Json.Read<string>(body, "defaultRoute");
-                if (!string.IsNullOrEmpty(d)) c.DefaultRoute = d!;
+                if (!string.IsNullOrEmpty(d)) c.DefaultRoute = d;
                 var f = Json.Read<string>(body, "autoFallbackRoute");
-                if (!string.IsNullOrEmpty(f)) c.AutoFallbackRoute = f!;
+                if (!string.IsNullOrEmpty(f)) c.AutoFallbackRoute = f;
             });
             return Task.FromResult(Json.Ok(ConfigView(Config.Snapshot())));
         }
@@ -441,16 +456,18 @@ namespace Fairlead.Core.Host
         private Task<HttpResponse> SaveSettings(HttpRequest r)
         {
             var body = Json.Body(r);
-            var serializer = Newtonsoft.Json.JsonSerializer.Create(Json.Settings);
             Config.Update(c =>
             {
-                if (body["kedge"] != null) c.Kedge = ParseKedge((string?)body["kedge"]);
-                if (body["requireClientKey"] != null) c.RequireClientKey = (bool)body["requireClientKey"]!;
-                if (body["setupComplete"] != null) c.SetupComplete = (bool)body["setupComplete"]!;
-                if (body["logContent"] != null) c.LogContent = (bool)body["logContent"]!;
-                if (body["corsOrigins"] is JArray cors) c.CorsOrigins = cors.Select(x => ((string?)x ?? string.Empty).Trim().TrimEnd('/')).Where(x => x.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-                if (body["privacy"] is JObject privacy) c.Privacy = privacy.ToObject<PrivacyConfig>(serializer) ?? c.Privacy;
-                if (body["network"] is JObject network) c.Network = network.ToObject<NetworkConfig>(serializer) ?? c.Network;
+                if (body["kedge"] != null) c.Kedge = ParseKedge((string)body["kedge"]);
+                if (body["requireClientKey"] != null) c.RequireClientKey = (bool)body["requireClientKey"];
+                if (body["setupComplete"] != null) c.SetupComplete = (bool)body["setupComplete"];
+                if (body["logContent"] != null) c.LogContent = (bool)body["logContent"];
+                var cors = body["corsOrigins"] as JArray;
+                if (cors != null) c.CorsOrigins = cors.Select(x => ((string)x ?? string.Empty).Trim().TrimEnd('/')).Where(x => x.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+                var privacy = body["privacy"] as JObject;
+                if (privacy != null) c.Privacy = privacy.ToObject<PrivacyConfig>(Json.Settings) ?? c.Privacy;
+                var network = body["network"] as JObject;
+                if (network != null) c.Network = network.ToObject<NetworkConfig>(Json.Settings) ?? c.Network;
             });
             return Task.FromResult(Json.Ok(ConfigView(Config.Snapshot())));
         }
@@ -488,13 +505,13 @@ namespace Fairlead.Core.Host
             {
                 Method = "POST",
                 Path = "/v1/chat/completions",
-                Body = System.Text.Encoding.UTF8.GetBytes(request.ToString(Newtonsoft.Json.Formatting.None)),
+                Body = System.Text.Encoding.UTF8.GetBytes(request.ToString(Formatting.None)),
                 RequestId = r.RequestId,
                 Internal = true,
                 Aborted = r.Aborted,
             };
             var route = Json.Read<string>(body, "route");
-            if (!string.IsNullOrEmpty(route)) synthetic.Headers[GatewayEngine.RouteHeader] = route!;
+            if (!string.IsNullOrEmpty(route)) synthetic.Headers[GatewayEngine.RouteHeader] = route;
             if (Json.Read<bool?>(body, "private") == true) synthetic.Headers[GatewayEngine.PrivacyHeader] = "local";
             var response = await Engine.HandleChatAsync(synthetic, Dialect.OpenAi).ConfigureAwait(false);
             var answer = JObject.Parse(System.Text.Encoding.UTF8.GetString(response.Body));
@@ -502,8 +519,8 @@ namespace Fairlead.Core.Host
             return Json.Ok(new
             {
                 status = response.Status,
-                text = response.Status < 300 ? Translate.ContentText(answer["choices"]?[0]?["message"]?["content"]) : null,
-                error = response.Status >= 300 ? (string?)answer["error"]?["message"] : null,
+                text = response.Status < 300 ? Translate.ContentText(answer["choices"].At(0).At("message").At("content")) : null,
+                error = response.Status >= 300 ? (string)answer["error"].At("message") : null,
                 route = response.Headers.ContainsKey("X-Fairlead-Route") ? response.Headers["X-Fairlead-Route"] : null,
                 target = response.Headers.ContainsKey("X-Fairlead-Target") ? response.Headers["X-Fairlead-Target"] : null,
                 record = rec,
@@ -516,19 +533,19 @@ namespace Fairlead.Core.Host
             if (raw != null) { var copy = (JObject)raw.DeepClone(); if (forSend) copy["stream"] = false; return copy; }
             var messages = new JArray();
             var system = Json.Read<string>(body, "system");
-            if (!string.IsNullOrWhiteSpace(system)) messages.Add(new JObject { ["role"] = "system", ["content"] = system });
-            messages.Add(new JObject { ["role"] = "user", ["content"] = Json.Read<string>(body, "prompt") ?? string.Empty });
-            var req = new JObject { ["model"] = Json.Read<string>(body, "model") ?? "auto", ["messages"] = messages, ["stream"] = false };
+            if (!string.IsNullOrWhiteSpace(system)) messages.Add(new JObject { { "role", "system" }, { "content", system } });
+            messages.Add(new JObject { { "role", "user" }, { "content", Json.Read<string>(body, "prompt") ?? string.Empty } });
+            var req = new JObject { { "model", Json.Read<string>(body, "model") ?? "auto" }, { "messages", messages }, { "stream", false } };
             var max = Json.Read<int?>(body, "maxTokens");
             if (max.HasValue) req["max_tokens"] = max.Value;
             if (Json.Read<bool?>(body, "withTools") == true)
             {
-                req["tools"] = new JArray { new JObject { ["type"] = "function", ["function"] = new JObject { ["name"] = "get_time", ["description"] = "Current time", ["parameters"] = new JObject { ["type"] = "object", ["properties"] = new JObject() } } } };
+                req["tools"] = new JArray { new JObject { { "type", "function" }, { "function", new JObject { { "name", "get_time" }, { "description", "Current time" }, { "parameters", new JObject { { "type", "object" }, { "properties", new JObject() } } } } } } };
             }
             return req;
         }
 
-        private static KedgeMode ParseKedge(string? mode)
+        private static KedgeMode ParseKedge(string mode)
         {
             switch ((mode ?? string.Empty).Trim().ToLowerInvariant())
             {
@@ -539,7 +556,7 @@ namespace Fairlead.Core.Host
             }
         }
 
-        private static ProviderKind ParseKind(string? kind)
+        private static ProviderKind ParseKind(string kind)
         {
             switch ((kind ?? string.Empty).Trim().ToLowerInvariant())
             {

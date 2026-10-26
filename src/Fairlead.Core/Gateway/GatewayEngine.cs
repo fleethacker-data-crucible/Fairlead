@@ -13,8 +13,7 @@ using Fairlead.Core.Providers;
 using Fairlead.Core.Resilience;
 using Fairlead.Core.Routing;
 using Fairlead.Core.Telemetry;
-using Newtonsoft.Json;
-using Newtonsoft.Json.Linq;
+using Fairlead.Core.Serialization;
 
 namespace Fairlead.Core.Gateway
 {
@@ -30,13 +29,13 @@ namespace Fairlead.Core.Gateway
         public const string PrivacyHeader = "X-Fairlead-Privacy";
         private readonly ConfigStore _config;
         private readonly UpstreamClient _upstream;
-        private readonly HealthMonitor? _health;
+        private readonly HealthMonitor _health;
         private readonly BreakerBoard _breakers;
         private readonly Metrics _metrics;
         private readonly Diagnostics _log;
         private readonly RoutePlanner _planner = new RoutePlanner();
 
-        public GatewayEngine(ConfigStore config, UpstreamClient upstream, HealthMonitor? health, BreakerBoard breakers, Metrics metrics, Diagnostics log)
+        public GatewayEngine(ConfigStore config, UpstreamClient upstream, HealthMonitor health, BreakerBoard breakers, Metrics metrics, Diagnostics log)
         {
             _config = config;
             _upstream = upstream;
@@ -69,26 +68,26 @@ namespace Fairlead.Core.Gateway
         }
 
         /// <summary>The bearer or x-api-key value, whichever the tool sent.</summary>
-        public static string? PresentedKey(HttpRequest request)
+        public static string PresentedKey(HttpRequest request)
         {
             var auth = request.Header("Authorization");
-            if (!string.IsNullOrEmpty(auth) && auth!.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)) return auth.Substring(7).Trim();
+            if (!string.IsNullOrEmpty(auth) && auth.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)) return auth.Substring(7).Trim();
             var x = request.Header("x-api-key");
-            return string.IsNullOrEmpty(x) ? null : x!.Trim();
+            return string.IsNullOrEmpty(x) ? null : x.Trim();
         }
 
         /// <summary>
         /// Finds the client for a request. Returns false (with the reason) when a key is required and missing or
         /// unknown. Remote (LAN) callers always need a valid key.
         /// </summary>
-        public bool Authenticate(HttpRequest request, out ClientKey? client, out string? error)
+        public bool Authenticate(HttpRequest request, out ClientKey client, out string error)
         {
             var cfg = _config.Current;
             client = null;
             error = null;
             if (request.Internal) return true;
             var key = PresentedKey(request);
-            if (!string.IsNullOrEmpty(key) && key!.StartsWith("fl-", StringComparison.Ordinal))
+            if (!string.IsNullOrEmpty(key) && key.StartsWith("fl-", StringComparison.Ordinal))
             {
                 var hash = HashKey(key);
                 client = cfg.Clients.FirstOrDefault(c => FixedTimeEquals(c.Hash, hash));
@@ -117,10 +116,10 @@ namespace Fairlead.Core.Gateway
         {
             var record = new RequestRecord { Id = request.RequestId, Dialect = dialect == Dialect.Anthropic ? "anthropic" : "openai", Endpoint = request.Path };
             var sw = System.Diagnostics.Stopwatch.StartNew();
-            ClientKey? client;
-            string? authError;
-            if (!Authenticate(request, out client, out authError)) return Fail(record, sw, dialect, 401, authError!);
-            record.Client = client?.Name;
+            ClientKey client;
+            string authError;
+            if (!Authenticate(request, out client, out authError)) return Fail(record, sw, dialect, 401, authError);
+            record.Client = (client == null ? null : client.Name);
             JObject body;
             try { body = JObject.Parse(request.BodyText); }
             catch (JsonException ex) { return Fail(record, sw, dialect, 400, "Body is not valid JSON: " + ex.Message); }
@@ -128,7 +127,7 @@ namespace Fairlead.Core.Gateway
 
             var cfg = _config.Current;
             var profile = RequestProfile.From(body, dialect, cfg.Privacy.DetectSecrets);
-            profile.ClientName = client?.Name;
+            profile.ClientName = (client == null ? null : client.Name);
             profile.RouteOverride = request.Header(RouteHeader);
             if (string.Equals(request.Header(PrivacyHeader), "local", StringComparison.OrdinalIgnoreCase)) profile.MarkSensitive("header");
             record.RequestedModel = profile.RequestedModel;
@@ -148,8 +147,8 @@ namespace Fairlead.Core.Gateway
             {
                 return Fail(record, sw, dialect, outcome.ErrorStatus, outcome.Error);
             }
-            var winner = outcome.Winner!;
-            var response = outcome.Response!;
+            var winner = outcome.Winner;
+            var response = outcome.Response;
             record.Target = winner.Ref;
             record.Local = winner.Local;
             record.Failover = record.Attempts.Count(a => a.Outcome != "skipped" && a.Outcome != "lost-race") > 1;
@@ -165,14 +164,14 @@ namespace Fairlead.Core.Gateway
         {
             var record = new RequestRecord { Id = request.RequestId, Dialect = "openai", Endpoint = request.Path };
             var sw = System.Diagnostics.Stopwatch.StartNew();
-            ClientKey? client;
-            string? authError;
-            if (!Authenticate(request, out client, out authError)) return Fail(record, sw, Dialect.OpenAi, 401, authError!);
-            record.Client = client?.Name;
+            ClientKey client;
+            string authError;
+            if (!Authenticate(request, out client, out authError)) return Fail(record, sw, Dialect.OpenAi, 401, authError);
+            record.Client = (client == null ? null : client.Name);
             JObject body;
             try { body = JObject.Parse(request.BodyText); }
             catch (JsonException ex) { return Fail(record, sw, Dialect.OpenAi, 400, "Body is not valid JSON: " + ex.Message); }
-            var profile = new RequestProfile { Dialect = Dialect.OpenAi, RequestedModel = (string?)body["model"] ?? string.Empty, ClientName = client?.Name, RouteOverride = request.Header(RouteHeader) };
+            var profile = new RequestProfile { Dialect = Dialect.OpenAi, RequestedModel = (string)body["model"] ?? string.Empty, ClientName = (client == null ? null : client.Name), RouteOverride = request.Header(RouteHeader) };
             if (string.Equals(request.Header(PrivacyHeader), "local", StringComparison.OrdinalIgnoreCase)) profile.MarkSensitive("header");
             record.RequestedModel = profile.RequestedModel;
             var plan = _planner.Plan(_config.Current, profile, _health, _breakers, _metrics, client, "embeddings");
@@ -182,14 +181,14 @@ namespace Fairlead.Core.Gateway
             if (plan.Error != null) return Fail(record, sw, Dialect.OpenAi, plan.ErrorStatus, plan.Error);
             var outcome = await TryCandidatesAsync(plan, body, Dialect.OpenAi, profile, record, sw, request.Aborted, "embeddings").ConfigureAwait(false);
             if (outcome.Error != null) return Fail(record, sw, Dialect.OpenAi, outcome.ErrorStatus, outcome.Error);
-            using (var response = outcome.Response!)
+            using (var response = outcome.Response)
             {
                 var text = await response.ReadTextAsync().ConfigureAwait(false);
-                record.Target = outcome.Winner!.Ref;
+                record.Target = outcome.Winner.Ref;
                 record.Local = outcome.Winner.Local;
                 record.Status = 200;
                 record.TotalMs = (int)sw.ElapsedMilliseconds;
-                try { record.InputTokens = (int?)JObject.Parse(text)["usage"]?["prompt_tokens"]; } catch (JsonException) { }
+                try { record.InputTokens = (int?)JObject.Parse(text)["usage"].At("prompt_tokens"); } catch (JsonException) { }
                 _metrics.Record(record);
                 var http = HttpResponse.Json(200, text);
                 AddHeaders(http, record, outcome.Winner);
@@ -198,7 +197,7 @@ namespace Fairlead.Core.Gateway
         }
 
         /// <summary>Dry run: what would happen to this request, without calling anything.</summary>
-        public object Explain(JObject body, Dialect dialect, string? routeHeader, bool privateHeader, string? clientName)
+        public object Explain(JObject body, Dialect dialect, string routeHeader, bool privateHeader, string clientName)
         {
             var cfg = _config.Current;
             var profile = RequestProfile.From(body, dialect, cfg.Privacy.DetectSecrets);
@@ -223,15 +222,15 @@ namespace Fairlead.Core.Gateway
 
         private sealed class Outcome
         {
-            public Candidate? Winner;
-            public UpstreamResponse? Response;
-            public string? Error;
+            public Candidate Winner;
+            public UpstreamResponse Response;
+            public string Error;
             public int ErrorStatus = 502;
         }
 
         private async Task<Outcome> TryCandidatesAsync(RoutePlan plan, JObject body, Dialect dialect, RequestProfile profile, RequestRecord record, System.Diagnostics.Stopwatch sw, CancellationToken aborted, string operation = "chat")
         {
-            UpstreamException? last = null;
+            UpstreamException last = null;
             var queue = new Queue<Candidate>(plan.Candidates);
             while (queue.Count > 0)
             {
@@ -242,8 +241,8 @@ namespace Fairlead.Core.Gateway
                 Task<UpstreamResponse> primary = SendAsync(first, body, dialect, operation, primaryCts.Token);
                 cancels[primary] = primaryCts;
                 var primaryStarted = sw.ElapsedMilliseconds;
-                Candidate? second = null;
-                Task<UpstreamResponse>? backup = null;
+                Candidate second = null;
+                Task<UpstreamResponse> backup = null;
                 long backupStarted = 0;
                 if (plan.HedgeAfterMs > 0 && queue.Count > 0)
                 {
@@ -267,7 +266,7 @@ namespace Fairlead.Core.Gateway
                     }
                 }
                 var racing = new List<KeyValuePair<Candidate, Task<UpstreamResponse>>> { new KeyValuePair<Candidate, Task<UpstreamResponse>>(first, primary) };
-                if (backup != null) racing.Add(new KeyValuePair<Candidate, Task<UpstreamResponse>>(second!, backup));
+                if (backup != null) racing.Add(new KeyValuePair<Candidate, Task<UpstreamResponse>>(second, backup));
                 while (racing.Count > 0)
                 {
                     var finished = await Task.WhenAny(racing.Select(r => r.Value)).ConfigureAwait(false);
@@ -364,7 +363,7 @@ namespace Fairlead.Core.Gateway
                 outgoing = (JObject)body.DeepClone();
                 outgoing["model"] = c.Model;
                 if (target == Dialect.OpenAi && outgoing.Value<bool?>("stream") == true && c.Provider.StreamUsage && outgoing["stream_options"] == null)
-                    outgoing["stream_options"] = new JObject { ["include_usage"] = true };
+                    outgoing["stream_options"] = new JObject { { "include_usage", true } };
             }
             else if (dialect == Dialect.Anthropic)
             {
@@ -385,8 +384,9 @@ namespace Fairlead.Core.Gateway
             {
                 string text;
                 try { text = await response.ReadTextAsync().ConfigureAwait(false); }
-                catch (Exception ex) when (ex is IOException || ex is OperationCanceledException || ex is System.Net.Http.HttpRequestException)
+                catch (Exception ex)
                 {
+                    if (!(ex is IOException || ex is OperationCanceledException || ex is System.Net.Http.HttpRequestException)) throw;
                     return Fail(record, sw, dialect, 502, winner.Ref + " dropped the connection while answering.");
                 }
                 var target = UpstreamClient.DialectOf(winner.Provider.Kind);
@@ -400,7 +400,7 @@ namespace Fairlead.Core.Gateway
                 else output = Translate.AnthropicToOpenAiResponse(parsed, profile.RequestedModel.Length > 0 ? profile.RequestedModel : winner.Ref);
                 Finish(record, sw, 200, usage, winner);
                 if (_config.Current.LogContent)
-                    record.ResponsePreview = Preview(target == Dialect.Anthropic ? Translate.BlocksText(parsed["content"]) : Translate.ContentText(parsed["choices"]?[0]?["message"]?["content"]));
+                    record.ResponsePreview = Preview(target == Dialect.Anthropic ? Translate.BlocksText(parsed["content"]) : Translate.ContentText(parsed["choices"].At(0).At("message").At("content")));
                 _metrics.Record(record);
                 var http = HttpResponse.Json(200, output.ToString(Formatting.None));
                 AddHeaders(http, record, winner);
@@ -416,7 +416,7 @@ namespace Fairlead.Core.Gateway
             {
                 var usage = new TokenUsage();
                 var text = new StringBuilder();
-                string? error = null;
+                string error = null;
                 var o2a = target == Dialect.OpenAi && dialect == Dialect.Anthropic ? new OpenAiToAnthropicStream(modelName) : null;
                 var a2o = target == Dialect.Anthropic && dialect == Dialect.OpenAi ? new AnthropicToOpenAiStream(modelName, true) : null;
                 var sawDone = false;
@@ -430,10 +430,11 @@ namespace Fairlead.Core.Gateway
                         while (true)
                         {
                             response.Touch();
-                            SseEvent? ev;
+                            SseEvent ev;
                             try { ev = await reader.NextAsync(response.Token).ConfigureAwait(false); }
-                            catch (Exception ex) when (ex is IOException || ex is OperationCanceledException || ex is ObjectDisposedException)
+                            catch (Exception ex)
                             {
+                                if (!(ex is IOException || ex is OperationCanceledException || ex is ObjectDisposedException)) throw;
                                 error = token.IsCancellationRequested ? "Fairlead is stopping." : winner.Ref + " stopped sending (" + ex.GetType().Name + ").";
                                 break;
                             }
@@ -458,15 +459,15 @@ namespace Fairlead.Core.Gateway
                                 if (json == null) continue;
                                 foreach (var s in a2o.Feed(ev.Name, json)) await output.WriteAsync(s, token).ConfigureAwait(false);
                                 if (a2o.Error != null) { error = a2o.Error; sawDone = true; break; }
-                                if ((string?)json["type"] == "message_stop") { sawDone = true; break; }
+                                if ((string)json["type"] == "message_stop") { sawDone = true; break; }
                             }
                             else
                             {
                                 // Same dialect: relay the event as it came, and read usage on the way through.
                                 await output.WriteAsync(ev.ToWire(), token).ConfigureAwait(false);
                                 if (json != null) Observe(target, json, usage, text);
-                                if (target == Dialect.Anthropic && json != null && (string?)json["type"] == "message_stop") { sawDone = true; break; }
-                                if (target == Dialect.Anthropic && json != null && (string?)json["type"] == "error") { error = (string?)json["error"]?["message"] ?? "Upstream error"; sawDone = true; break; }
+                                if (target == Dialect.Anthropic && json != null && (string)json["type"] == "message_stop") { sawDone = true; break; }
+                                if (target == Dialect.Anthropic && json != null && (string)json["type"] == "error") { error = (string)json["error"].At("message") ?? "Upstream error"; sawDone = true; break; }
                             }
                         }
                         if (!sawDone && error == null)
@@ -503,7 +504,7 @@ namespace Fairlead.Core.Gateway
             return http;
         }
 
-        private static async Task WriteStreamError(IResponseStream output, Dialect dialect, string error, OpenAiToAnthropicStream? o2a, AnthropicToOpenAiStream? a2o, CancellationToken token)
+        private static async Task WriteStreamError(IResponseStream output, Dialect dialect, string error, OpenAiToAnthropicStream o2a, AnthropicToOpenAiStream a2o, CancellationToken token)
         {
             if (dialect == Dialect.Anthropic)
             {
@@ -520,15 +521,16 @@ namespace Fairlead.Core.Gateway
         {
             if (target == Dialect.OpenAi)
             {
-                if (json["usage"] != null && json["usage"]!.Type == JTokenType.Object) usage.Merge(TokenUsage.FromOpenAi(json["usage"]));
-                var delta = (string?)json["choices"]?.FirstOrDefault()?["delta"]?["content"];
+                if (json["usage"] != null && json["usage"].Type == JTokenType.Object) usage.Merge(TokenUsage.FromOpenAi(json["usage"]));
+                var choices = json["choices"];
+                var delta = choices == null ? null : (string)choices.FirstOrDefault().At("delta").At("content");
                 if (delta != null && text.Length < 4000) text.Append(delta);
                 return;
             }
-            var type = (string?)json["type"];
-            if (type == "message_start") usage.Merge(TokenUsage.FromAnthropic(json["message"]?["usage"]));
+            var type = (string)json["type"];
+            if (type == "message_start") usage.Merge(TokenUsage.FromAnthropic(json["message"].At("usage")));
             else if (type == "message_delta") usage.Merge(TokenUsage.FromAnthropic(json["usage"]));
-            else if (type == "content_block_delta" && text.Length < 4000) text.Append((string?)json["delta"]?["text"]);
+            else if (type == "content_block_delta" && text.Length < 4000) text.Append((string)json["delta"].At("text"));
         }
 
         private void Finish(RequestRecord record, System.Diagnostics.Stopwatch sw, int status, TokenUsage usage, Candidate winner)
@@ -566,11 +568,11 @@ namespace Fairlead.Core.Gateway
             return http;
         }
 
-        private static string? Preview(string? text)
+        private static string Preview(string text)
         {
             if (string.IsNullOrEmpty(text)) return null;
-            var t = Redactor.Redact(text!.Trim());
-            return t.Length > 2000 ? t.Substring(0, 2000) + "…" : t;
+            var t = Redactor.Redact(text.Trim());
+            return t.Length > 2000 ? t.Substring(0, 2000) + "\u2026" : t;
         }
     }
 }
