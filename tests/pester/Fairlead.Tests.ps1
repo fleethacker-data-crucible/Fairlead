@@ -88,7 +88,11 @@ Describe 'Test-FairleadModelConfig' {
         $script:Gw = Join-Path ([IO.Path]::GetTempPath()) ('fairlead-gw-' + [guid]::NewGuid().ToString('N'))
         New-Item -ItemType Directory -Force (Join-Path $script:Gw 'config') | Out-Null
         $script:SavedGw = @{}
-        foreach ($n in @('AI_GATEWAY_BASE_URL', 'DATABRICKS_TOKEN', 'FAIRLEAD_GATEWAY_CONFIG')) { $script:SavedGw[$n] = [Environment]::GetEnvironmentVariable($n, 'Process') }
+        # Earlier tests leave fairlead.env values (FAIRLEAD_BIND=everywhere) in the process; start clean.
+        foreach ($n in @('AI_GATEWAY_BASE_URL', 'DATABRICKS_TOKEN', 'FAIRLEAD_GATEWAY_CONFIG', 'FAIRLEAD_PORT', 'FAIRLEAD_BIND', 'FAIRLEAD_AUTO_STOP', 'FAIRLEAD_DATA_DIR')) {
+            $script:SavedGw[$n] = [Environment]::GetEnvironmentVariable($n, 'Process')
+            [Environment]::SetEnvironmentVariable($n, $null, 'Process')
+        }
     }
     AfterAll {
         foreach ($k in $script:SavedGw.Keys) { [Environment]::SetEnvironmentVariable($k, $script:SavedGw[$k], 'Process') }
