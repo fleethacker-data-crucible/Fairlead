@@ -94,11 +94,11 @@ export function Section({ title, aside, children, className }: { title?: ReactNo
 }
 
 export function Emblem({ size }: { size: number }) {
-  // The full Halyard emblem (assets/brand/emblem-*.png with the backdrop made transparent), one per theme.
+  // The full Fairlead emblem (assets/brand/emblem-*.png with the backdrop made transparent), one per theme.
   return (
     <>
-      <img src="brand/emblem-light.png" alt="Halyard" width={size} height={size} className="only-light" />
-      <img src="brand/emblem-dark.png" alt="Halyard" width={size} height={size} className="only-dark" />
+      <img src="brand/emblem-light.png" alt="Fairlead" width={size} height={size} className="only-light" />
+      <img src="brand/emblem-dark.png" alt="Fairlead" width={size} height={size} className="only-dark" />
     </>
   );
 }

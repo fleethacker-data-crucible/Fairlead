@@ -59,4 +59,4 @@ In **Playground**, type a prompt and select **Explain** to see which route and t
 
 ## About these images
 
-Images live in [`docs/assets/walkthrough/`](../assets/walkthrough/), named `NN-<screen>.png` after the step they belong to. They are 1440x900 at 100% scale in the dark (System theme on a dark system) theme, and show demo data only.
+Images live in [`docs/assets/walkthrough/`](../assets/walkthrough/), named `NN-<screen>.png` after the step they belong to. They are 1440x900 at 100% scale in the dark (System theme on a dark system) theme, and show demo data only. `node docs/screenshots/capture-screenshots.mjs --walkthrough <dir>` renders the same views from the built UI with a mocked API, for checking them against the app.
