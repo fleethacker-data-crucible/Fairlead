@@ -9,7 +9,7 @@ Fairlead; an integration is a verified recipe, plus fixes in Fairlead when a too
 | Anthropic-style base URL | `http://127.0.0.1:8776` (the SDK adds `/v1/messages`) |
 | Key | a client key from Fairlead → Clients (`fl-…`), as `Authorization: Bearer` or `x-api-key` |
 | Model | `auto`, `smart`, `fast`, `local`, any route you made, or `provider/model` |
-| From a container | `http://host.docker.internal:8776/v1` with `FAIRLEAD_BIND=lan` |
+| From a container | not supported: Fairlead listens on this machine only (loopback) |
 
 The Clients page renders these recipes with your real address and a freshly created key.
 

@@ -76,7 +76,7 @@ export function SettingsPage({ status, refreshStatus }: { status: Status | undef
 
       <Section title="Where things are">
         <div className="grid gap-x-6 gap-y-1.5 px-4 py-3 text-ink-2 md:grid-cols-2">
-          <span>Gateway: <code>{status?.gatewayUrl}</code>{status?.lan ? ' (also on the LAN)' : ''}</span>
+          <span>Gateway: <code>{status?.gatewayUrl}</code></span>
           <span>Config: <code className="break-all">{status?.configFile ?? '—'}</code></span>
           <span>Log: <code className="break-all">{status?.logFile ?? '—'}</code></span>
           <span>Port, bind and auto-stop are set in <code>config\fairlead.env</code> (see <code>fairlead.env.example</code>).</span>

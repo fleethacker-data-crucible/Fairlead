@@ -124,7 +124,6 @@ namespace Fairlead.Core.Host
         public string SessionToken { get; private set; }
         public DateTimeOffset StartedAt { get; private set; }
         public int Port { get { return _server == null ? 0 : _server.Port; } }
-        public bool BoundToLan { get { return _server != null && _server.BoundToLan; } }
         public bool StopRequested { get; private set; }
         public string BaseUrl { get { return "http://127.0.0.1:" + Port; } }
 
@@ -150,10 +149,8 @@ namespace Fairlead.Core.Host
         {
             if (_server != null) throw new InvalidOperationException("Host already started.");
             _server = new HttpServer(HandleAsync, Log);
-            // Remote peers (FAIRLEAD_BIND=lan) reach the gateway only; the engine still demands a client key from them.
-            _server.AllowRemote = r => r.Path.StartsWith("/v1/", StringComparison.Ordinal) || r.Path == "/v1";
             var preferred = Options.PreferredPort > 0 ? Options.PreferredPort : Settings.PreferredPort;
-            var port = _server.Start(preferred, Settings.BindLan);
+            var port = _server.Start(preferred);
             var info = new HostInfo
             {
                 Port = port,
@@ -169,7 +166,7 @@ namespace Fairlead.Core.Host
             info.RuntimeFile = _runtimeFile;
             if (Options.Monitor) Health.Start();
             if (Options.AutoStop) _presenceTimer = new Timer(PresenceTick, null, 2000, 2000);
-            Log.Info("HOST_READY", "Fairlead " + Version + " gateway " + info.GatewayUrl + (Settings.BindLan ? " (also on the LAN)" : string.Empty) + ", config " + (Config.FilePath ?? "in memory"));
+            Log.Info("HOST_READY", "Fairlead " + Version + " gateway " + info.GatewayUrl + ", config " + (Config.FilePath ?? "in memory"));
             return info;
         }
 

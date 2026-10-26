@@ -59,7 +59,6 @@ export const Status = z.object({
   registryPort: z.number(),
   preferredPort: z.number(),
   gatewayUrl: z.string(),
-  lan: z.boolean(),
   startedAt: z.string(),
   autoStop: z.boolean(),
   setupComplete: z.boolean(),
