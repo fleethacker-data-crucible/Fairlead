@@ -29,6 +29,8 @@ namespace Fairlead.Core.Host
         public FairleadConfig Config { get; set; }
         /// <summary>The AI gateway model file; null looks up FAIRLEAD_GATEWAY_CONFIG, then config\ai_gateway_models.yaml under the root.</summary>
         public string GatewayModelPath { get; set; }
+        /// <summary>The store for a model file imported in the browser; null uses the data folder (memory when Config is given).</summary>
+        public GatewayStore GatewayStore { get; set; }
         /// <summary>Start the health monitor (off in tests that drive health by hand).</summary>
         public bool Monitor { get; set; }
         /// <summary>Stop when the admin tab is gone (TechStack lifecycle). Off for Fairlead by default: it serves other tools.</summary>
@@ -80,6 +82,7 @@ namespace Fairlead.Core.Host
         public const string Version = "0.1.0";
         private readonly ManualResetEventSlim _stopped = new ManualResetEventSlim(false);
         private readonly object _presenceLock = new object();
+        private readonly object _gatewayLock = new object();
         private HttpServer _server;
         private string _runtimeFile;
         private DateTimeOffset? _lastHeartbeat;
@@ -93,6 +96,7 @@ namespace Fairlead.Core.Host
             Settings = options.Settings;
             Log = new Diagnostics(Settings.LogDirectory);
             Config = options.Config != null ? new ConfigStore(options.Config) : new ConfigStore(Settings.ConfigPath);
+            GatewayValues = options.GatewayStore ?? new GatewayStore(options.Config != null ? null : Settings.DataDirectory);
             LoadGatewayModels();
             Breakers = new BreakerBoard();
             Upstream = new UpstreamClient(options.UpstreamHandler);
@@ -112,8 +116,12 @@ namespace Fairlead.Core.Host
         public FairleadSettings Settings { get; private set; }
         public Diagnostics Log { get; private set; }
         public ConfigStore Config { get; private set; }
-        /// <summary>The AI gateway model file as loaded at start; null when there is none.</summary>
+        /// <summary>The AI gateway model file as last loaded; null when there is none.</summary>
         public GatewayModelFile GatewayModels { get; private set; }
+        /// <summary>Where it came from: "imported" (the browser), "environment" (FAIRLEAD_GATEWAY_CONFIG) or "file" (config\ folder).</summary>
+        public string GatewaySource { get; private set; }
+        /// <summary>The model file and values imported in the browser, encrypted in the data folder.</summary>
+        public GatewayStore GatewayValues { get; private set; }
         public BreakerBoard Breakers { get; private set; }
         public UpstreamClient Upstream { get; private set; }
         public HealthMonitor Health { get; private set; }
@@ -128,21 +136,60 @@ namespace Fairlead.Core.Host
         public string BaseUrl { get { return "http://127.0.0.1:" + Port; } }
 
         /// <summary>
-        /// Reads the AI gateway model file once and adds its endpoints as managed providers. A file with errors adds
-        /// nothing; Fairlead still starts, and the console, log and status page say why.
+        /// Reads the AI gateway model file and adds its endpoints as managed providers, replacing the previous set. The
+        /// file is FAIRLEAD_GATEWAY_CONFIG when set, else the one imported in the browser (encrypted in the data folder),
+        /// else config\ai_gateway_models.yaml. Variables come from the values stored with the import, then the
+        /// environment. A file with errors adds nothing; Fairlead keeps running, and the console, log and Providers page
+        /// say why. Called at start and after every import or value change.
         /// </summary>
-        private void LoadGatewayModels()
+        public void LoadGatewayModels()
         {
-            var path = Options.GatewayModelPath ?? GatewayModelFile.ResolvePath(Settings.RootDirectory, null);
-            if (path == null) return;
-            var file = GatewayModelFile.Load(path, null);
-            if (file.Ok)
+            lock (_gatewayLock)
             {
-                try { Config.SetManaged(file.Providers); }
-                catch (ArgumentException ex) { file.Errors.Add(ex.Message); }
+                var env = GatewayValues.Environment(null);
+                GatewayModelFile file = null;
+                var source = "file";
+                var path = Options.GatewayModelPath;
+                if (path == null && string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(GatewayModelFile.PathVariable)) && GatewayValues.HasFile)
+                {
+                    source = "imported";
+                    var text = GatewayValues.ReadFile();
+                    if (text == null)
+                    {
+                        file = new GatewayModelFile { Path = GatewayValues.Location };
+                        file.Errors.Add("The imported model file cannot be decrypted by this Windows account. Import it again.");
+                    }
+                    else file = GatewayModelFile.Parse(text, GatewayValues.Location, env);
+                }
+                else
+                {
+                    if (path == null && !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(GatewayModelFile.PathVariable))) source = "environment";
+                    if (path == null) path = GatewayModelFile.ResolvePath(Settings.RootDirectory, null);
+                    if (path != null) file = GatewayModelFile.Load(path, env);
+                }
+
+                var providers = new List<ProviderConfig>();
+                if (file != null && file.Ok)
+                {
+                    foreach (var p in file.Providers)
+                    {
+                        // A token stored with the import travels DPAPI-protected in memory, like a key saved on this page.
+                        var token = p.ApiKeyEnv == null ? null : GatewayValues.Value(p.ApiKeyEnv);
+                        if (token != null) p.ApiKeyProtected = SecretProtector.Protect(token);
+                        providers.Add(p);
+                    }
+                }
+                try { Config.SetManaged(providers); }
+                catch (ArgumentException ex)
+                {
+                    file.Errors.Add(ex.Message);
+                    Config.SetManaged(new ProviderConfig[0]);
+                }
+                GatewayModels = file;
+                GatewaySource = file == null ? null : source;
+                if (file == null) return;
+                foreach (var line in file.Summary()) Log.Info(file.Ok ? "GATEWAY_MODELS" : "GATEWAY_MODELS_INVALID", line.Trim());
             }
-            GatewayModels = file;
-            foreach (var line in file.Summary()) Log.Info(file.Ok ? "GATEWAY_MODELS" : "GATEWAY_MODELS_INVALID", line.Trim());
         }
 
         public HostInfo Start()
