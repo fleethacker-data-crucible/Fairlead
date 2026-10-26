@@ -34,18 +34,11 @@ function Import-FairleadCore {
       Compiles the Fairlead engine from src\Fairlead.Core\*.cs in memory and loads it.
     .DESCRIPTION
       The Fleet stack: C# 5 source compiled at start by Windows PowerShell 5.1 (Add-Type, the inbox .NET Framework
-      compiler), framework assemblies only, no DLLs shipped. FAIRLEAD_CORE_DLL may point at a prebuilt
-      Fairlead.Core.dll instead (development only).
+      compiler), framework assemblies only. No custom or third-party DLL is ever loaded.
     #>
     [CmdletBinding()]
     param([string]$Root = (Get-FairleadRoot))
     if ($script:FairleadCoreLoaded -or ('Fairlead.Core.Facade' -as [type])) { $script:FairleadCoreLoaded = $true; return }
-    $custom = [Environment]::GetEnvironmentVariable('FAIRLEAD_CORE_DLL', 'Process')
-    if ($custom) {
-        Add-Type -LiteralPath $custom -ErrorAction Stop
-        $script:FairleadCoreLoaded = $true
-        return
-    }
     $files = Get-FairleadCoreSources -Root $Root
     if ($files.Count -eq 0) { throw ('The Fairlead engine source was not found under ' + (Join-Path $Root 'src\Fairlead.Core') + '. Copy the whole Fairlead folder.') }
     $cp = New-Object System.CodeDom.Compiler.CompilerParameters

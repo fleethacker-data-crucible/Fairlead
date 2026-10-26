@@ -1,6 +1,6 @@
 #requires -Version 5.1
 # Pester 5 tests for the PowerShell layer and the repository rules. Run: Invoke-Pester tests/pester
-# Import-FairleadCore compiles src\Fairlead.Core with Add-Type (or loads FAIRLEAD_CORE_DLL when set).
+# Import-FairleadCore compiles src\Fairlead.Core with Add-Type; no DLL is loaded.
 
 BeforeAll {
     $script:Root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
