@@ -144,6 +144,11 @@ namespace Fairlead.Core.Providers
 
         public static Uri EndpointUri(ProviderConfig p, string operation)
         {
+            if (p.Kind == ProviderKind.Responses)
+            {
+                if (operation != "chat") throw new NotSupportedException("A Responses endpoint serves chat only, not '" + operation + "'.");
+                return new Uri(p.BaseUrl.TrimEnd('/') + p.Path);
+            }
             if (p.Kind == ProviderKind.Anthropic)
             {
                 var root = p.BaseUrl.TrimEnd('/');
@@ -172,6 +177,7 @@ namespace Fairlead.Core.Providers
         /// </summary>
         public async Task<UpstreamResponse> SendAsync(ProviderConfig p, string operation, JObject body, CancellationToken token, IDictionary<string, string> passHeaders = null)
         {
+            if (p.Kind == ProviderKind.Responses) return await SendResponsesAsync(p, operation, body, token).ConfigureAwait(false);
             var timeoutMs = Math.Max(5, p.TimeoutSeconds) * 1000;
             var cts = CancellationTokenSource.CreateLinkedTokenSource(token);
             cts.CancelAfter(timeoutMs);
@@ -217,6 +223,76 @@ namespace Fairlead.Core.Providers
             throw Classify(p, status, text, retryAfter);
         }
 
+        /// <summary>
+        /// A Responses endpoint, called without streaming. The answer is translated to a Chat Completions body (or, when
+        /// the caller streams, a Chat Completions event stream holding the whole answer), so the rest of the gateway
+        /// handles it like any OpenAI-compatible provider. Logs carry the provider id only, never the URL or body.
+        /// </summary>
+        private async Task<UpstreamResponse> SendResponsesAsync(ProviderConfig p, string operation, JObject chat, CancellationToken token)
+        {
+            if (operation != "chat") throw new UpstreamException(FailureKind.BadRequest, p.Id + " serves chat only; '" + operation + "' is not available there.", 400);
+            JObject body;
+            try { body = ResponsesApi.FromChatRequest(chat, (string)chat["model"], p.RequestFields); }
+            catch (ResponsesRequestException ex) { throw new UpstreamException(FailureKind.BadRequest, p.Id + ": " + ex.Message, 400); }
+            var stream = chat.Value<bool?>("stream") == true;
+            var includeUsage = (bool?)chat["stream_options"].At("include_usage") == true;
+            var timeoutMs = Math.Max(5, p.TimeoutSeconds) * 1000;
+            var cts = CancellationTokenSource.CreateLinkedTokenSource(token);
+            cts.CancelAfter(timeoutMs);
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            string text;
+            int status;
+            TimeSpan? retryAfter;
+            try
+            {
+                using (var request = new HttpRequestMessage(HttpMethod.Post, EndpointUri(p, operation)) { Content = new StringContent(body.ToString(Formatting.None), Encoding.UTF8, "application/json") })
+                {
+                    ApplyAuth(request, p);
+                    request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+                    using (var response = await _http.SendAsync(request, HttpCompletionOption.ResponseContentRead, cts.Token).ConfigureAwait(false))
+                    {
+                        status = (int)response.StatusCode;
+                        retryAfter = RetryAfter(response);
+                        text = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+                    }
+                }
+            }
+            catch (OperationCanceledException ex)
+            {
+                cts.Dispose();
+                if (token.IsCancellationRequested) throw;
+                throw new UpstreamException(FailureKind.Timeout, p.Id + " did not answer within " + p.TimeoutSeconds + " s.", null, null, ex);
+            }
+            catch (HttpRequestException ex)
+            {
+                cts.Dispose();
+                throw new UpstreamException(FailureKind.Network, p.Id + " is unreachable: " + Describe(ex), null, null, ex);
+            }
+            if (status < 200 || status >= 300)
+            {
+                cts.Dispose();
+                throw Classify(p, status, text, retryAfter);
+            }
+            JObject answer;
+            try { answer = JObject.Parse(text); }
+            catch (JsonException)
+            {
+                cts.Dispose();
+                throw new UpstreamException(FailureKind.Server, p.Id + " returned a body that is not JSON.", status);
+            }
+            var completion = ResponsesApi.ToChatCompletion(answer, (string)chat["model"]);
+            if (completion == null)
+            {
+                cts.Dispose();
+                var state = (string)answer["status"];
+                throw new UpstreamException(FailureKind.Server, p.Id + " returned no text" + (string.IsNullOrEmpty(state) ? "." : " (status " + state + ")."), status);
+            }
+            var content = stream
+                ? new StringContent(ResponsesApi.ToChatStream(completion, includeUsage), Encoding.UTF8, "text/event-stream")
+                : new StringContent(completion.ToString(Formatting.None), Encoding.UTF8, "application/json");
+            return new UpstreamResponse(new HttpResponseMessage(HttpStatusCode.OK) { Content = content }, cts, timeoutMs, sw.Elapsed);
+        }
+
         public static UpstreamException Classify(ProviderConfig p, int status, string body, TimeSpan? retryAfter)
         {
             var message = ErrorMessage(body);
@@ -235,6 +311,16 @@ namespace Fairlead.Core.Providers
         /// <summary>The model list. Ollama: /api/tags with capabilities and context; others: /models.</summary>
         public async Task<List<ModelInfo>> ListModelsAsync(ProviderConfig p, CancellationToken token, int timeoutMs = 8000)
         {
+            if (p.Kind == ProviderKind.Responses)
+            {
+                // A Responses gateway publishes no model list: its models come from the gateway model file. Check that
+                // something answers on its host and port; the key is only proven by a real request.
+                Uri u;
+                if (!Uri.TryCreate(p.BaseUrl, UriKind.Absolute, out u)) throw new UpstreamException(FailureKind.BadRequest, p.Id + " has no valid base URL.");
+                if (!await TcpReachableAsync(u.Host, u.Port, Math.Min(timeoutMs, 5000), token).ConfigureAwait(false))
+                    throw new UpstreamException(FailureKind.Network, p.Id + " is unreachable.");
+                return p.Models.Select(m => new ModelInfo { Id = m.Id, ContextWindow = m.ContextWindow, Tools = m.Tools, Vision = m.Vision, Embedding = m.Embedding }).ToList();
+            }
             using (var cts = CancellationTokenSource.CreateLinkedTokenSource(token))
             {
                 cts.CancelAfter(timeoutMs);

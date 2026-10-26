@@ -223,6 +223,18 @@ namespace Fairlead.Core.Host
                     };
                 }),
                 routes = cfg.Routes.Select(r => new { id = r.Id, strategy = r.Strategy, targets = r.Targets.Count }),
+                gatewayModels = GatewayModels == null ? null : new
+                {
+                    path = GatewayModels.Path,
+                    ok = GatewayModels.Ok,
+                    endpoints = GatewayModels.EndpointKeys,
+                    models = GatewayModels.ModelKeys.Count,
+                    enabledModels = GatewayModels.EnabledModels,
+                    providers = GatewayModels.Providers.Select(p => p.Id),
+                    variables = GatewayModels.RequiredVariables,
+                    errors = GatewayModels.Errors,
+                    warnings = GatewayModels.Warnings,
+                },
                 launcher = Options.LauncherState,
                 metrics = Metrics.Summary(),
             };
@@ -251,6 +263,9 @@ namespace Fairlead.Core.Host
                     discovered = DiscoveredModels(p.Id),
                     keySource = SecretProtector.KeySource(p),
                     keyHint = SecretProtector.KeyHint(p),
+                    managed = p.Managed == true,
+                    p.Path,
+                    p.Retries,
                 }),
                 c.Routes,
                 c.Rules,
@@ -300,6 +315,7 @@ namespace Fairlead.Core.Host
             var incoming = body["provider"] as JObject;
             if (incoming == null) throw new BadRequestException("Send { provider: {...}, apiKey?: string, clearKey?: bool }.");
             var id = (string)incoming["id"];
+            if (!string.IsNullOrWhiteSpace(id) && Config.IsManaged(id)) throw new BadRequestException(ManagedMessage(id));
             var preset = (string)incoming["preset"];
             var apiKey = Json.Read<string>(body, "apiKey");
             var clearKey = Json.Read<bool?>(body, "clearKey") == true;
@@ -350,9 +366,15 @@ namespace Fairlead.Core.Host
             return id;
         }
 
+        private string ManagedMessage(string id)
+        {
+            return "Provider '" + id + "' comes from the AI gateway model file" + (GatewayModels == null ? string.Empty : " (" + GatewayModels.Path + ")") + ". Change it there and restart Fairlead.";
+        }
+
         private Task<HttpResponse> DeleteProvider(HttpRequest r)
         {
             var id = r.RouteValues["id"];
+            if (Config.IsManaged(id)) throw new BadRequestException(ManagedMessage(id));
             Config.Update(c =>
             {
                 if (c.Providers.RemoveAll(p => string.Equals(p.Id, id, StringComparison.OrdinalIgnoreCase)) == 0) throw new NotFoundException("No provider " + id + ".");
@@ -383,6 +405,7 @@ namespace Fairlead.Core.Host
         private async Task<HttpResponse> DiscoverProvider(HttpRequest r)
         {
             var id = r.RouteValues["id"];
+            if (Config.IsManaged(id)) throw new BadRequestException(ManagedMessage(id));
             var p = Config.Current.FindProvider(id);
             if (p == null) throw new NotFoundException("No provider " + id + ".");
             var models = await Upstream.ListModelsAsync(p, CancellationToken.None, 10000).ConfigureAwait(false);
@@ -563,6 +586,7 @@ namespace Fairlead.Core.Host
                 case "openai": return ProviderKind.OpenAi;
                 case "anthropic": return ProviderKind.Anthropic;
                 case "ollama": return ProviderKind.Ollama;
+                case "responses": throw new BadRequestException("Responses providers come from the AI gateway model file (config\\ai_gateway_models.yaml), not from this page.");
                 default: throw new BadRequestException("Provider kind must be openai, anthropic or ollama.");
             }
         }

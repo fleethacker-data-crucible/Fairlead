@@ -20,7 +20,7 @@ AfterAll {
 Describe 'Module surface' {
     It 'exports the documented commands' {
         $names = (Get-Command -Module Fairlead).Name
-        foreach ($n in @('Start-Fairlead', 'Get-FairleadStatus', 'Import-FairleadCore', 'Initialize-FairleadEnvironment')) { $names | Should -Contain $n }
+        foreach ($n in @('Start-Fairlead', 'Get-FairleadStatus', 'Import-FairleadCore', 'Initialize-FairleadEnvironment', 'Test-FairleadModelConfig')) { $names | Should -Contain $n }
     }
     It 'resolves the repository root' {
         Get-FairleadRoot | Should -Be $script:Root
@@ -80,6 +80,37 @@ Describe 'Initialize-FairleadEnvironment' {
     It 'rejects an unknown bind value' {
         Set-Content (Join-Path $script:Tmp 'config\fairlead.env') 'FAIRLEAD_BIND=everywhere'
         { Initialize-FairleadEnvironment -Root $script:Tmp } | Should -Throw '*loopback or lan*'
+    }
+}
+
+Describe 'Test-FairleadModelConfig' {
+    BeforeAll {
+        $script:Gw = Join-Path ([IO.Path]::GetTempPath()) ('fairlead-gw-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Force (Join-Path $script:Gw 'config') | Out-Null
+        $script:SavedGw = @{}
+        foreach ($n in @('AI_GATEWAY_BASE_URL', 'DATABRICKS_TOKEN', 'FAIRLEAD_GATEWAY_CONFIG')) { $script:SavedGw[$n] = [Environment]::GetEnvironmentVariable($n, 'Process') }
+    }
+    AfterAll {
+        foreach ($k in $script:SavedGw.Keys) { [Environment]::SetEnvironmentVariable($k, $script:SavedGw[$k], 'Process') }
+        Remove-Item $script:Gw -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    It 'accepts the committed example when its variables are set, and prints no value' {
+        [Environment]::SetEnvironmentVariable('AI_GATEWAY_BASE_URL', 'https://approved-gateway.example', 'Process')
+        [Environment]::SetEnvironmentVariable('DATABRICKS_TOKEN', 'made-up-token', 'Process')
+        $example = Join-Path $script:Root 'config\ai_gateway_models.example.yaml'
+        $out = Test-FairleadModelConfig -Path $example -Root $script:Gw 6>&1
+        ($out | Where-Object { $_ -is [bool] }) | Should -Be $true
+        ($out -join "`n") | Should -Not -Match 'approved-gateway|made-up-token|example\.provider-model'
+    }
+    It 'names a missing variable and fails' {
+        [Environment]::SetEnvironmentVariable('DATABRICKS_TOKEN', $null, 'Process')
+        $out = Test-FairleadModelConfig -Path (Join-Path $script:Root 'config\ai_gateway_models.example.yaml') -Root $script:Gw 6>&1
+        ($out | Where-Object { $_ -is [bool] }) | Should -Be $false
+        ($out -join "`n") | Should -Match 'DATABRICKS_TOKEN'
+    }
+    It 'returns false when there is no model file' {
+        [Environment]::SetEnvironmentVariable('FAIRLEAD_GATEWAY_CONFIG', $null, 'Process')
+        (Test-FairleadModelConfig -Root $script:Gw 6>$null) | Should -Be $false
     }
 }
 

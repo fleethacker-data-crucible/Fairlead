@@ -8,7 +8,8 @@ namespace Fairlead.Core.Config
 {
     /// <summary>
     /// Owns fairlead.json. Readers get an immutable snapshot (a deep copy); writers go through <see cref="Update"/>,
-    /// which applies the change to a copy, validates it, saves atomically and only then publishes it.
+    /// which applies the change to a copy, validates it, saves atomically and only then publishes it. Managed providers
+    /// (from the AI gateway model file) are part of every snapshot but never of fairlead.json.
     /// </summary>
     public sealed class ConfigStore
     {
@@ -17,6 +18,8 @@ namespace Fairlead.Core.Config
         private readonly object _lock = new object();
         private readonly string _path;
         private FairleadConfig _current;
+        private FairleadConfig _view;
+        private System.Collections.Generic.List<ProviderConfig> _managed = new System.Collections.Generic.List<ProviderConfig>();
         private long _revision;
 
         /// <summary>A store backed by <paramref name="path"/>; null keeps the config in memory only (tests).</summary>
@@ -25,6 +28,7 @@ namespace Fairlead.Core.Config
             _path = path;
             _current = Load(path) ?? FairleadConfig.CreateDefault();
             Validate(_current);
+            _view = _current;
         }
 
         public ConfigStore(FairleadConfig config)
@@ -32,6 +36,7 @@ namespace Fairlead.Core.Config
             _path = null;
             _current = Clone(config);
             Validate(_current);
+            _view = _current;
         }
 
         public string FilePath { get { return _path; } }
@@ -43,30 +48,80 @@ namespace Fairlead.Core.Config
         /// <summary>A private copy; changing it does nothing.</summary>
         public FairleadConfig Snapshot()
         {
-            lock (_lock) return Clone(_current);
+            lock (_lock) return Clone(_view);
         }
 
         /// <summary>The live object, for hot paths that only read. Never mutate it.</summary>
         internal FairleadConfig Current
         {
-            get { lock (_lock) return _current; }
+            get { lock (_lock) return _view; }
         }
 
+        /// <summary>
+        /// Applies <paramref name="change"/> to a copy of the saved config (managed providers are not in it), validates the
+        /// result together with the managed providers, saves it and publishes it.
+        /// </summary>
         public FairleadConfig Update(Action<FairleadConfig> change)
         {
-            FairleadConfig next;
+            FairleadConfig view;
             lock (_lock)
             {
-                next = Clone(_current);
+                var next = Clone(_current);
                 change(next);
                 Validate(next);
+                view = Merge(next, _managed);
+                Validate(view);
                 Save(next);
                 _current = next;
+                _view = view;
                 _revision++;
             }
             var handler = Changed;
-            if (handler != null) handler(Clone(next));
-            return Clone(next);
+            if (handler != null) handler(Clone(view));
+            return Clone(view);
+        }
+
+        /// <summary>
+        /// Replaces the managed providers (the AI gateway model file). Throws ArgumentException when one clashes with a
+        /// saved provider or is invalid; the previous set stays in place then.
+        /// </summary>
+        public void SetManaged(System.Collections.Generic.IEnumerable<ProviderConfig> providers)
+        {
+            var list = new System.Collections.Generic.List<ProviderConfig>();
+            foreach (var p in providers ?? new ProviderConfig[0])
+            {
+                var copy = CloneProvider(p);
+                copy.Managed = true;
+                list.Add(copy);
+            }
+            lock (_lock)
+            {
+                foreach (var p in list)
+                    if (_current.FindProvider(p.Id) != null) throw new ArgumentException("A provider called '" + p.Id + "' is already set up in Fairlead; rename it or the gateway endpoint.");
+                var view = Merge(_current, list);
+                Validate(view);
+                _managed = list;
+                _view = view;
+                _revision++;
+            }
+        }
+
+        public bool IsManaged(string providerId)
+        {
+            lock (_lock) return _managed.Exists(p => string.Equals(p.Id, providerId, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static FairleadConfig Merge(FairleadConfig saved, System.Collections.Generic.List<ProviderConfig> managed)
+        {
+            if (managed.Count == 0) return saved;
+            var view = Clone(saved);
+            foreach (var p in managed) view.Providers.Add(CloneProvider(p));
+            return view;
+        }
+
+        private static ProviderConfig CloneProvider(ProviderConfig p)
+        {
+            return JsonConvert.DeserializeObject<ProviderConfig>(JsonConvert.SerializeObject(p, Formatting.None, FileJson), FileJson);
         }
 
         private void Save(FairleadConfig config)
@@ -103,7 +158,7 @@ namespace Fairlead.Core.Config
 
         public static FairleadConfig Clone(FairleadConfig config)
         {
-            return JsonConvert.DeserializeObject<FairleadConfig>(JsonConvert.SerializeObject(config, Formatting.Indented, FileJson), FileJson);
+            return JsonConvert.DeserializeObject<FairleadConfig>(JsonConvert.SerializeObject(config, Formatting.None, FileJson), FileJson);
         }
 
         public static string Serialize(FairleadConfig config)
@@ -123,6 +178,8 @@ namespace Fairlead.Core.Config
                 if (!Uri.TryCreate(p.BaseUrl, UriKind.Absolute, out uri) || (uri.Scheme != "http" && uri.Scheme != "https"))
                     throw new ArgumentException("Provider '" + p.Id + "' needs an http or https base URL.");
                 if (p.TimeoutSeconds < 5 || p.TimeoutSeconds > 3600) throw new ArgumentException("Provider '" + p.Id + "': timeout must be 5 to 3600 seconds.");
+                if (p.Kind == ProviderKind.Responses && (string.IsNullOrEmpty(p.Path) || p.Path[0] != '/')) throw new ArgumentException("Provider '" + p.Id + "': a Responses endpoint needs a path starting with /.");
+                if (p.Retries.HasValue && (p.Retries.Value < 0 || p.Retries.Value > 5)) throw new ArgumentException("Provider '" + p.Id + "': retries must be 0 to 5.");
             }
             var routes = new System.Collections.Generic.HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var r in c.Routes)

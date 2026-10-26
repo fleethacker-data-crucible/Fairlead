@@ -19,6 +19,17 @@ namespace Fairlead.Core
             return FairleadSettings.FromEnvironment(rootDirectory);
         }
 
+        /// <summary>Validates an AI gateway model file against the current environment without starting anything (Test-FairleadModelConfig).</summary>
+        public static GatewayModelFile TestGatewayModelFile(string path)
+        {
+            return GatewayModelFile.Load(path, null);
+        }
+
+        public static string GatewayModelPath(string rootDirectory)
+        {
+            return GatewayModelFile.ResolvePath(rootDirectory, null);
+        }
+
         public static FairleadHost CreateHost(FairleadSettings settings, string webRoot, int preferredPort, Dictionary<string, object> launcherState, bool autoStop)
         {
             return new FairleadHost(new HostOptions

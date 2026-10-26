@@ -82,6 +82,12 @@ export const Status = z.object({
     keySource: z.string(),
   }).passthrough()),
   routes: z.array(z.object({ id: z.string(), strategy: z.string(), targets: z.number() }).passthrough()),
+  gatewayModels: z.object({
+    path: z.string(),
+    ok: z.boolean(),
+    errors: z.array(z.string()).default([]),
+    warnings: z.array(z.string()).default([]),
+  }).passthrough().nullable().optional(),
   metrics: MetricsSummary,
 }).passthrough();
 export type Status = z.infer<typeof Status>;
@@ -101,7 +107,7 @@ export type ModelInfo = z.infer<typeof ModelInfo>;
 export const Provider = z.object({
   id: z.string(),
   name: z.string(),
-  kind: z.enum(['openAi', 'anthropic', 'ollama']),
+  kind: z.enum(['openAi', 'anthropic', 'ollama', 'responses']),
   preset: s,
   baseUrl: z.string(),
   local: z.boolean(),
@@ -114,6 +120,10 @@ export const Provider = z.object({
   discovered: z.array(ModelInfo).default([]),
   keySource: z.enum(['stored', 'env', 'none']),
   keyHint: s,
+  /** From the AI gateway model file: shown, never edited here. */
+  managed: z.boolean().default(false),
+  path: s,
+  retries: n,
 }).passthrough();
 export type Provider = z.infer<typeof Provider>;
 
