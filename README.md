@@ -43,8 +43,7 @@ The Overview with synthetic demo data: Ollama on this machine, one cloud provide
 ## Quick start
 
 ```powershell
-build\Build-Fairlead.ps1        # on the build machine (.NET 8 SDK, Node 20+); output in dist\Fairlead
-.\Launch-Fairlead.bat           # on the workstation: tray icon; the setup page opens on first run
+.\Launch-Fairlead.bat           # from a clone or a release zip: tray icon; the setup page opens on first run
 ```
 
 Then point a tool at it, for example Claude Code:

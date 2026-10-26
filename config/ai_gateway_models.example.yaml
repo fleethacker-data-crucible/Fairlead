@@ -1,4 +1,5 @@
-# Example AI gateway model file. Copy to config\ai_gateway_models.yaml (git-ignored) and replace the model ids with
+# Example AI gateway model file. Import yours under Providers -> AI gateway (kept encrypted outside the app folder),
+# or copy it to config\ai_gateway_models.yaml (git-ignored). Replace the model ids with
 # the ones your gateway serves. The format is the gateway's; Fairlead reads environment, endpoints and models and
 # ignores other sections. No host, URL or token belongs here: they come from the environment variables named below.
 # Check your copy with: Test-FairleadModelConfig

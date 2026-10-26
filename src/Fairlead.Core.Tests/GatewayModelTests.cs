@@ -629,4 +629,128 @@ Endpoint("gw_mlflow", "/ai-gateway/mlflow/v1/responses") +
             Assert.NotEqual(0, host.Port);
         }
     }
+
+    /// <summary>The model file imported in the browser: kept by Fairlead, address stored with it, token never.</summary>
+    public sealed class GatewayImportTests : IDisposable
+    {
+        private readonly string _dir = Path.Combine(Path.GetTempPath(), "fairlead-imp-" + Guid.NewGuid().ToString("N"));
+        private readonly GatewayFixture _fx = new GatewayFixture();
+        private readonly HttpClient _http = new HttpClient();
+        private readonly List<FairleadHost> _hosts = new List<FairleadHost>();
+
+        public GatewayImportTests() { Directory.CreateDirectory(_dir); }
+
+        public void Dispose()
+        {
+            foreach (var h in _hosts) h.Dispose();
+            _http.Dispose();
+            _fx.Unexport();
+            try { Directory.Delete(_dir, true); } catch (IOException) { }
+        }
+
+        // Reversible stand-in for DPAPI so the tests run on any OS; the real store uses SecretProtector.
+        private static string Wrap(string s) { return "t:" + Convert.ToBase64String(Encoding.UTF8.GetBytes(s)); }
+        private static string Unwrap(string s) { return s != null && s.StartsWith("t:") ? Encoding.UTF8.GetString(Convert.FromBase64String(s.Substring(2))) : null; }
+
+        private FairleadHost Start(GatewayStore store)
+        {
+            var host = new FairleadHost(new HostOptions
+            {
+                Settings = new FairleadSettings { RootDirectory = _dir, DataDirectory = _dir, LogDirectory = Path.Combine(_dir, "logs") },
+                Config = RoutingTests.Config(),
+                GatewayStore = store,
+                UpstreamHandler = new FakeUpstream(),
+                Monitor = false,
+                PreferredPort = 0,
+            });
+            host.Start();
+            _hosts.Add(host);
+            return host;
+        }
+
+        private async Task<(HttpStatusCode code, JObject body)> Admin(FairleadHost host, HttpMethod method, string path, JObject? body = null)
+        {
+            var req = new HttpRequestMessage(method, host.BaseUrl + path);
+            if (body != null) req.Content = new StringContent(body.ToString(), Encoding.UTF8, "application/json");
+            req.Headers.Add("X-Fairlead-Session", host.SessionToken);
+            var r = await _http.SendAsync(req);
+            var text = await r.Content.ReadAsStringAsync();
+            return (r.StatusCode, string.IsNullOrEmpty(text) ? new JObject() : JObject.Parse(text));
+        }
+
+        [Fact]
+        public void InspectChecksStructureWithoutAnyValues()
+        {
+            var f = GatewayModelFile.Inspect(_fx.Yaml(), "x");
+            Assert.True(f.Ok);
+            Assert.Equal(new[] { _fx.BaseVar }, f.BaseUrlVariables.ToArray());
+            Assert.Equal(new[] { _fx.TokenVar }, f.TokenVariables.ToArray());
+            Assert.False(GatewayModelFile.Inspect(_fx.Yaml().Replace("endpoint: \"gw_openai\"", "endpoint: \"gone\""), "x").Ok);
+        }
+
+        [Fact]
+        public async Task ImportStoresTheFileEncryptedAndAsksForTheAddressAndToken()
+        {
+            var store = new GatewayStore(_dir, Wrap, Unwrap);
+            var host = Start(store);
+            var (code, body) = await Admin(host, HttpMethod.Post, "/api/gateway/import", new JObject { ["yaml"] = _fx.Yaml() });
+            Assert.Equal(HttpStatusCode.OK, code);
+            Assert.True((bool)body["saved"]!);
+            var gw = (JObject)body["gateway"]!;
+            Assert.Equal("imported", (string?)gw["source"]);
+            Assert.False((bool)gw["ok"]!);
+            var vars = ((JArray)gw["variables"]!).ToDictionary(v => (string)v["name"]!, v => (string)v["kind"]! + "/" + (string)v["source"]!);
+            Assert.Equal("baseUrl/missing", vars[_fx.BaseVar]);
+            Assert.Equal("token/missing", vars[_fx.TokenVar]);
+
+            var onDisk = File.ReadAllText(Path.Combine(_dir, GatewayStore.FileName));
+            Assert.DoesNotContain("fake.model", onDisk);
+            Assert.DoesNotContain("gw_openai", onDisk);
+        }
+
+        [Fact]
+        public async Task TheAddressIsStoredTheTokenIsRefusedAndProvidersAppearWithoutARestart()
+        {
+            var store = new GatewayStore(_dir, Wrap, Unwrap);
+            var host = Start(store);
+            await Admin(host, HttpMethod.Post, "/api/gateway/import", new JObject { ["yaml"] = _fx.Yaml() });
+
+            var (refused, msg) = await Admin(host, HttpMethod.Post, "/api/gateway/values", new JObject { ["values"] = new JObject { [_fx.TokenVar] = GatewayFixture.Token } });
+            Assert.Equal(HttpStatusCode.BadRequest, refused);
+            Assert.Contains("Lazarette", msg.ToString());
+
+            var (bad, _) = await Admin(host, HttpMethod.Post, "/api/gateway/values", new JObject { ["values"] = new JObject { [_fx.BaseVar] = "http://gateway.test" } });
+            Assert.Equal(HttpStatusCode.BadRequest, bad);
+
+            var (ok, view) = await Admin(host, HttpMethod.Post, "/api/gateway/values", new JObject { ["values"] = new JObject { [_fx.BaseVar] = GatewayFixture.BaseUrl } });
+            Assert.Equal(HttpStatusCode.OK, ok);
+            Assert.DoesNotContain("gateway.test", view.ToString());
+            Assert.Null(host.Config.Snapshot().FindProvider("gw_openai"));   // token still missing
+
+            Environment.SetEnvironmentVariable(_fx.TokenVar, GatewayFixture.Token);
+            host.LoadGatewayModels();
+            Assert.True(host.GatewayModels!.Ok);
+            Assert.Equal("https://gateway.test", host.Config.Snapshot().FindProvider("gw_openai")!.BaseUrl);
+
+            // A second start reads the same encrypted files.
+            var again = Start(new GatewayStore(_dir, Wrap, Unwrap));
+            Assert.NotNull(again.Config.Snapshot().FindProvider("gw_mlflow"));
+
+            var (removed, _) = await Admin(host, HttpMethod.Delete, "/api/gateway");
+            Assert.Equal(HttpStatusCode.OK, removed);
+            Assert.Null(host.Config.Snapshot().FindProvider("gw_openai"));
+            Assert.False(File.Exists(Path.Combine(_dir, GatewayStore.FileName)));
+        }
+
+        [Fact]
+        public async Task ABrokenFileIsRefusedAndNothingIsSaved()
+        {
+            var host = Start(new GatewayStore(_dir, Wrap, Unwrap));
+            var (code, body) = await Admin(host, HttpMethod.Post, "/api/gateway/import", new JObject { ["yaml"] = _fx.Yaml().Replace("request_format: \"openai_responses_v1\"", "request_format: \"x\"") });
+            Assert.Equal(HttpStatusCode.OK, code);
+            Assert.False((bool)body["saved"]!);
+            Assert.NotEmpty((JArray)body["errors"]!);
+            Assert.False(File.Exists(Path.Combine(_dir, GatewayStore.FileName)));
+        }
+    }
 }

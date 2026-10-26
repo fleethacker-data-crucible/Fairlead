@@ -10,6 +10,7 @@ using Fairlead.Core.Gateway;
 using Fairlead.Core.Protocol;
 using Fairlead.Core.Providers;
 using Fairlead.Core.Resilience;
+using Fairlead.Core.Secrets;
 using Fairlead.Core.Telemetry;
 
 namespace Fairlead.Core.Host
@@ -29,6 +30,13 @@ namespace Fairlead.Core.Host
         public FairleadConfig Config { get; set; }
         /// <summary>The AI gateway model file; null looks up FAIRLEAD_GATEWAY_CONFIG, then config\ai_gateway_models.yaml under the root.</summary>
         public string GatewayModelPath { get; set; }
+        /// <summary>The store for a model file imported in the browser; null uses the data folder (memory when Config is given).</summary>
+        public GatewayStore GatewayStore { get; set; }
+        /// <summary>Lazarette's data folder (its logs\arc-server-*.json); null uses %LAZARETTE_DATA% or %LOCALAPPDATA%\Lazarette.</summary>
+        public string LazaretteDataDirectory { get; set; }
+        /// <summary>Protection for the saved Lazarette pairing; null uses DPAPI (tests pass a stand-in).</summary>
+        public Func<string, string> Protect { get; set; }
+        public Func<string, string> Unprotect { get; set; }
         /// <summary>Start the health monitor (off in tests that drive health by hand).</summary>
         public bool Monitor { get; set; }
         /// <summary>Stop when the admin tab is gone (TechStack lifecycle). Off for Fairlead by default: it serves other tools.</summary>
@@ -80,6 +88,7 @@ namespace Fairlead.Core.Host
         public const string Version = "0.1.0";
         private readonly ManualResetEventSlim _stopped = new ManualResetEventSlim(false);
         private readonly object _presenceLock = new object();
+        private readonly object _gatewayLock = new object();
         private HttpServer _server;
         private string _runtimeFile;
         private DateTimeOffset? _lastHeartbeat;
@@ -93,9 +102,14 @@ namespace Fairlead.Core.Host
             Settings = options.Settings;
             Log = new Diagnostics(Settings.LogDirectory);
             Config = options.Config != null ? new ConfigStore(options.Config) : new ConfigStore(Settings.ConfigPath);
-            LoadGatewayModels();
-            Breakers = new BreakerBoard();
+            GatewayValues = options.GatewayStore ?? new GatewayStore(options.Config != null ? null : Settings.DataDirectory);
             Upstream = new UpstreamClient(options.UpstreamHandler);
+            Lazarette = new LazaretteLink(Settings.DataDirectory, Upstream, LazaretteNames, options.LazaretteDataDirectory == null ? null : (Func<string>)(() => options.LazaretteDataDirectory), options.Protect, options.Unprotect);
+            Lazarette.HoldHours = Config.Current.LazaretteHoldHours;
+            Upstream.VaultLookup = Lazarette.Value;
+            LoadGatewayModels();
+            Lazarette.Changed += () => { Log.Info("LAZARETTE", "Keys from Lazarette changed (" + Lazarette.State + "); reloading the AI gateway."); LoadGatewayModels(); };
+            Breakers = new BreakerBoard();
             Health = new HealthMonitor(Config, Upstream, Breakers, Log);
             Metrics = new Metrics(Settings.LogDirectory);
             Engine = new GatewayEngine(Config, Upstream, Health, Breakers, Metrics, Log);
@@ -103,6 +117,7 @@ namespace Fairlead.Core.Host
             Admin = new Router();
             Gateway = new Router();
             StartedAt = DateTimeOffset.UtcNow;
+            Config.Changed += c => Lazarette.HoldHours = c.LazaretteHoldHours;
             Config.Changed += c => Log.Info("CONFIG_SAVED", "fairlead.json saved (" + c.Providers.Count + " providers, " + c.Routes.Count + " routes).");
             RegisterGatewayRoutes();
             RegisterAdminRoutes();
@@ -112,8 +127,30 @@ namespace Fairlead.Core.Host
         public FairleadSettings Settings { get; private set; }
         public Diagnostics Log { get; private set; }
         public ConfigStore Config { get; private set; }
-        /// <summary>The AI gateway model file as loaded at start; null when there is none.</summary>
+        /// <summary>The AI gateway model file as last loaded; null when there is none.</summary>
         public GatewayModelFile GatewayModels { get; private set; }
+        /// <summary>Where it came from: "imported" (the browser), "environment" (FAIRLEAD_GATEWAY_CONFIG) or "file" (config\ folder).</summary>
+        public string GatewaySource { get; private set; }
+        /// <summary>The model file and values imported in the browser, encrypted in the data folder.</summary>
+        public GatewayStore GatewayValues { get; private set; }
+        /// <summary>Keys held in Lazarette, the suite's vault, asked for by variable name and kept in memory only.</summary>
+        public LazaretteLink Lazarette { get; private set; }
+
+        /// <summary>
+        /// What to ask Lazarette for: every variable the gateway model file names that is not saved in Fairlead (its
+        /// tokens above all), and the key variable of every provider without a key saved in Fairlead.
+        /// </summary>
+        private IList<string> LazaretteNames()
+        {
+            var names = new List<string>();
+            var f = GatewayModels;
+            if (f != null)
+                foreach (var v in f.RequiredVariables)
+                    if (!GatewayValues.HasValue(v)) names.Add(v);
+            foreach (var p in Config.Current.Providers)
+                if (!string.IsNullOrEmpty(p.ApiKeyEnv) && string.IsNullOrEmpty(p.ApiKeyProtected) && !names.Contains(p.ApiKeyEnv)) names.Add(p.ApiKeyEnv);
+            return names;
+        }
         public BreakerBoard Breakers { get; private set; }
         public UpstreamClient Upstream { get; private set; }
         public HealthMonitor Health { get; private set; }
@@ -128,21 +165,56 @@ namespace Fairlead.Core.Host
         public string BaseUrl { get { return "http://127.0.0.1:" + Port; } }
 
         /// <summary>
-        /// Reads the AI gateway model file once and adds its endpoints as managed providers. A file with errors adds
-        /// nothing; Fairlead still starts, and the console, log and status page say why.
+        /// Reads the AI gateway model file and adds its endpoints as managed providers, replacing the previous set. The
+        /// file is FAIRLEAD_GATEWAY_CONFIG when set, else the one imported in the browser (encrypted in the data folder),
+        /// else config\ai_gateway_models.yaml. Variables come from the values stored with the import, then the
+        /// environment. A file with errors adds nothing; Fairlead keeps running, and the console, log and Providers page
+        /// say why. Called at start and after every import or value change.
         /// </summary>
-        private void LoadGatewayModels()
+        public void LoadGatewayModels()
         {
-            var path = Options.GatewayModelPath ?? GatewayModelFile.ResolvePath(Settings.RootDirectory, null);
-            if (path == null) return;
-            var file = GatewayModelFile.Load(path, null);
-            if (file.Ok)
+            lock (_gatewayLock)
             {
-                try { Config.SetManaged(file.Providers); }
-                catch (ArgumentException ex) { file.Errors.Add(ex.Message); }
+                // Saved in Fairlead (the address), then Lazarette (tokens), then the process environment.
+                var env = GatewayValues.Environment(name => Lazarette.Value(name) ?? Environment.GetEnvironmentVariable(name));
+                GatewayModelFile file = null;
+                var source = "file";
+                var path = Options.GatewayModelPath;
+                if (path == null && string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(GatewayModelFile.PathVariable)) && GatewayValues.HasFile)
+                {
+                    source = "imported";
+                    var text = GatewayValues.ReadFile();
+                    if (text == null)
+                    {
+                        file = new GatewayModelFile { Path = GatewayValues.Location };
+                        file.Errors.Add("The imported model file cannot be decrypted by this Windows account. Import it again.");
+                    }
+                    else file = GatewayModelFile.Parse(text, GatewayValues.Location, env);
+                }
+                else
+                {
+                    if (path == null && !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(GatewayModelFile.PathVariable))) source = "environment";
+                    if (path == null) path = GatewayModelFile.ResolvePath(Settings.RootDirectory, null);
+                    if (path != null) file = GatewayModelFile.Load(path, env);
+                }
+
+                var providers = new List<ProviderConfig>();
+                if (file != null && file.Ok)
+                {
+                    // Tokens are not copied into the providers: UpstreamClient asks Lazarette or the environment per request.
+                    providers.AddRange(file.Providers);
+                }
+                try { Config.SetManaged(providers); }
+                catch (ArgumentException ex)
+                {
+                    file.Errors.Add(ex.Message);
+                    Config.SetManaged(new ProviderConfig[0]);
+                }
+                GatewayModels = file;
+                GatewaySource = file == null ? null : source;
+                if (file == null) return;
+                foreach (var line in file.Summary()) Log.Info(file.Ok ? "GATEWAY_MODELS" : "GATEWAY_MODELS_INVALID", line.Trim());
             }
-            GatewayModels = file;
-            foreach (var line in file.Summary()) Log.Info(file.Ok ? "GATEWAY_MODELS" : "GATEWAY_MODELS_INVALID", line.Trim());
         }
 
         public HostInfo Start()
@@ -165,6 +237,7 @@ namespace Fairlead.Core.Host
             WriteRuntimeFile(info);
             info.RuntimeFile = _runtimeFile;
             if (Options.Monitor) Health.Start();
+            if (Options.Monitor) Lazarette.Start();
             if (Options.AutoStop) _presenceTimer = new Timer(PresenceTick, null, 2000, 2000);
             Log.Info("HOST_READY", "Fairlead " + Version + " gateway " + info.GatewayUrl + ", config " + (Config.FilePath ?? "in memory"));
             return info;
@@ -194,6 +267,7 @@ namespace Fairlead.Core.Host
         {
             Stop();
             Health.Dispose();
+            Lazarette.Dispose();
             if (_server != null) _server.Dispose();
             _stopped.Dispose();
         }
@@ -261,6 +335,15 @@ namespace Fairlead.Core.Host
             var hostName = host.StartsWith("[") ? host.Substring(0, host.IndexOf(']') + 1) : host.Split(':')[0];
             if (hostName != "127.0.0.1" && hostName != "localhost" && hostName != "[::1]")
                 return Json.Error(403, "BAD_HOST", "Loopback host names only.", request.RequestId);
+
+            // FleetPort id endpoint (edge-ops PORTS.md): launchers and Lazarette's requester check use it.
+            if (request.Path == "/__fleethacker/id")
+            {
+                var idOrigin = request.Header("Origin");
+                if (idOrigin != null && !IsOwnOrigin(idOrigin)) return Json.Error(403, "BAD_ORIGIN", "Cross-origin requests are not accepted.", request.RequestId);
+                if (request.Method != "GET") return Json.Error(405, "METHOD_NOT_ALLOWED", "Method not allowed.", request.RequestId);
+                return Json.Ok(new { tool = "fairlead", version = Version, pid = System.Diagnostics.Process.GetCurrentProcess().Id });
+            }
 
             if (request.Path.StartsWith("/api/", StringComparison.Ordinal) || request.Path == "/api")
             {

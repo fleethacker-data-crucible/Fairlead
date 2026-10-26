@@ -106,6 +106,8 @@ namespace Fairlead.Core.Providers
     {
         public const string AnthropicVersion = "2023-06-01";
         private readonly HttpClient _http;
+        // Loopback calls to other Fleet tools (Lazarette): never through a proxy, never redirected.
+        private readonly HttpClient _local;
 
         static UpstreamClient()
         {
@@ -128,6 +130,36 @@ namespace Fairlead.Core.Providers
             }
             _http = new HttpClient(handler, true) { Timeout = Timeout.InfiniteTimeSpan };
             _http.DefaultRequestHeaders.UserAgent.ParseAdd("Fairlead/" + Host.FairleadHost.Version);
+            _local = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false, UseProxy = false, UseCookies = false }, true) { Timeout = Timeout.InfiniteTimeSpan };
+            _local.DefaultRequestHeaders.UserAgent.ParseAdd("Fairlead/" + Host.FairleadHost.Version);
+        }
+
+        /// <summary>Looks up a provider key held outside Fairlead (Lazarette) by variable name; null when it has none.</summary>
+        public Func<string, string> VaultLookup { get; set; }
+
+        /// <summary>
+        /// POSTs JSON to another tool on 127.0.0.1 (no proxy, no redirects, no cookies, no Origin). Returns the status and
+        /// body, or status 0 when nothing answers. The caller never logs the body: it may hold secrets.
+        /// </summary>
+        public async Task<KeyValuePair<int, string>> PostLocalJsonAsync(int port, string path, string json, IDictionary<string, string> headers, TimeSpan timeout)
+        {
+            if (port < 1 || port > 65535) throw new ArgumentOutOfRangeException("port");
+            using (var cts = new CancellationTokenSource(timeout))
+            using (var request = new HttpRequestMessage(HttpMethod.Post, new Uri("http://127.0.0.1:" + port + path)))
+            {
+                request.Content = new StringContent(json, Encoding.UTF8, "application/json");
+                if (headers != null) foreach (var h in headers) request.Headers.TryAddWithoutValidation(h.Key, h.Value);
+                try
+                {
+                    using (var response = await _local.SendAsync(request, HttpCompletionOption.ResponseContentRead, cts.Token).ConfigureAwait(false))
+                    {
+                        var text = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+                        return new KeyValuePair<int, string>((int)response.StatusCode, text);
+                    }
+                }
+                catch (HttpRequestException) { return new KeyValuePair<int, string>(0, null); }
+                catch (OperationCanceledException) { return new KeyValuePair<int, string>(0, null); }
+            }
         }
 
         public static Dialect DialectOf(ProviderKind kind)
@@ -450,9 +482,9 @@ namespace Fairlead.Core.Providers
             }
         }
 
-        private static void ApplyAuth(HttpRequestMessage request, ProviderConfig p)
+        private void ApplyAuth(HttpRequestMessage request, ProviderConfig p)
         {
-            var key = SecretProtector.ApiKeyFor(p);
+            var key = SecretProtector.ApiKeyFor(p, VaultLookup);
             if (p.Kind == ProviderKind.Anthropic)
             {
                 if (!string.IsNullOrEmpty(key)) request.Headers.TryAddWithoutValidation("x-api-key", key);
