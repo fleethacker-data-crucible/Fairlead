@@ -53,6 +53,31 @@ export const MetricsSummary = z.object({
 }).passthrough();
 export type MetricsSummary = z.infer<typeof MetricsSummary>;
 
+export const GatewayVariable = z.object({
+  name: z.string(),
+  kind: z.enum(['baseUrl', 'token', 'other']),
+  source: z.enum(['stored', 'env', 'missing']),
+});
+export type GatewayVariable = z.infer<typeof GatewayVariable>;
+
+/** The AI gateway model file: keys, counts, problems and where each variable comes from; never values. */
+export const GatewayView = z.object({
+  present: z.boolean().default(false),
+  canImport: z.boolean().default(true),
+  imported: z.boolean().default(false),
+  source: z.enum(['imported', 'environment', 'file']).nullable().optional(),
+  path: z.string().optional(),
+  ok: z.boolean().default(false),
+  endpoints: z.array(z.string()).default([]),
+  models: z.number().default(0),
+  enabledModels: z.number().default(0),
+  providers: z.array(z.string()).default([]),
+  variables: z.array(GatewayVariable).default([]),
+  errors: z.array(z.string()).default([]),
+  warnings: z.array(z.string()).default([]),
+}).passthrough();
+export type GatewayView = z.infer<typeof GatewayView>;
+
 export const Status = z.object({
   version: z.string(),
   port: z.number(),
@@ -81,12 +106,7 @@ export const Status = z.object({
     keySource: z.string(),
   }).passthrough()),
   routes: z.array(z.object({ id: z.string(), strategy: z.string(), targets: z.number() }).passthrough()),
-  gatewayModels: z.object({
-    path: z.string(),
-    ok: z.boolean(),
-    errors: z.array(z.string()).default([]),
-    warnings: z.array(z.string()).default([]),
-  }).passthrough().nullable().optional(),
+  gatewayModels: GatewayView.nullable().optional(),
   metrics: MetricsSummary,
 }).passthrough();
 export type Status = z.infer<typeof Status>;

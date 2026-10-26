@@ -9,32 +9,36 @@ your own routes) and never see a gateway host, token or provider model id.
 
 | Thing | Where | In git? |
 |---|---|---|
-| Gateway model file (endpoints, paths, model ids) | `config\ai_gateway_models.yaml`, or the path in `FAIRLEAD_GATEWAY_CONFIG` | No (git-ignored). `config\ai_gateway_models.example.yaml` shows the format with made-up ids. |
-| Gateway base URL | The environment variable the file names in `base_url_env` (usually `AI_GATEWAY_BASE_URL`) | No |
-| Bearer token | The environment variable the file names in `headers.Authorization.token_env` (usually `DATABRICKS_TOKEN`) | No |
+| Gateway model file (endpoints, paths, model ids) | Imported under **Providers → AI gateway**; kept DPAPI-encrypted for your Windows account in Fairlead's data folder (`%LOCALAPPDATA%\Fairlead\ai-gateway-models.dpapi`). Also read from `FAIRLEAD_GATEWAY_CONFIG` (a path) or `config\ai_gateway_models.yaml` for scripted setups. | No |
+| Gateway base URL (the variable in `base_url_env`, usually `AI_GATEWAY_BASE_URL`) | Entered once under **Providers → AI gateway**; kept DPAPI-encrypted in `ai-gateway-values.json` in the data folder. The environment variable of that name still works and is used when nothing is entered. | No |
+| Bearer token (the variable in `headers.Authorization.token_env`, usually `DATABRICKS_TOKEN`) | **Never stored by Fairlead.** It comes from Lazarette (the suite's encrypted vault; connection in progress) or, until then, the environment variable of that name. | No |
 | Timeout | `AI_GATEWAY_TIMEOUT_SECONDS` (5 to 3600, default 120) | No |
 | Routes such as `fast`, `balanced`, `reasoning` | Fairlead → Routes, targets like `mlflow_responses/<model id>` | No (`fairlead.json`) |
 
-Set the two variables in your Windows user environment or through your deployment's secret injection. They can also
-go in `config\fairlead.env` (git-ignored), but that file is plain text.
+The page never shows the address, the token or a model id back; it shows where each value comes from
+(saved, environment, missing).
 
 ## Set it up
 
-1. Put the gateway's model file at `config\ai_gateway_models.yaml` (or set `FAIRLEAD_GATEWAY_CONFIG`).
-2. Set the variables it names.
-3. Check it without starting Fairlead:
-
-   ```powershell
-   Import-Module .\module\Fairlead
-   Test-FairleadModelConfig
-   ```
-
-   It lists endpoints, model counts, the variables the file needs and every problem, by key and variable name only.
-   It never prints a URL, token or model id.
-4. Start Fairlead. The console says how many gateway endpoints and models were added. Under Providers, each endpoint
-   shows as a read-only provider.
+1. Open **Providers**. Under **AI gateway**, press **Import model file** and choose the gateway's YAML. A file with a
+   wrong structure is refused with the reasons, and nothing is saved.
+2. Enter the **gateway address** (`https://...`) and press **Save**.
+3. Make the token available: stow it in Lazarette, or for now set the environment variable the file names (for
+   example `DATABRICKS_TOKEN`) in your Windows user environment and restart Fairlead.
+4. The gateway endpoints appear as read-only providers at once, with no restart. **Import a new version** replaces the
+   file; **Remove** deletes the file and the saved address.
 5. Under Routes, make the logical routes your tools use (for example `fast`, `balanced`, `reasoning`) with gateway
    models as targets, in the order to try them.
+
+Check a file without the browser:
+
+```powershell
+Import-Module .\module\Fairlead
+Test-FairleadModelConfig
+```
+
+It lists endpoints, model counts, the variables the file needs and every problem, by key and variable name only. It
+never prints a URL, token or model id.
 
 ## How a request is made
 
@@ -69,13 +73,14 @@ gateway without streaming. Embeddings are not routed to the gateway.
 Any error rejects the whole file: no gateway provider is added, Fairlead still starts, and the console, the log and the
 Providers page say what to fix. Typical messages:
 
-- `Environment variable DATABRICKS_TOKEN (endpoints.mlflow_responses.headers.Authorization.token_env) is not set.`
+- `DATABRICKS_TOKEN (endpoints.mlflow_responses.headers.Authorization.token_env) is not set.`
 - `models.example_fast.endpoint refers to 'mlflow', which is not under endpoints.`
 - `endpoints.openai_responses.request_format 'x' is not supported; Fairlead speaks openai_responses_v1.`
 
 Sections other than `environment`, `endpoints` and `models` are reported once and ignored.
 
-## Later: Lazarette
+## Lazarette
 
-The base URL and token are planned to come from the Lazarette vault instead of environment variables, with the model
-file imported into Lazarette and shared from there. See [VISION](VISION.md).
+Tokens belong in Lazarette, the suite's encrypted vault. Fairlead asks Lazarette for the token by its variable name
+once you have connected the two and granted Fairlead access in Lazarette; Fairlead holds it in memory only. Until that
+connection ships, use the environment variable.

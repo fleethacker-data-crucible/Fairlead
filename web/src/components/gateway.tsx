@@ -1,0 +1,124 @@
+import { useRef, useState } from 'react';
+import { LuFileUp, LuTrash2 } from 'react-icons/lu';
+import { describeError } from '../lib/api';
+import { importGatewayFile, removeGatewayFile, saveGatewayValues } from '../lib/config';
+import type { GatewayVariable, GatewayView } from '../lib/schemas';
+import { Button, ConfirmDialog, Field, Input, Notice, Pill, Section, useToast } from './ui';
+
+const sourceText: Record<string, string> = {
+  imported: 'Imported here; kept encrypted for your Windows account in Fairlead\'s data folder, never in the app folder.',
+  environment: 'Read from the path in FAIRLEAD_GATEWAY_CONFIG.',
+  file: 'Read from the config folder.',
+};
+
+/**
+ * The AI gateway model file: choose it here, enter the gateway address once, and Fairlead adds one provider per
+ * endpoint at once. Tokens are never entered here: they come from Lazarette or the environment.
+ */
+export function GatewayCard({ gateway }: { gateway: GatewayView | null | undefined }) {
+  const toast = useToast();
+  const fileInput = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [refused, setRefused] = useState<string[] | null>(null);
+  const [values, setValues] = useState<Record<string, string>>({});
+  const [confirmRemove, setConfirmRemove] = useState(false);
+  const g = gateway ?? null;
+  const canImport = g?.canImport ?? true;
+
+  const run = async (what: string, f: () => Promise<void>) => {
+    setBusy(what);
+    try { await f(); } catch (e) { toast.push('err', describeError(e)); } finally { setBusy(null); }
+  };
+
+  const onFile = (file: File | undefined) => {
+    if (!file) return;
+    void run('import', async () => {
+      const text = await file.text();
+      const r = await importGatewayFile(text);
+      if (!r.saved) { setRefused(r.errors ?? ['The file was not accepted.']); return; }
+      setRefused(null);
+      toast.push('ok', `Imported ${file.name}.`);
+    });
+    if (fileInput.current) fileInput.current.value = '';
+  };
+
+  const editable = (g?.variables ?? []).filter((v) => v.kind !== 'token');
+  const dirty = Object.values(values).some((v) => v.trim() !== '');
+  const save = () => run('save', async () => {
+    const send: Record<string, string> = {};
+    for (const [k, v] of Object.entries(values)) if (v.trim() !== '') send[k] = v.trim();
+    await saveGatewayValues(send);
+    setValues({});
+    toast.push('ok', 'Saved.');
+  });
+
+  return (
+    <Section title="AI gateway"
+      aside={canImport ? <>
+        <input ref={fileInput} type="file" accept=".yaml,.yml,.txt" className="sr-only" id="gateway-file" aria-label="AI gateway model file" onChange={(e) => onFile(e.target.files?.[0])} />
+        <Button size="sm" variant={g?.present ? 'default' : 'primary'} busy={busy === 'import'} onClick={() => fileInput.current?.click()}><LuFileUp size={14} />{g?.imported ? 'Import a new version' : 'Import model file'}</Button>
+        {g?.imported ? <Button size="sm" variant="danger" onClick={() => setConfirmRemove(true)}><LuTrash2 size={14} />Remove</Button> : null}
+      </> : undefined}>
+      <div className="flex flex-col gap-3 px-4 py-4 text-[13px]">
+        {!g?.present ? (
+          <p className="text-ink-2">Have a gateway model file (YAML listing endpoints and models)? Import it and Fairlead adds each endpoint as a provider. It is kept encrypted on this PC, not in the app folder or a repository.</p>
+        ) : (
+          <>
+            <p className="text-ink-2">{sourceText[g.source ?? 'file']}</p>
+            <p>
+              {g.endpoints.length} endpoint{g.endpoints.length === 1 ? '' : 's'} ({g.endpoints.join(', ')}), {g.enabledModels} of {g.models} models enabled.{' '}
+              {g.ok ? <Pill>{g.providers.length} provider{g.providers.length === 1 ? '' : 's'} added</Pill> : <span className="text-warn">Not in use yet: see below.</span>}
+            </p>
+          </>
+        )}
+        {!canImport ? <Notice tone="info">FAIRLEAD_GATEWAY_CONFIG is set, so the file comes from that path and cannot be imported here.</Notice> : null}
+        {refused ? (
+          <Notice tone="err">That file was not imported, and nothing was saved:
+            <ul className="mt-1 list-disc pl-5">{refused.map((e) => <li key={e}>{e}</li>)}</ul>
+          </Notice>
+        ) : null}
+
+        {g?.present && g.variables.length > 0 ? (
+          <div className="grid gap-3 md:grid-cols-2">
+            {g.variables.map((v) => v.kind === 'token' ? <TokenState key={v.name} v={v} /> : (
+              <Field key={v.name} label={`${v.kind === 'baseUrl' ? 'Gateway address' : 'Value'} (${v.name})`}
+                hint={v.source === 'stored' ? 'Saved, encrypted. Enter a new one to replace it.' : v.source === 'env' ? 'From the environment variable. Enter one here to use instead.' : 'Needed.'}>
+                <Input value={values[v.name] ?? ''} autoComplete="off" spellCheck={false} className="mono"
+                  placeholder={v.kind === 'baseUrl' ? 'https://gateway.example' : ''} onChange={(e) => setValues({ ...values, [v.name]: e.target.value })} />
+              </Field>
+            ))}
+          </div>
+        ) : null}
+        {editable.length > 0 ? (
+          <div className="flex justify-end"><Button variant="primary" disabled={!dirty} busy={busy === 'save'} onClick={() => void save()}>Save</Button></div>
+        ) : null}
+
+        {g?.present && !g.ok && g.errors.length > 0 ? (
+          <Notice tone="warn">Problems:
+            <ul className="mt-1 list-disc pl-5">{g.errors.map((e) => <li key={e}>{e}</li>)}</ul>
+          </Notice>
+        ) : null}
+        {g?.present && g.warnings.length > 0 ? (
+          <ul className="list-disc pl-5 text-[12px] text-ink-3">{g.warnings.map((w) => <li key={w}>{w}</li>)}</ul>
+        ) : null}
+      </div>
+
+      <ConfirmDialog open={confirmRemove} danger title="Remove the imported model file?" confirmLabel="Remove" onCancel={() => setConfirmRemove(false)}
+        onConfirm={() => { setConfirmRemove(false); void run('remove', removeGatewayFile); }}>
+        The file and the saved gateway address are deleted from this PC, and its providers are taken out of use. Routes that name them fall through to their next target.
+      </ConfirmDialog>
+    </Section>
+  );
+}
+
+function TokenState({ v }: { v: GatewayVariable }) {
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="text-ink-2">Token ({v.name})</span>
+      {v.source === 'env' ? <span>From the environment variable.</span> : (
+        <span className="text-warn">Not available. Tokens are never typed into Fairlead: stow {v.name} in Lazarette, or set the environment variable for now.</span>
+      )}
+      <span className="text-[12px] text-ink-3">Fairlead keeps tokens out of its own files on purpose.</span>
+    </div>
+  );
+}

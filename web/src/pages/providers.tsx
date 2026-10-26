@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { LuCloud, LuHardDrive, LuPlus, LuRefreshCw, LuTrash2 } from 'react-icons/lu';
+import { GatewayCard } from '../components/gateway';
 import { describeModel } from '../components/targets';
 import { Button, Checkbox, ConfirmDialog, Empty, Field, Input, Notice, Page, Pill, Section, Select, useToast } from '../components/ui';
 import { describeError } from '../lib/api';
@@ -43,12 +44,7 @@ export function ProvidersPage({ status }: { status: Status | undefined }) {
         </span>
       }
     >
-      {status?.gatewayModels && !status.gatewayModels.ok ? (
-        <Notice tone="warn">
-          The AI gateway model file has problems, so none of its models were added ({status.gatewayModels.path}):
-          <ul className="mt-1 list-disc pl-5">{status.gatewayModels.errors.map((e) => <li key={e}>{e}</li>)}</ul>
-        </Notice>
-      ) : null}
+      <GatewayCard gateway={status?.gatewayModels} />
       {config.error ? <Notice tone="err">{config.error}</Notice> : null}
       {providers.length === 0 ? <Section><Empty title="No providers" emblem>Add a local server or a cloud API with the menu above.</Empty></Section> : (
         <div className="grid gap-5 lg:grid-cols-[280px_minmax(0,1fr)]">
@@ -87,11 +83,11 @@ function ManagedProvider({ provider, probeMs }: { provider: Provider; probeMs: n
   return (
     <Section title={<span className="flex items-center gap-2">{provider.name}<span className="mono text-ink-3">{provider.id}</span></span>}
       aside={<Button size="sm" busy={busy} onClick={() => void check()}>Check reachability</Button>}>
-      <Notice tone="info" className="mx-4 mt-4">From the AI gateway model file. Change endpoints and models there and restart Fairlead; the address and token come from environment variables, never from this page.</Notice>
+      <Notice tone="info" className="mx-4 mt-4">From the AI gateway model file. To change endpoints or models, import a new version above; it takes effect at once. The address is set above; the token comes from Lazarette or the environment, never from this page.</Notice>
       <dl className="grid gap-x-6 gap-y-2 px-4 py-4 text-[13px] md:grid-cols-2">
         <div><dt className="text-ink-3">API style</dt><dd>OpenAI Responses (called without streaming)</dd></div>
         <div><dt className="text-ink-3">Endpoint path</dt><dd className="mono">{provider.path ?? ''}</dd></div>
-        <div><dt className="text-ink-3">Token</dt><dd>{provider.keySource === 'env' ? <>from <span className="mono">{provider.apiKeyEnv}</span></> : <span className="text-err">not set ({provider.apiKeyEnv})</span>}</dd></div>
+        <div><dt className="text-ink-3">Token</dt><dd>{provider.keySource === 'env' ? <>from <span className="mono">{provider.apiKeyEnv}</span></> : provider.keySource === 'stored' ? <>from Lazarette (<span className="mono">{provider.apiKeyEnv}</span>)</> : <span className="text-err">not set ({provider.apiKeyEnv})</span>}</dd></div>
         <div><dt className="text-ink-3">Retries on transient errors</dt><dd>{provider.retries ?? 0}, then the route's next target</dd></div>
         <div><dt className="text-ink-3">Timeout</dt><dd>{provider.timeoutSeconds} s</dd></div>
         <div><dt className="text-ink-3">Last probe</dt><dd>{ms(probeMs)}</dd></div>
