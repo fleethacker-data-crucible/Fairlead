@@ -5,7 +5,11 @@ using System.Linq;
 namespace Fairlead.Core.Config
 {
     /// <summary>The wire dialect a provider speaks. Every OpenAI-compatible server (Ollama, LM Studio, vLLM, Groq, Gemini...) is OpenAi.</summary>
-    public enum ProviderKind { OpenAi, Anthropic, Ollama }
+    /// <summary>
+    /// The wire format a provider speaks. Responses: the OpenAI Responses API (POST base URL + path) as served by an AI
+    /// gateway; Fairlead calls it without streaming and translates to and from Chat Completions.
+    /// </summary>
+    public enum ProviderKind { OpenAi, Anthropic, Ollama, Responses }
 
     /// <summary>A model a provider serves. Unknown capabilities stay null and never exclude a model.</summary>
     public sealed class ModelInfo
@@ -48,6 +52,16 @@ namespace Fairlead.Core.Config
         public List<ModelInfo> Models { get; set; }
         /// <summary>Ask OpenAI-compatible servers for a final usage chunk when streaming (stream_options.include_usage).</summary>
         public bool StreamUsage { get; set; }
+        /// <summary>Responses providers: the endpoint path appended to the base URL (for example /ai-gateway/openai/v1/responses).</summary>
+        public string Path { get; set; }
+        /// <summary>Responses providers: the optional request fields the endpoint accepts (max_output_tokens, temperature, top_p). Others are never sent.</summary>
+        public List<string> RequestFields { get; set; }
+        /// <summary>Extra tries on the same target for transient failures (5xx, 429, timeout, network), with exponential backoff and jitter. Never for 401/403/400/404. Null or 0: fail over at once.</summary>
+        public int? Retries { get; set; }
+        public int? RetryBaseMs { get; set; }
+        public int? RetryMaxMs { get; set; }
+        /// <summary>True for providers loaded from the AI gateway model file: rebuilt at every start, never saved to fairlead.json, not editable in the browser.</summary>
+        public bool? Managed { get; set; }
 
         public ProviderConfig()
         {

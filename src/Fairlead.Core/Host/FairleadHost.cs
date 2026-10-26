@@ -27,6 +27,8 @@ namespace Fairlead.Core.Host
         public System.Net.Http.HttpMessageHandler UpstreamHandler { get; set; }
         /// <summary>A config to use instead of fairlead.json (tests).</summary>
         public FairleadConfig Config { get; set; }
+        /// <summary>The AI gateway model file; null looks up FAIRLEAD_GATEWAY_CONFIG, then config\ai_gateway_models.yaml under the root.</summary>
+        public string GatewayModelPath { get; set; }
         /// <summary>Start the health monitor (off in tests that drive health by hand).</summary>
         public bool Monitor { get; set; }
         /// <summary>Stop when the admin tab is gone (TechStack lifecycle). Off for Fairlead by default: it serves other tools.</summary>
@@ -91,6 +93,7 @@ namespace Fairlead.Core.Host
             Settings = options.Settings;
             Log = new Diagnostics(Settings.LogDirectory);
             Config = options.Config != null ? new ConfigStore(options.Config) : new ConfigStore(Settings.ConfigPath);
+            LoadGatewayModels();
             Breakers = new BreakerBoard();
             Upstream = new UpstreamClient(options.UpstreamHandler);
             Health = new HealthMonitor(Config, Upstream, Breakers, Log);
@@ -109,6 +112,8 @@ namespace Fairlead.Core.Host
         public FairleadSettings Settings { get; private set; }
         public Diagnostics Log { get; private set; }
         public ConfigStore Config { get; private set; }
+        /// <summary>The AI gateway model file as loaded at start; null when there is none.</summary>
+        public GatewayModelFile GatewayModels { get; private set; }
         public BreakerBoard Breakers { get; private set; }
         public UpstreamClient Upstream { get; private set; }
         public HealthMonitor Health { get; private set; }
@@ -122,6 +127,24 @@ namespace Fairlead.Core.Host
         public bool BoundToLan { get { return _server != null && _server.BoundToLan; } }
         public bool StopRequested { get; private set; }
         public string BaseUrl { get { return "http://127.0.0.1:" + Port; } }
+
+        /// <summary>
+        /// Reads the AI gateway model file once and adds its endpoints as managed providers. A file with errors adds
+        /// nothing; Fairlead still starts, and the console, log and status page say why.
+        /// </summary>
+        private void LoadGatewayModels()
+        {
+            var path = Options.GatewayModelPath ?? GatewayModelFile.ResolvePath(Settings.RootDirectory, null);
+            if (path == null) return;
+            var file = GatewayModelFile.Load(path, null);
+            if (file.Ok)
+            {
+                try { Config.SetManaged(file.Providers); }
+                catch (ArgumentException ex) { file.Errors.Add(ex.Message); }
+            }
+            GatewayModels = file;
+            foreach (var line in file.Summary()) Log.Info(file.Ok ? "GATEWAY_MODELS" : "GATEWAY_MODELS_INVALID", line.Trim());
+        }
 
         public HostInfo Start()
         {

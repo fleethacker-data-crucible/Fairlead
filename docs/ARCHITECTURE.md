@@ -26,6 +26,7 @@ directly. It runs on the operator's workstation, serves an OpenAI- and Anthropic
 | JSON | Own `JObject`/`JArray` model (`Serialization/`, shared with Halyard) | No third-party assembly. Same API subset and byte-for-byte output as Newtonsoft.Json in 0.1 (parity tests); `JObject` keeps unknown fields so same-dialect relays lose nothing. |
 | Server | `TcpListener` with chunked responses | `HttpListener` needs URL reservations a standard user lacks. Chunked transfer streams tokens as they arrive. |
 | Upstream | One shared `HttpClient`, system proxy, no redirects | Connection pooling; TLS 1.2 and 64 connections per host forced on .NET Framework. |
+| AI gateway | `Config/GatewayModelFile.cs` + `Protocol/ResponsesApi.cs` | Endpoints from the gateway's own model file become read-only Responses providers; base URL and token from environment variables. See [AI gateway](AI-GATEWAY.md). |
 | UI | React 19 + TypeScript, Tailwind 4 on the Fleet tokens, zod | Built to static files by esbuild + Tailwind's compiler; every response validated. |
 | Config | `%LOCALAPPDATA%\Fairlead\fairlead.json`, atomic writes with a `.bak` | Readable, diffable, survives a crash mid-save. |
 | Tests | xUnit (core, with real loopback sockets and a fake upstream), Pester 5 (PowerShell and repository rules), node:test (UI libs) | Each layer in its own tool. |

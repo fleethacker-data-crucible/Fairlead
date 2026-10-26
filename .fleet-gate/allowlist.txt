@@ -1,0 +1,2 @@
+fingerprint:(^|:)integrations/openai-sdk/README\.md:[a-z0-9-]+:17$  # placeholder client key fl-YOUR-KEY in a loopback curl example
+fingerprint:(^|:)src/Fairlead\.Core\.Tests/RoutingTests\.cs:[a-z0-9-]+:83$  # made-up AWS-style key: the test proves secret-bearing prompts stay local

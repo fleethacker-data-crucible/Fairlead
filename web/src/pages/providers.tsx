@@ -43,6 +43,12 @@ export function ProvidersPage({ status }: { status: Status | undefined }) {
         </span>
       }
     >
+      {status?.gatewayModels && !status.gatewayModels.ok ? (
+        <Notice tone="warn">
+          The AI gateway model file has problems, so none of its models were added ({status.gatewayModels.path}):
+          <ul className="mt-1 list-disc pl-5">{status.gatewayModels.errors.map((e) => <li key={e}>{e}</li>)}</ul>
+        </Notice>
+      ) : null}
       {config.error ? <Notice tone="err">{config.error}</Notice> : null}
       {providers.length === 0 ? <Section><Empty title="No providers" emblem>Add a local server or a cloud API with the menu above.</Empty></Section> : (
         <div className="grid gap-5 lg:grid-cols-[280px_minmax(0,1fr)]">
@@ -69,7 +75,39 @@ export function ProvidersPage({ status }: { status: Status | undefined }) {
   );
 }
 
+/** A provider from the AI gateway model file: read-only here, changed in that file. */
+function ManagedProvider({ provider, probeMs }: { provider: Provider; probeMs: number | null | undefined }) {
+  const toast = useToast();
+  const [test, setTest] = useState<TestResult | null>(null);
+  const [busy, setBusy] = useState(false);
+  const check = async () => {
+    setBusy(true);
+    try { setTest(await testProvider(provider.id)); } catch (e) { toast.push('err', describeError(e)); } finally { setBusy(false); }
+  };
+  return (
+    <Section title={<span className="flex items-center gap-2">{provider.name}<span className="mono text-ink-3">{provider.id}</span></span>}
+      aside={<Button size="sm" busy={busy} onClick={() => void check()}>Check reachability</Button>}>
+      <Notice tone="info" className="mx-4 mt-4">From the AI gateway model file. Change endpoints and models there and restart Fairlead; the address and token come from environment variables, never from this page.</Notice>
+      <dl className="grid gap-x-6 gap-y-2 px-4 py-4 text-[13px] md:grid-cols-2">
+        <div><dt className="text-ink-3">API style</dt><dd>OpenAI Responses (called without streaming)</dd></div>
+        <div><dt className="text-ink-3">Endpoint path</dt><dd className="mono">{provider.path ?? ''}</dd></div>
+        <div><dt className="text-ink-3">Token</dt><dd>{provider.keySource === 'env' ? <>from <span className="mono">{provider.apiKeyEnv}</span></> : <span className="text-err">not set ({provider.apiKeyEnv})</span>}</dd></div>
+        <div><dt className="text-ink-3">Retries on transient errors</dt><dd>{provider.retries ?? 0}, then the route's next target</dd></div>
+        <div><dt className="text-ink-3">Timeout</dt><dd>{provider.timeoutSeconds} s</dd></div>
+        <div><dt className="text-ink-3">Last probe</dt><dd>{ms(probeMs)}</dd></div>
+        <div className="md:col-span-2"><dt className="text-ink-3">Models ({provider.models.length})</dt><dd className="mono">{provider.models.map((m) => m.id).join(', ')}</dd></div>
+      </dl>
+      {test ? <Notice tone={test.ok ? 'ok' : 'err'} className="mx-4 mb-3">{test.ok ? `Reachable in ${ms(test.ms)}. The token is checked by the first real request.` : `${test.error} (${test.kind})`}</Notice> : null}
+    </Section>
+  );
+}
+
 function ProviderEditor({ provider, probeMs, onDeleted }: { provider: Provider; probeMs: number | null | undefined; onDeleted: () => void }) {
+  if (provider.managed) return <ManagedProvider provider={provider} probeMs={probeMs} />;
+  return <EditableProvider provider={provider} probeMs={probeMs} onDeleted={onDeleted} />;
+}
+
+function EditableProvider({ provider, probeMs, onDeleted }: { provider: Provider; probeMs: number | null | undefined; onDeleted: () => void }) {
   const toast = useToast();
   const [draft, setDraft] = useState(provider);
   const [key, setKey] = useState('');
