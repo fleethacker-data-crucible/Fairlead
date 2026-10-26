@@ -20,6 +20,13 @@ right model. Its offline mode is called **Kedge mode**: to kedge is to move a sh
 no wind, which is what Fairlead does with local models when the cloud drops away. Fairlead is new; it has no former
 names.
 
+| Night watch (dark) | Chart room (light) |
+| --- | --- |
+| ![Fairlead Overview in the Night watch theme](docs/screenshots/overview-night-watch.png) | ![Fairlead Overview in the Chart room theme](docs/screenshots/overview-chart-room.png) |
+
+The Overview with synthetic demo data: Ollama on this machine, one cloud provider and a few requests
+(`docs/screenshots/capture-screenshots.mjs` regenerates both pictures from the built UI with a mocked API).
+
 ## What it does
 
 | | |
