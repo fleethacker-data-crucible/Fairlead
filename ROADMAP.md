@@ -26,7 +26,8 @@ Pick one, put your name on it in the issue tracker, and tick its checklist under
 
 1. **Run every integration for real**: Claude Code, Open WebUI, Continue, Aider, LangChain, Halyard. Each folder
    has the recipe and a checklist; most fixes will be small translation gaps.
-2. **Windlass**: build the big-model server to `integrations/windlass` and register it as `deep-local`.
+2. **Windlass**: Windlass v0.2 (C#, same PC) serves the contract in `integrations/windlass`; run it with a real model,
+   register it as `deep-local` and tick that checklist.
 3. **Semantic auto-routing**: score prompt difficulty with a small local embedding model (or a tiny local LLM as a
    judge) and add it as a rule condition. Must stay under ~50 ms per request; cache by prompt hash.
 4. **Budgets**: per client key token or dollar limits per day, enforced in `GatewayEngine` before the attempt, with
