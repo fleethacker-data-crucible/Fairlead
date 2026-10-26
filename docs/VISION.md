@@ -11,14 +11,14 @@ and default to Fairlead for three kinds of access:
 
 | Access | Today (in each tool) | With the router |
 | --- | --- | --- |
-| **AI / LLM endpoints** | Each tool has its own URL, model and token settings, and some hard-code an external default (for example `https://api.genai.mil/v1`, `https://api.openai.com/v1/chat/completions`) | Tools call Fairlead's OpenAI/Anthropic API on loopback with a route (`auto`, `smart`, `fast`, `local`). Fairlead 0.1 already does this part. |
-| **Git repositories** | Tools call GitHub/GitLab REST and GraphQL themselves, with hard-coded hosts (`https://api.github.com`, `https://web.git.mil`) and their own tokens | Tools reach repositories through Fairlead, which knows the hosts, holds the credentials and applies policy (new scope) |
+| **AI / LLM endpoints** | Each tool has its own URL, model and token settings, and some hard-code an external default (for example a government AI endpoint, `https://api.openai.com/v1/chat/completions`) | Tools call Fairlead's OpenAI/Anthropic API on loopback with a route (`auto`, `smart`, `fast`, `local`). Fairlead 0.1 already does this part. |
+| **Git repositories** | Tools call GitHub/GitLab REST and GraphQL themselves, with hard-coded hosts (`https://api.github.com`, a government GitLab host) and their own tokens | Tools reach repositories through Fairlead, which knows the hosts, holds the credentials and applies policy (new scope) |
 | **Databases** | Not wired yet; Semaphore models data sources and names their secrets by Lazarette vault item | Tools get connections through Fairlead instead of carrying connection details (new scope) |
 
 What Fairlead owns:
 
 - **Endpoint selection:** which target serves a request. For models, that means local phoenix-lai at
-  `http://127.0.0.1:1234/v1` versus a remote provider such as genai.mil, plus Kedge mode when the network drops.
+  `http://127.0.0.1:1234/v1` versus a remote provider such as the government AI endpoint, plus Kedge mode when the network drops.
   For git and databases, it means which host or server.
 - **Credentials:** kept in Lazarette or Windows Credential Manager and used by Fairlead, never stored in a tool's
   config or env file. Tools hold at most a Fairlead client key.
@@ -51,8 +51,8 @@ These are the consumers found on 2026-10-26 across the Fleet tools in scope. Lin
 | --- | --- | --- | --- |
 | Halyard | AI: OpenAI-compatible, **default `https://api.openai.com/v1/chat/completions`**; Databricks profile (no default) | `src/Halyard.Core/Llm/LlmClient.cs:39`; `Config/HalyardSettings.cs:135-145` | `HALYARD_LLM_PROFILE`, `LLM_URL`/`OPENAI_BASE_URL`, `LLM_MODEL`, `LLM_TOKEN`/`OPENAI_API_KEY`, `DATABRICKS_*`; vault `HALYARD_LAZARETTE_ITEM_Llm`/`_Databricks` |
 | Halyard | Git: GitHub REST + GraphQL, **default `https://api.github.com`**; GitLab REST (no default) | `src/Halyard.Core/Providers/ProviderSettings.cs:44`; `HalyardSettings.cs:99-116` | `HALYARD_PROVIDER`, `GITHUB_API_URL`, `GITHUB_TOKEN`/`GH_TOKEN`, `GITLAB_URL`, `GITLAB_TOKEN`, `HALYARD_SOURCE_REPO`, `HALYARD_SANDBOX_REPO` |
-| Gangplank | AI: OpenAI-compatible (openai, azure, databricks, ollama), **default `https://api.genai.mil/v1`**, always allowlisted | `Core/Intelligence.ps1:17` (allowlist `:43-58`) | `GANGPLANK_AI_URL`/`LLM_URL`/`OPENAI_BASE_URL`, `GANGPLANK_AI_MODEL`, `GANGPLANK_AI_ALLOWED_HOSTS`, `GANGPLANK_AI_TOKEN`/`GENAI_TOKEN`/`LLM_TOKEN`/`OPENAI_API_KEY`; vault `genapi` |
-| Gangplank | Git: GitHub REST, **default `https://api.github.com`**; GitLab REST, **default `https://web.git.mil`**; archive sync, commits-API push | `Providers/GitProviderBase.ps1:67`, `:71`; `Core/Workspace.ps1:12` | `GITHUB_TOKEN`, `GITLAB_TOKEN`, `GANGPLANK_GITLAB_ALLOWED_HOSTS`; vault `github`, `gitmil` |
+| Gangplank | AI: OpenAI-compatible (openai, azure, databricks, ollama), **default: the government AI endpoint**, always allowlisted | `Core/Intelligence.ps1:17` (allowlist `:43-58`) | `GANGPLANK_AI_URL`/`LLM_URL`/`OPENAI_BASE_URL`, `GANGPLANK_AI_MODEL`, `GANGPLANK_AI_ALLOWED_HOSTS`, `GANGPLANK_AI_TOKEN`/`GENAI_TOKEN`/`LLM_TOKEN`/`OPENAI_API_KEY`; vault `genapi` |
+| Gangplank | Git: GitHub REST, **default `https://api.github.com`**; GitLab REST, **default: the government GitLab host**; archive sync, commits-API push | `Providers/GitProviderBase.ps1:67`, `:71`; `Core/Workspace.ps1:12` | `GITHUB_TOKEN`, `GITLAB_TOKEN`, `GANGPLANK_GITLAB_ALLOWED_HOSTS`; vault entries `github` and the GitLab vault entry |
 | Bowerbird | AI: OpenAI-compatible, default local phoenix-lai `http://127.0.0.1:1234/v1/chat/completions`; Grok profile (no default) | `Private/BowerbirdLlm.ps1:10` | `LLM_URL`, `BOWERBIRD_AI_ENDPOINT_URL`, `BOWERBIRD_GROK_URL`, `LLM_TOKEN`, `AI_ENDPOINT_TOKEN`/`GENAI_TOKEN`, `DATABRICKS_TOKEN`; vault `ai-endpoint-api`, `grok-api` |
 | PacketRat | AI: OpenAI-compatible, default local phoenix-lai `http://127.0.0.1:1234/v1/chat/completions`; Grok profile (no default) | `Private/PacketRatLlm.ps1:12` | `LLM_URL`, `PACKETRAT_AI_ENDPOINT_URL`, `PACKETRAT_GROK_URL`, `PACKETRAT_LLM_PROFILE`, `LLM_TOKEN`, `AI_ENDPOINT_TOKEN`/`GENAI_TOKEN`, `DATABRICKS_TOKEN`; Lazarette items `ai-endpoint-api`, `grok-api` are looked up by `Private/LazaretteBridge.ps1`, but PacketRat does not connect to Lazarette today (reported 2026-10-26; cause not found yet) |
 | Eight Bells | AI: OpenAI-compatible, entered by hand, no default, in memory only | `Start-EightBells.ps1:131` | UI Settings → "AI provider · Manual" (endpoint, model, key) |
@@ -85,8 +85,8 @@ These are deliberately undecided.
    provisioned without putting it in the tool's config?
 6. **Credential source of truth.** Fairlead 0.1 stores provider keys with DPAPI in its own config. Should they move
    to Lazarette, to Windows Credential Manager, or should both be supported?
-7. **Defaults and allowlists.** Which external hosts may the router reach by default (genai.mil, github.com,
-   web.git.mil), and who changes that list? Gangplank currently always allows `api.genai.mil`.
+7. **Defaults and allowlists.** Which external hosts may the router reach by default (the government AI endpoint, github.com,
+   the government GitLab host), and who changes that list? Gangplank currently always allows the government AI endpoint.
 8. **When the router is not running.** Should tools fail closed, fall back to their current settings, or start
    Fairlead themselves? Fairlead runs as a tray app that outlives tabs (the TechStack tray exception).
 9. **Port and discovery.** Fairlead uses registry port 8776. How do tools find it if that port is taken? Does the

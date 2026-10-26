@@ -62,24 +62,25 @@ Describe 'Initialize-FairleadEnvironment' {
     It 'defaults to the registry port, loopback, no auto-stop and %LOCALAPPDATA%\Fairlead' {
         $s = (Initialize-FairleadEnvironment -Root $script:Tmp).Settings
         $s.PreferredPort | Should -Be 8776
-        $s.BindLan | Should -BeFalse
         $s.AutoStop | Should -BeFalse
         $s.DataDirectory | Should -Be (Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'Fairlead')
         $s.LogDirectory | Should -Be (Join-Path $script:Tmp 'logs')
     }
 
     It 'reads fairlead.env without overriding variables already set' {
-        Set-Content (Join-Path $script:Tmp 'config\fairlead.env') "FAIRLEAD_PORT=9001`nFAIRLEAD_BIND=lan`nFAIRLEAD_AUTO_STOP=1"
+        Set-Content (Join-Path $script:Tmp 'config\fairlead.env') "FAIRLEAD_PORT=9001`nFAIRLEAD_BIND=loopback`nFAIRLEAD_AUTO_STOP=1"
         [Environment]::SetEnvironmentVariable('FAIRLEAD_PORT', '9002', 'Process')
         $s = (Initialize-FairleadEnvironment -Root $script:Tmp).Settings
         $s.PreferredPort | Should -Be 9002
-        $s.BindLan | Should -BeTrue
         $s.AutoStop | Should -BeTrue
     }
 
-    It 'rejects an unknown bind value' {
-        Set-Content (Join-Path $script:Tmp 'config\fairlead.env') 'FAIRLEAD_BIND=everywhere'
-        { Initialize-FairleadEnvironment -Root $script:Tmp } | Should -Throw '*loopback or lan*'
+    It 'refuses any bind other than loopback, including the removed lan option' {
+        foreach ($v in @('lan', 'everywhere')) {
+            [Environment]::SetEnvironmentVariable('FAIRLEAD_BIND', $null, 'Process')
+            Set-Content (Join-Path $script:Tmp 'config\fairlead.env') "FAIRLEAD_BIND=$v"
+            { Initialize-FairleadEnvironment -Root $script:Tmp } | Should -Throw '*loopback*'
+        }
     }
 }
 

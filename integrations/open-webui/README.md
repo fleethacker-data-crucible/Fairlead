@@ -4,15 +4,15 @@
 
 ## Setup
 
-Fairlead must listen on the LAN for the container to reach it: add `FAIRLEAD_BIND=lan` to `config\fairlead.env`
-and restart Fairlead. Then in Open WebUI: Admin Settings > Connections > OpenAI API.
+Fairlead listens on this machine only (loopback, a Fleet rule), so run Open WebUI on the same PC outside a container. A container reaches the host through a
+virtual network adapter, not loopback, so it cannot reach Fairlead. In Open WebUI: Admin Settings > Connections > OpenAI API.
 
 ```
-API Base URL: http://host.docker.internal:8776/v1
+API Base URL: http://127.0.0.1:8776/v1
 API Key:      fl-YOUR-KEY   (create one named open-webui)
 ```
 
-Or as container environment: `OPENAI_API_BASE_URL=http://host.docker.internal:8776/v1`, `OPENAI_API_KEY=fl-...`.
+Or as environment: `OPENAI_API_BASE_URL=http://127.0.0.1:8776/v1`, `OPENAI_API_KEY=fl-...`.
 The model picker shows Fairlead's routes first (`auto`, `smart`, `fast`, `local`), then every provider/model.
 
 ## Checklist

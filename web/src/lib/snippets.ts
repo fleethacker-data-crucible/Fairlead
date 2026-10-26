@@ -60,8 +60,8 @@ export function snippets(base: string, key: string): Snippet[] {
       tool: 'Open WebUI',
       kind: 'env',
       status: 'hackathon',
-      note: 'Admin Settings > Connections > OpenAI API. From the Docker container use host.docker.internal and start Fairlead with FAIRLEAD_BIND=lan.',
-      code: `OPENAI_API_BASE_URL=http://host.docker.internal:${portOf(base)}/v1\nOPENAI_API_KEY=${k}`,
+      note: 'Admin Settings > Connections > OpenAI API. Fairlead listens on this machine only, so run Open WebUI on the same PC, not in a container.',
+      code: `OPENAI_API_BASE_URL=${base}\nOPENAI_API_KEY=${k}`,
     },
     {
       id: 'continue',

@@ -194,7 +194,6 @@ namespace Fairlead.Core.Host
                 registryPort = FairleadSettings.RegistryPort,
                 preferredPort = Options.PreferredPort > 0 ? Options.PreferredPort : Settings.PreferredPort,
                 gatewayUrl = BaseUrl + "/v1",
-                lan = BoundToLan,
                 startedAt = StartedAt,
                 autoStop = Options.AutoStop,
                 setupComplete = cfg.SetupComplete,

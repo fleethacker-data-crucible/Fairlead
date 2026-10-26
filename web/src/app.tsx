@@ -206,7 +206,6 @@ function StatusBar({ status, error }: { status: Status | undefined; error: strin
       <Dot tone={state === 'Running' ? 'ok' : state === 'Disconnected' ? 'err' : 'warn'}>{state}</Dot>
       <span className="mono">{window.location.host}</span>
       <span>{status ? (status.connectivity.kedge ? 'Kedge mode: local only' : status.connectivity.internet === 'up' ? 'Cloud + local' : status.connectivity.internet === 'down' ? 'Offline' : 'Checking network') : '—'}</span>
-      {status?.lan ? <span>Gateway also on the LAN</span> : null}
       <span className="ml-auto">Fairlead {status ? status.version : '—'}</span>
     </footer>
   );
