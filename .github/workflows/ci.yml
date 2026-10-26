@@ -56,8 +56,11 @@ jobs:
           npm test; if ($LASTEXITCODE) { exit $LASTEXITCODE }
           npm run build; if ($LASTEXITCODE) { exit $LASTEXITCODE }
           # web/dist is committed so a plain checkout launches with its UI; it must match the source.
-          $stale = @(git status --porcelain -- dist)
-          if ($stale.Count -gt 0) { $stale; throw 'web/dist is out of date: run npm run build in web and commit web/dist.' }
+          # Line endings are ignored: the Windows checkout turns the UI sources into CRLF, so the build emits CRLF here.
+          git diff --ignore-cr-at-eol --exit-code --stat -- dist
+          $changed = $LASTEXITCODE
+          $added = @(git ls-files --others --exclude-standard -- dist)
+          if ($changed -or $added.Count -gt 0) { $added; throw 'web/dist is out of date: run npm run build in web and commit web/dist.' }
 
       - name: Pester on Windows PowerShell 5.1
         shell: powershell
