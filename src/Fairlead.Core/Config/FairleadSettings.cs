@@ -22,8 +22,6 @@ namespace Fairlead.Core.Config
         public string LogDirectory { get; set; }
         public string WebRootDirectory { get; set; }
         public int PreferredPort { get; set; }
-        /// <summary>Serve /v1 on every interface too (containers, other machines). Admin pages stay loopback-only.</summary>
-        public bool BindLan { get; set; }
         /// <summary>
         /// Off by default: Fairlead is a gateway for other tools, so closing the setup tab must not stop it
         /// (the TechStack tray exception). FAIRLEAD_AUTO_STOP=1 makes the tab own the engine.
@@ -55,9 +53,9 @@ namespace Fairlead.Core.Config
             int port;
             var portText = Env("FAIRLEAD_PORT");
             if (portText != null && int.TryParse(portText, out port) && port > 0 && port < 65536) s.PreferredPort = port;
+            // Fairlead listens on loopback only (Fleet rule). The old FAIRLEAD_BIND=lan is refused with a clear message.
             var bind = (Env("FAIRLEAD_BIND") ?? "loopback").ToLowerInvariant();
-            if (bind != "loopback" && bind != "lan") throw new ArgumentException("FAIRLEAD_BIND must be loopback or lan.");
-            s.BindLan = bind == "lan";
+            if (bind != "loopback") throw new ArgumentException("FAIRLEAD_BIND=" + bind + " is not supported: Fairlead listens on this machine only (loopback). Remove FAIRLEAD_BIND from config\\fairlead.env.");
             s.AutoStop = Env("FAIRLEAD_AUTO_STOP") == "1";
             return s;
         }

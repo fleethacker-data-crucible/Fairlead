@@ -149,19 +149,17 @@ namespace Fairlead.Core.Host
         public int Port { get; private set; }
         public bool IsRunning { get { return _listener != null; } }
         public int ActiveConnections { get { return _active; } }
-        /// <summary>True when bound to every interface (FAIRLEAD_BIND=lan); otherwise loopback only.</summary>
-        public bool BoundToLan { get; private set; }
         /// <summary>
         /// Decides, after the request is read, whether a non-loopback peer may be served. Null (the default) refuses
-        /// every non-loopback peer. The host allows only gateway routes, and only with a client key.
+        /// every non-loopback peer. The server binds loopback only, so this is a second line of defence.
         /// </summary>
         public Func<HttpRequest, bool> AllowRemote { get; set; }
 
-        /// <summary>Binds <paramref name="preferredPort"/>; falls back to an OS-assigned port when it is taken.</summary>
-        public int Start(int preferredPort, bool lan = false)
+        /// <summary>Binds <paramref name="preferredPort"/> on loopback; falls back to an OS-assigned port when it is taken.</summary>
+        public int Start(int preferredPort)
         {
             if (_listener != null) throw new InvalidOperationException("Server already started.");
-            var address = lan ? IPAddress.Any : IPAddress.Loopback;
+            var address = IPAddress.Loopback;
             TcpListener listener;
             try
             {
@@ -176,11 +174,10 @@ namespace Fairlead.Core.Host
                 listener.Start(128);
             }
             _listener = listener;
-            BoundToLan = lan;
             Port = ((IPEndPoint)listener.LocalEndpoint).Port;
             _cts = new CancellationTokenSource();
             _acceptLoop = Task.Run(() => AcceptLoop(_cts.Token));
-            _log.Info("SERVER_START", "Listening on " + (lan ? "0.0.0.0" : "127.0.0.1") + ":" + Port);
+            _log.Info("SERVER_START", "Listening on 127.0.0.1:" + Port);
             return Port;
         }
 

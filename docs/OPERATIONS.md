@@ -32,8 +32,8 @@ that saved them, so re-enter keys on a new machine (or use environment variables
 
 ## The hackathon network
 
-- Containers (Open WebUI in Docker): set `FAIRLEAD_BIND=lan` and use `http://host.docker.internal:8776/v1`. LAN callers
-  always need a client key; admin pages stay on loopback.
+- Fairlead listens on this machine only (127.0.0.1, a Fleet rule), so tools must run on the same PC. Containers and other
+  machines cannot reach it; `FAIRLEAD_BIND=lan` was removed and is refused at start.
 - Browser apps calling `/v1` directly: list their origin under Settings → Browser origins.
 - Teams on a budget: give each team its own key limited to `local,fast` (Clients page) and a rule on the client name.
 - Conference Wi-Fi drops: leave Kedge on **auto**. For a demo that must not depend on the network, force **on**.

@@ -73,8 +73,8 @@ with an error event in the caller's dialect; replaying a half-delivered answer f
 - Admin pages and `/api` are served to loopback only, check the `Host` header (DNS rebinding) and require the
   random per-session token in `X-Fairlead-Session`. The tray and the launcher hold the token; it is never written
   to the runtime file.
-- `/v1` requires a client key (`fl-…`) unless the operator turns that off for loopback. Remote callers
-  (`FAIRLEAD_BIND=lan`) always need a key and can reach `/v1` only.
+- `/v1` requires a client key (`fl-…`) unless the operator turns that off. Fairlead binds 127.0.0.1 only, and the
+  server refuses any non-loopback peer as a second line of defence.
 - Browser origins are refused on `/v1` unless listed, so a web page cannot spend the operator's credits.
 - API keys: DPAPI (CurrentUser) at rest; the browser sees only where a key comes from and its last four characters.
   A stored key is dropped when its provider's base URL changes, so a key cannot be redirected without retyping it.
