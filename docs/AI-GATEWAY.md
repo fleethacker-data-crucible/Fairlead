@@ -10,6 +10,7 @@ your own routes) and never see a gateway host, token or provider model id.
 | Thing | Where | In git? |
 |---|---|---|
 | Gateway model file (endpoints, paths, model ids) | Imported under **Providers → AI gateway**; kept DPAPI-encrypted for your Windows account in Fairlead's data folder (`%LOCALAPPDATA%\Fairlead\ai-gateway-models.dpapi`). Also read from `FAIRLEAD_GATEWAY_CONFIG` (a path) or `config\ai_gateway_models.yaml` for scripted setups. | No |
+| Endpoint address | Either the full `url:` of each endpoint in the model file (kept encrypted with it once imported; nothing else to enter), or `base_url_env` + `path` below. |
 | Gateway base URL (the variable in `base_url_env`, usually `AI_GATEWAY_BASE_URL`) | Entered once under **Providers → AI gateway**; kept DPAPI-encrypted in `ai-gateway-values.json` in the data folder. The environment variable of that name still works and is used when nothing is entered. | No |
 | Bearer token (the variable in `headers.Authorization.token_env`, usually `DATABRICKS_TOKEN`) | **Never stored by Fairlead.** It comes from Lazarette (the suite's encrypted vault; see below) or the environment variable of that name. | No |
 | Timeout | `AI_GATEWAY_TIMEOUT_SECONDS` (5 to 3600, default 120) | No |
@@ -17,6 +18,16 @@ your own routes) and never see a gateway host, token or provider model id.
 
 The page never shows the address, the token or a model id back; it shows where each value comes from
 (saved, environment, missing).
+
+## Starting from the gateway's curl commands
+
+`config/ai_gateway_models.template.yaml` is the gateway's documented curl commands (`model-curls.md`) as a model
+file, in the same order: two endpoints and nine models. Its two `url:` values are placeholders
+(`<OPENAI_RESPONSES_URL>`, `<MLFLOW_RESPONSES_URL>`). Fill them with the real endpoint addresses on a machine allowed
+to see them, import the filled copy, and never commit it. A file that still holds a placeholder is refused with the
+endpoint named. Fairlead then sends exactly what the curls send: `POST`, `Content-Type: application/json`,
+`Authorization: Bearer <token>`, and `model`, `input` (user turns as `input_text`, assistant turns as `output_text`)
+and `max_output_tokens` when the caller sets a limit.
 
 ## Set it up
 

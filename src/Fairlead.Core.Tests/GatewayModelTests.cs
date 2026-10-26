@@ -578,6 +578,68 @@ Endpoint("gw_mlflow", "/ai-gateway/mlflow/v1/responses") +
             Assert.Null(sent["messages"]);
         }
 
+        /// <summary>config/ai_gateway_models.template.yaml with its placeholders filled in, as GenAI.mil will.</summary>
+        private string FilledTemplate()
+        {
+            var text = File.ReadAllText(Path.Combine(CoreSourceTests.RepoRoot(), "config", "ai_gateway_models.template.yaml"));
+            return text.Replace("<OPENAI_RESPONSES_URL>", "https://gateway.test/ai-gateway/openai/v1/responses")
+                       .Replace("<MLFLOW_RESPONSES_URL>", "https://gateway.test/ai-gateway/mlflow/v1/responses")
+                       .Replace("DATABRICKS_TOKEN", _fx.TokenVar);
+        }
+
+        [Fact]
+        public void TheTemplateIsRefusedUntilItsPlaceholdersAreFilled()
+        {
+            var text = File.ReadAllText(Path.Combine(CoreSourceTests.RepoRoot(), "config", "ai_gateway_models.template.yaml"));
+            var f = GatewayModelFile.Parse(text, "t", n => "x");
+            Assert.False(f.Ok);
+            Assert.Contains(f.Errors, e => e.Contains("endpoints.openai_responses.url still holds a placeholder"));
+            Assert.Contains(f.Errors, e => e.Contains("endpoints.mlflow_responses.url still holds a placeholder"));
+        }
+
+        [Fact]
+        public async Task TheFilledTemplateSendsWhatTheCurlsSend()
+        {
+            var fake = new FakeUpstream().On("gateway.test", (r, b) => FakeUpstream.Json(HttpStatusCode.OK, GatewayFixture.ResponsesAnswer("Databricks is a data platform.")));
+            var host = Start(fake, out var key, yaml: FilledTemplate());
+            var f = host.GatewayModels!;
+            Assert.True(f.Ok, string.Join("\n", f.Errors));
+            Assert.Empty(f.BaseUrlVariables);   // the address is in the file: nothing to enter
+            Assert.Equal(new[] { "openai_responses", "mlflow_responses" }, f.Providers.Select(p => p.Id).ToArray());
+            Assert.Equal(9, f.EnabledModels);
+
+            // The conversation from model-curls.md, sent through Fairlead's OpenAI API.
+            var body = new JObject
+            {
+                ["model"] = "openai_responses/system.ai.grok-4-6",
+                ["max_tokens"] = 256,
+                ["messages"] = new JArray
+                {
+                    new JObject { ["role"] = "user", ["content"] = "Hello!" },
+                    new JObject { ["role"] = "assistant", ["content"] = "Hello! How can I assist you today?" },
+                    new JObject { ["role"] = "user", ["content"] = "What is Databricks?" },
+                },
+            };
+            var r = await Post(host, "/v1/chat/completions", body, key);
+            Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+            var seen = fake.Seen.Single();
+            Assert.Equal("gateway.test/ai-gateway/openai/v1/responses", seen.Key);
+            var expected = JObject.Parse(@"{
+              ""model"": ""system.ai.grok-4-6"",
+              ""input"": [
+                { ""role"": ""user"", ""content"": [{ ""type"": ""input_text"", ""text"": ""Hello!"" }] },
+                { ""role"": ""assistant"", ""content"": [{ ""type"": ""output_text"", ""text"": ""Hello! How can I assist you today?"" }] },
+                { ""role"": ""user"", ""content"": [{ ""type"": ""input_text"", ""text"": ""What is Databricks?"" }] }
+              ],
+              ""max_output_tokens"": 256
+            }");
+            Assert.Equal(expected.ToString(Formatting.None), seen.Value.ToString(Formatting.None));
+
+            var r2 = await Post(host, "/v1/chat/completions", Chat("mlflow_responses/system.ai.gpt-5-4", "Hi"), key);
+            Assert.Equal(HttpStatusCode.OK, r2.StatusCode);
+            Assert.Equal("gateway.test/ai-gateway/mlflow/v1/responses", fake.Seen.Last().Key);
+        }
+
         [Fact]
         public async Task StreamsAWholeAnswerToStreamingClients()
         {
