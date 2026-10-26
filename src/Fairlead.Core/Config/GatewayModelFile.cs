@@ -230,31 +230,55 @@ namespace Fairlead.Core.Config
                 if (format == null || format.Type != JTokenType.String) Errors.Add(where + ".request_format is missing.");
                 else if ((string)format != SupportedFormat) Errors.Add(where + ".request_format '" + (string)format + "' is not supported; Fairlead speaks " + SupportedFormat + ".");
 
-                var pathToken = e["path"];
                 string path = null;
-                if (pathToken == null || pathToken.Type != JTokenType.String) Errors.Add(where + ".path is missing.");
+                string baseUrl = null;
+                var urlToken = e["url"];
+                if (urlToken != null && urlToken.Type != JTokenType.Null)
+                {
+                    // The whole address in the file (it is kept encrypted once imported): no address variable to set.
+                    if (e["base_url_env"] != null || e["path"] != null) Errors.Add(where + ": give url, or base_url_env with path, not both.");
+                    else if (urlToken.Type != JTokenType.String) Errors.Add(where + ".url must be text.");
+                    else
+                    {
+                        var value = ((string)urlToken).Trim();
+                        Uri u;
+                        var ok = Uri.TryCreate(value, UriKind.Absolute, out u) && (u.Scheme == "https" || (u.Scheme == "http" && u.IsLoopback))
+                            && string.IsNullOrEmpty(u.Query) && string.IsNullOrEmpty(u.Fragment) && string.IsNullOrEmpty(u.UserInfo) && u.AbsolutePath.Length > 1;
+                        if (value.StartsWith("<", StringComparison.Ordinal)) Errors.Add(where + ".url still holds a placeholder; put the endpoint's full https address there.");
+                        else if (!ok) Errors.Add(where + ".url must be the endpoint's full https address (for example https://gateway.example/ai-gateway/openai/v1/responses), with no query or credentials.");
+                        else
+                        {
+                            baseUrl = u.GetLeftPart(UriPartial.Authority);
+                            path = u.AbsolutePath;
+                        }
+                    }
+                }
                 else
                 {
-                    path = ((string)pathToken).Trim();
-                    if (!path.StartsWith("/", StringComparison.Ordinal) || path.Contains("://") || path.IndexOf('?') >= 0 || path.IndexOf('#') >= 0 || path.IndexOf(' ') >= 0)
-                        Errors.Add(where + ".path must be a path starting with / (no host, query or spaces).");
-                }
-
-                string baseUrl = null;
-                var baseVar = VariableAt(e["base_url_env"], where + ".base_url_env");
-                if (baseVar != null)
-                {
-                    NeedVariable(baseVar, where + ".base_url_env", env);
-                    if (!BaseUrlVariables.Contains(baseVar)) BaseUrlVariables.Add(baseVar);
-                    var value = env(baseVar);
-                    if (!string.IsNullOrWhiteSpace(value))
+                    var pathToken = e["path"];
+                    if (pathToken == null || pathToken.Type != JTokenType.String) Errors.Add(where + ".path is missing.");
+                    else
                     {
-                        Uri u;
-                        value = value.Trim();
-                        var loopback = Uri.TryCreate(value, UriKind.Absolute, out u) && u.IsLoopback;
-                        if (u == null || (u.Scheme != "https" && !(loopback && u.Scheme == "http")) || !string.IsNullOrEmpty(u.Query) || !string.IsNullOrEmpty(u.Fragment) || !string.IsNullOrEmpty(u.UserInfo))
-                            Errors.Add("The gateway address in " + baseVar + " must hold an absolute https URL with no query or credentials.");
-                        else baseUrl = value.TrimEnd('/');
+                        path = ((string)pathToken).Trim();
+                        if (!path.StartsWith("/", StringComparison.Ordinal) || path.Contains("://") || path.IndexOf('?') >= 0 || path.IndexOf('#') >= 0 || path.IndexOf(' ') >= 0)
+                            Errors.Add(where + ".path must be a path starting with / (no host, query or spaces).");
+                    }
+
+                    var baseVar = VariableAt(e["base_url_env"], where + ".base_url_env");
+                    if (baseVar != null)
+                    {
+                        NeedVariable(baseVar, where + ".base_url_env", env);
+                        if (!BaseUrlVariables.Contains(baseVar)) BaseUrlVariables.Add(baseVar);
+                        var value = env(baseVar);
+                        if (!string.IsNullOrWhiteSpace(value))
+                        {
+                            Uri u;
+                            value = value.Trim();
+                            var loopback = Uri.TryCreate(value, UriKind.Absolute, out u) && u.IsLoopback;
+                            if (u == null || (u.Scheme != "https" && !(loopback && u.Scheme == "http")) || !string.IsNullOrEmpty(u.Query) || !string.IsNullOrEmpty(u.Fragment) || !string.IsNullOrEmpty(u.UserInfo))
+                                Errors.Add("The gateway address in " + baseVar + " must hold an absolute https URL with no query or credentials.");
+                            else baseUrl = value.TrimEnd('/');
+                        }
                     }
                 }
 
