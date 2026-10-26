@@ -18,9 +18,9 @@ $browser = @("${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe", "
 if (-not $browser) { throw 'Edge or Chrome is needed on the build machine to render the brand assets.' }
 Add-Type -AssemblyName System.Drawing
 
-function Render([string]$url, [string]$out, [int]$w, [int]$h) {
+function Render([string]$url, [string]$out, [int]$w, [int]$h, [int]$scale = 1) {
     $profile = Join-Path ([IO.Path]::GetTempPath()) ('fairlead-brand-' + [guid]::NewGuid().ToString('N'))
-    $args = @('--headless=new', '--disable-gpu', '--hide-scrollbars', '--no-first-run', '--default-background-color=00000000', "--user-data-dir=$profile", "--window-size=$w,$h", "--screenshot=$out", $url)
+    $args = @('--headless=new', '--disable-gpu', '--hide-scrollbars', '--no-first-run', '--default-background-color=00000000', "--user-data-dir=$profile", "--window-size=$w,$h", "--force-device-scale-factor=$scale", "--screenshot=$out", $url)
     $p = Start-Process -FilePath $browser -ArgumentList $args -PassThru -WindowStyle Hidden -Wait
     Remove-Item $profile -Recurse -Force -ErrorAction SilentlyContinue
     if (-not (Test-Path $out)) { throw ('Rendering failed: ' + $url) }
@@ -82,8 +82,8 @@ try {
     if (-not $MarkOnly) {
         foreach ($theme in @('light', 'dark')) {
             $raw = Join-Path $tmp "emblem-$theme-raw.png"
-            Render (([Uri](Join-Path $brand 'emblem-source.html')).AbsoluteUri + "?theme=$theme") $raw 512 512
-            Resize $raw (Join-Path $brand "emblem-$theme.png") 512
+            Render (([Uri](Join-Path $brand 'emblem-source.html')).AbsoluteUri + "?theme=$theme") $raw 512 512 2
+            Resize $raw (Join-Path $brand "emblem-$theme.png") 1024
             Copy-Item (Join-Path $brand "emblem-$theme.png") (Join-Path $public "brand\emblem-$theme.png") -Force
         }
     }
