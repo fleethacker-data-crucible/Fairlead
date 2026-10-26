@@ -1,12 +1,12 @@
 #requires -Version 5.1
 <#
 .SYNOPSIS
-  Renders the placeholder brand assets: emblem PNGs (light and dark), the mark as PNGs, favicon.ico and tray.ico.
+  Renders the brand assets made from source: the mark as PNGs, favicon.ico and tray.ico.
 .DESCRIPTION
-  Build-machine only. Uses headless Edge (or Chrome) to render assets\brand\emblem-source.html and
-  assets\brand\mark.svg to PNG with a transparent background, then packs PNG frames into .ico files.
-  When the detailed original emblem exists, drop it in as assets\brand\emblem-light.png / emblem-dark.png and
-  stop running the emblem part of this script (-MarkOnly).
+  Build-machine only. Uses headless Edge (or Chrome) to render assets\brand\mark.svg to PNG with a transparent
+  background, then packs PNG frames into .ico files. The emblems (assets\brand\emblem-*.png) are the detailed
+  originals and are not generated; the emblem step only runs if a placeholder assets\brand\emblem-source.html
+  is put back. -MarkOnly skips it in any case.
 #>
 [CmdletBinding()]
 param([switch]$MarkOnly)
@@ -79,7 +79,7 @@ try {
     Write-Ico (Join-Path $brand 'favicon.ico') @((Join-Path $tmp 'mark-16.png'), (Join-Path $tmp 'mark-32.png'), (Join-Path $tmp 'mark-48.png'), (Join-Path $tmp 'mark-256.png'))
     Write-Ico (Join-Path $brand 'tray.ico') @((Join-Path $tmp 'mark-16.png'), (Join-Path $tmp 'mark-20.png'), (Join-Path $tmp 'mark-24.png'), (Join-Path $tmp 'mark-32.png'))
     Copy-Item (Join-Path $brand 'favicon.ico') (Join-Path $public 'favicon.ico') -Force
-    if (-not $MarkOnly) {
+    if (-not $MarkOnly -and (Test-Path (Join-Path $brand 'emblem-source.html'))) {
         foreach ($theme in @('light', 'dark')) {
             $raw = Join-Path $tmp "emblem-$theme-raw.png"
             Render (([Uri](Join-Path $brand 'emblem-source.html')).AbsoluteUri + "?theme=$theme") $raw 512 512 2
