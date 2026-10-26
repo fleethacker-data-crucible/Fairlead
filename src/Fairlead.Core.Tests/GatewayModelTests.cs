@@ -183,10 +183,67 @@ Endpoint("gw_mlflow", "/ai-gateway/mlflow/v1/responses") +
             Assert.Equal("tab\tlineA", (string)doc["j"]);
         }
 
+        [Fact]
+        public void ReadsLiteralAndFoldedBlockScalars()
+        {
+            var doc = (JObject)YamlReader.Parse(
+                "lit: |\n" +
+                "  line one\n" +
+                "    indented # not a comment\n" +
+                "\n" +
+                "  line three\n" +
+                "fold: >\n" +
+                "  joined\n" +
+                "  words\n" +
+                "\n" +
+                "  new paragraph\n" +
+                "strip: |-\n" +
+                "  no newline\n" +
+                "keep: |+\n" +
+                "  kept\n" +
+                "\n" +
+                "explicit: |2\n" +
+                "    four spaces\n" +
+                "empty: |\n" +
+                "list:\n" +
+                "- >-\n" +
+                "  folded item\n" +
+                "  here\n" +
+                "- plain\n" +
+                "nested:\n" +
+                "  description: >\n" +
+                "    Routes to the\n" +
+                "    responses API.\n" +
+                "  path: \"/x\"\n" +
+                "after: 1\n");
+            Assert.Equal("line one\n  indented # not a comment\n\nline three\n", (string)doc["lit"]);
+            Assert.Equal("joined words\nnew paragraph\n", (string)doc["fold"]);
+            Assert.Equal("no newline", (string)doc["strip"]);
+            Assert.Equal("kept\n\n", (string)doc["keep"]);
+            Assert.Equal("  four spaces\n", (string)doc["explicit"]);
+            Assert.Equal("", (string)doc["empty"]);
+            Assert.Equal(new[] { "folded item here", "plain" }, ((JArray)doc["list"]!).Select(x => (string)x!).ToArray());
+            Assert.Equal("Routes to the responses API.\n", (string)doc["nested"]!["description"]);
+            Assert.Equal("/x", (string)doc["nested"]!["path"]);
+            Assert.Equal(1L, (long)doc["after"]!);
+        }
+
+        [Fact]
+        public void AGatewayFileWithBlockScalarDescriptionsLoads()
+        {
+            var fx = new GatewayFixture();
+            var yaml = fx.Yaml().Replace("endpoints:\n", "endpoints:\n  # notes\n") + "notes: |\n  Free text: with a colon\n  - and a dash\n";
+            yaml = yaml.Replace("    method: \"POST\"\n", "    description: >\n      Calls the gateway\n      over HTTPS.\n    method: \"POST\"\n");
+            var f = GatewayModelFile.Parse(yaml, "x", fx.Lookup(fx.Env()));
+            Assert.True(f.Ok, string.Join("; ", f.Errors));
+            Assert.Equal(2, f.Providers.Count);
+        }
+
         [Theory]
         [InlineData("a:\n\tb: 1\n", "tabs")]
         [InlineData("a: &x 1\nb: *x\n", "anchors")]
-        [InlineData("a: |\n  text\n", "block scalars")]
+        [InlineData("a: |x\n  text\n", "block scalar indicator")]
+        [InlineData("a: |\n  ok\n\tb: 1\n", "tabs")]
         [InlineData("a: 1\na: 2\n", "appears twice")]
         [InlineData("a: 1\n---\nb: 2\n", "one document")]
         [InlineData("a: \"open\n", "unterminated")]
