@@ -39,7 +39,8 @@ The router follows the same [TechStack](../TechStack) rules as every Fleet tool:
   The workstation's application control blocks prebuilt and custom DLLs (confirmed 2026-10-26).
 - No third-party DLLs or NuGet packages. Build off the workstation; bundle everything; no CDNs or runtime downloads.
 
-Fairlead 0.1 does not meet the DLL rule yet; see the first open question.
+Fairlead meets these rules since 0.2: its core ships as C# 5 source compiled in memory at launch, with no DLL and
+no Newtonsoft.Json (see the first open question).
 
 ## Migration inventory
 
@@ -53,7 +54,7 @@ These are the consumers found on 2026-10-26 across the Fleet tools in scope. Lin
 | Gangplank | AI: OpenAI-compatible (openai, azure, databricks, ollama), **default `https://api.genai.mil/v1`**, always allowlisted | `Core/Intelligence.ps1:17` (allowlist `:43-58`) | `GANGPLANK_AI_URL`/`LLM_URL`/`OPENAI_BASE_URL`, `GANGPLANK_AI_MODEL`, `GANGPLANK_AI_ALLOWED_HOSTS`, `GANGPLANK_AI_TOKEN`/`GENAI_TOKEN`/`LLM_TOKEN`/`OPENAI_API_KEY`; vault `genapi` |
 | Gangplank | Git: GitHub REST, **default `https://api.github.com`**; GitLab REST, **default `https://web.git.mil`**; archive sync, commits-API push | `Providers/GitProviderBase.ps1:67`, `:71`; `Core/Workspace.ps1:12` | `GITHUB_TOKEN`, `GITLAB_TOKEN`, `GANGPLANK_GITLAB_ALLOWED_HOSTS`; vault `github`, `gitmil` |
 | Bowerbird | AI: OpenAI-compatible, default local phoenix-lai `http://127.0.0.1:1234/v1/chat/completions`; Grok profile (no default) | `Private/BowerbirdLlm.ps1:10` | `LLM_URL`, `BOWERBIRD_AI_ENDPOINT_URL`, `BOWERBIRD_GROK_URL`, `LLM_TOKEN`, `AI_ENDPOINT_TOKEN`/`GENAI_TOKEN`, `DATABRICKS_TOKEN`; vault `ai-endpoint-api`, `grok-api` |
-| PacketRat | AI: OpenAI-compatible, default local phoenix-lai `http://127.0.0.1:1234/v1/chat/completions`; Grok profile (no default) | `Private/PacketRatLlm.ps1:12` | `LLM_URL`, `PACKETRAT_AI_ENDPOINT_URL`, `PACKETRAT_GROK_URL`, `PACKETRAT_LLM_PROFILE`, `LLM_TOKEN`, `AI_ENDPOINT_TOKEN`/`GENAI_TOKEN`, `DATABRICKS_TOKEN`; vault `ai-endpoint-api`, `grok-api` |
+| PacketRat | AI: OpenAI-compatible, default local phoenix-lai `http://127.0.0.1:1234/v1/chat/completions`; Grok profile (no default) | `Private/PacketRatLlm.ps1:12` | `LLM_URL`, `PACKETRAT_AI_ENDPOINT_URL`, `PACKETRAT_GROK_URL`, `PACKETRAT_LLM_PROFILE`, `LLM_TOKEN`, `AI_ENDPOINT_TOKEN`/`GENAI_TOKEN`, `DATABRICKS_TOKEN`; Lazarette items `ai-endpoint-api`, `grok-api` are looked up by `Private/LazaretteBridge.ps1`, but PacketRat does not connect to Lazarette today (reported 2026-10-26; cause not found yet) |
 | Eight Bells | AI: OpenAI-compatible, entered by hand, no default, in memory only | `Start-EightBells.ps1:131` | UI Settings → "AI provider · Manual" (endpoint, model, key) |
 | Lazarette | AI: Stark assistant, OpenAI-compatible, default placeholder `https://ai.example.com` | `lib/core/Config.ps1:131-133`; `lib/server/Stark.ps1:77` | `StarkBaseUrl`, `StarkModel`, `StarkKeyItem`; also the credential store other tools (and the router) read |
 | Semaphore | AI: OpenAI-compatible and contract providers, caller-supplied, no default | `src/core/intelligence/remote.ts:23-32` | `RemoteSettings.url`/`.model`/`.token` |
@@ -69,11 +70,9 @@ runner, not the workstation.
 
 These are deliberately undecided.
 
-1. **Fairlead's own build versus the DLL rule.** Fairlead 0.1 ships a compiled `Fairlead.Core.dll` (`net48`) and
-   bundles Newtonsoft.Json, and the roadmap plans to sign the DLL. Application control on the workstation blocks
-   custom DLLs. Does the core move to C# source compiled by `Add-Type` (C# 5, framework assemblies only, which means
-   replacing Newtonsoft.Json and `HttpClient` usage that needs newer language features)? Or does signing get
-   approved as an exception?
+1. **Fairlead's own build versus the DLL rule.** Decided: no DLL, no signing exception. The core moved to C# 5
+   source compiled by `Add-Type` with framework assemblies only, and Newtonsoft.Json was replaced by Fairlead's own
+   JSON model (the one Halyard uses), with parity tests pinning the same output.
 2. **Git access model.** Should Fairlead proxy GitHub/GitLab API calls, act as a credential broker that hands tools a
    short-lived token, or both? Archive download and push through the commits API (Gangplank) are large transfers.
    Should they pass through the router?

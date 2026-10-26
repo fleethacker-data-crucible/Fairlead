@@ -15,13 +15,13 @@ namespace Fairlead.Core.Config
         /// <summary>Registry port (docs/UNIFIED-UI.md section 1). Tools are pointed at it, so it should not move.</summary>
         public const int RegistryPort = 8776;
 
-        public string RootDirectory { get; set; } = string.Empty;
+        public string RootDirectory { get; set; }
         /// <summary>%LOCALAPPDATA%\Fairlead: fairlead.json and its backup.</summary>
-        public string DataDirectory { get; set; } = string.Empty;
+        public string DataDirectory { get; set; }
         /// <summary>logs\ under the app root: runtime files and JSONL logs (never prompts or keys).</summary>
-        public string LogDirectory { get; set; } = string.Empty;
-        public string? WebRootDirectory { get; set; }
-        public int PreferredPort { get; set; } = RegistryPort;
+        public string LogDirectory { get; set; }
+        public string WebRootDirectory { get; set; }
+        public int PreferredPort { get; set; }
         /// <summary>Serve /v1 on every interface too (containers, other machines). Admin pages stay loopback-only.</summary>
         public bool BindLan { get; set; }
         /// <summary>
@@ -32,6 +32,14 @@ namespace Fairlead.Core.Config
 
         public string ConfigPath { get { return Path.Combine(DataDirectory, "fairlead.json"); } }
 
+        public FairleadSettings()
+        {
+            RootDirectory = string.Empty;
+            DataDirectory = string.Empty;
+            LogDirectory = string.Empty;
+            PreferredPort = RegistryPort;
+        }
+
         public static FairleadSettings FromEnvironment(string rootDirectory)
         {
             var s = new FairleadSettings { RootDirectory = rootDirectory };
@@ -41,7 +49,7 @@ namespace Fairlead.Core.Config
                 var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
                 data = string.IsNullOrEmpty(local) ? Path.Combine(rootDirectory, "data") : Path.Combine(local, "Fairlead");
             }
-            s.DataDirectory = data!;
+            s.DataDirectory = data;
             s.LogDirectory = Env("FAIRLEAD_LOG_DIR") ?? Path.Combine(rootDirectory, "logs");
             s.WebRootDirectory = Env("FAIRLEAD_WEBROOT");
             int port;
@@ -54,10 +62,10 @@ namespace Fairlead.Core.Config
             return s;
         }
 
-        private static string? Env(string name)
+        private static string Env(string name)
         {
             var v = Environment.GetEnvironmentVariable(name);
-            return string.IsNullOrWhiteSpace(v) ? null : v!.Trim();
+            return string.IsNullOrWhiteSpace(v) ? null : v.Trim();
         }
 
         /// <summary>Applies KEY=VALUE lines to the process environment without overriding variables already set.</summary>
@@ -103,7 +111,7 @@ namespace Fairlead.Core.Config
 
         public static bool IsMatch(string pattern, string text)
         {
-            Regex? re;
+            Regex re;
             lock (Cache)
             {
                 if (!Cache.TryGetValue(pattern, out re))
@@ -131,7 +139,7 @@ namespace Fairlead.Core.Config
         }
 
         /// <summary>An exact pattern wins; otherwise the first glob in file order (so "*haiku*" listed before "claude-*" wins).</summary>
-        public static string? Resolve(IDictionary<string, string> aliases, string text)
+        public static string Resolve(IDictionary<string, string> aliases, string text)
         {
             foreach (var kv in aliases) if (string.Equals(kv.Key, text, StringComparison.OrdinalIgnoreCase)) return kv.Value;
             foreach (var kv in aliases)

@@ -4,8 +4,10 @@
   Builds and tests Fairlead, then assembles a self-contained bundle for the workstation.
 .DESCRIPTION
   Runs on a development machine with the .NET 8 SDK and Node.js 20+. The output folder dist\Fairlead
-  (and dist\Fairlead-<version>.zip) needs neither: it holds the compiled DLLs, the built admin UI, the
-  PowerShell module, scripts and config templates. Copy it to the workstation and run Launch-Fairlead.bat.
+  (and dist\Fairlead-<version>.zip) needs neither: it holds the core as C# source (src\Fairlead.Core, compiled in
+  memory by Windows PowerShell 5.1 at launch), the built admin UI, the PowerShell module, scripts and config
+  templates. It contains no DLL: the workstation's application control blocks loading custom DLL files. Copy it to
+  the workstation and run Launch-Fairlead.bat.
 .PARAMETER SkipTests
   Skip xUnit, UI unit tests and Pester.
 .PARAMETER SkipWeb
@@ -39,15 +41,15 @@ function Run([string]$exe, [string[]]$arguments, [string]$cwd = $root) {
     } finally { $ErrorActionPreference = $previous; Pop-Location }
 }
 
-# A running gateway holds Fairlead.Core.dll and the build cannot replace it. Stop it first and say so.
+# Build stops the app (TechStack lifecycle rule): a running gateway would keep serving the old build. Say what stopped.
 . (Join-Path $root 'scripts\Fairlead-Process.ps1')
 $running = @(Get-FairleadProcesses -Root $root -IncludeHolders)
 if ($running.Count -gt 0) {
-    Step 'Stopping processes that hold Fairlead.Core.dll so the build can replace it'
-    foreach ($p in $running) { Write-Host ('  ' + $(if ($p.Kind -eq 'holder') { 'PowerShell window with the DLL loaded' } else { 'Fairlead gateway' }) + ' PID ' + $p.Pid) -ForegroundColor DarkGray }
+    Step 'Stopping running Fairlead gateways before the build'
+    foreach ($p in $running) { Write-Host ('  ' + $(if ($p.Kind -eq 'holder') { 'PowerShell window holding a Fairlead file' } else { 'Fairlead gateway' }) + ' PID ' + $p.Pid) -ForegroundColor DarkGray }
     foreach ($p in Stop-FairleadProcesses -Root $root -IncludeHolders) { Write-Host ('  stopped PID ' + $p) -ForegroundColor Yellow }
     $left = @(Get-FairleadProcesses -Root $root -IncludeHolders)
-    if ($left.Count -gt 0) { throw ('Fairlead.Core.dll is still held by PID ' + (($left | ForEach-Object { $_.Pid }) -join ', ') + '. Close those PowerShell windows (they were opened as administrator) and run the build again.') }
+    if ($left.Count -gt 0) { throw ('Fairlead is still running as PID ' + (($left | ForEach-Object { $_.Pid }) -join ', ') + '. Close those PowerShell windows (they were opened as administrator) and run the build again.') }
 }
 
 foreach ($tool in @('dotnet', 'node', 'npm')) {
@@ -57,8 +59,15 @@ foreach ($tool in @('dotnet', 'node', 'npm')) {
     }
 }
 
-Step 'Core library'
+# The core ships as source. Check it the way the workstation will compile it: C# 5 (the .NET Framework 4.8
+# compiler behind Add-Type), framework references only. The DLL this produces is never shipped or loaded.
+Step 'Core source check (C# 5, framework references only)'
 Run dotnet @('build', 'src/Fairlead.Core/Fairlead.Core.csproj', '-c', $Configuration, '--nologo')
+if ($env:OS -eq 'Windows_NT') {
+    & (Join-Path $PSScriptRoot 'Test-FairleadAddType.ps1') -Runs 1
+} else {
+    Write-Warning 'Not on Windows: skipped compiling the core with Windows PowerShell 5.1 Add-Type (CI does it).'
+}
 if (-not $SkipTests) {
     Step 'Core tests (xUnit)'
     Run dotnet @('test', 'src/Fairlead.Core.Tests/Fairlead.Core.Tests.csproj', '-c', $Configuration, '--nologo', '--logger', 'console;verbosity=minimal')
@@ -97,14 +106,16 @@ if (-not $SkipTests) {
 Step ('Assembling ' + $bundle)
 if (Test-Path $bundle) { Remove-Item $bundle -Recurse -Force }
 New-Item -ItemType Directory -Force $bundle | Out-Null
-$outBase = Join-Path $root ('src\Fairlead.Core\bin\' + $Configuration)
-foreach ($tfm in @('net48', 'netstandard2.0')) {
-    $src = Join-Path $outBase $tfm
-    if (-not (Test-Path (Join-Path $src 'Fairlead.Core.dll'))) { throw ('Missing build output ' + $src) }
-    $dst = Join-Path $bundle ('lib\' + $tfm)
-    New-Item -ItemType Directory -Force $dst | Out-Null
-    Copy-Item (Join-Path $src '*.dll') $dst
+# Core source: every .cs file under src\Fairlead.Core except build output, same layout (Import-FairleadCore compiles it).
+$coreSrc = (Resolve-Path (Join-Path $root 'src\Fairlead.Core')).Path
+$coreFiles = @(Get-ChildItem -LiteralPath $coreSrc -Filter '*.cs' -Recurse -File | Where-Object { $_.FullName.Substring($coreSrc.Length) -notmatch '(?i)[\\/](bin|obj)[\\/]' })
+if ($coreFiles.Count -eq 0) { throw ('No core source under ' + $coreSrc) }
+foreach ($f in $coreFiles) {
+    $dst = Join-Path (Join-Path $bundle 'src\Fairlead.Core') $f.FullName.Substring($coreSrc.Length).TrimStart('\', '/')
+    New-Item -ItemType Directory -Force (Split-Path $dst -Parent) | Out-Null
+    Copy-Item -LiteralPath $f.FullName -Destination $dst
 }
+Write-Host ('  core: ' + $coreFiles.Count + ' C# source files') -ForegroundColor DarkGray
 Copy-Item (Join-Path $root 'web\dist') (Join-Path $bundle 'web\dist') -Recurse
 Copy-Item (Join-Path $root 'module') (Join-Path $bundle 'module') -Recurse
 Copy-Item (Join-Path $root 'scripts') (Join-Path $bundle 'scripts') -Recurse
@@ -119,8 +130,12 @@ foreach ($f in @('Launch-Fairlead.bat', 'README.md', 'TechStack')) { Copy-Item (
 $version = (Select-Xml -Path (Join-Path $root 'src\Fairlead.Core\Fairlead.Core.csproj') -XPath '//Version').Node.InnerText
 $commit = ''
 try { $commit = (& git -C $root rev-parse --short HEAD 2>$null) } catch { }
-@{ version = $version; commit = $commit; configuration = $Configuration; builtAt = (Get-Date).ToUniversalTime().ToString('o') } |
+@{ version = $version; commit = $commit; configuration = $Configuration; core = 'source (C# 5, compiled in memory at launch)'; builtAt = (Get-Date).ToUniversalTime().ToString('o') } |
     ConvertTo-Json | Set-Content -Encoding UTF8 (Join-Path $bundle 'BUILD.json')
+
+# The workstation blocks loading custom DLL files: the bundle must not contain any.
+$dlls = @(Get-ChildItem -LiteralPath $bundle -Recurse -File | Where-Object { $_.Extension -in @('.dll', '.exe', '.pdb') })
+if ($dlls.Count -gt 0) { throw ('The bundle must not contain binaries; found: ' + (($dlls | ForEach-Object { $_.FullName.Substring($bundle.Length) }) -join ', ')) }
 
 if (-not $NoZip) {
     $zip = Join-Path $dist ('Fairlead-' + $version + '.zip')

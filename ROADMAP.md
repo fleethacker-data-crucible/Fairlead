@@ -15,6 +15,11 @@
   rules editors, clients, playground with dry-run explain, activity with decision traces, diagnostics, settings.
 - Tray icon (Open, copy URL, Kedge mode, Exit), start-with-Windows shortcut, single instance, Stop script.
 
+## Done after 0.1 (unreleased)
+
+- The core ships as C# 5 source and is compiled in memory by Windows PowerShell 5.1 at launch: no DLL is shipped
+  or loaded, and Newtonsoft.Json is replaced by Fairlead's own JSON model (same output, pinned by parity tests).
+
 ## Hackathon worklist
 
 Pick one, put your name on it in the issue tracker, and tick its checklist under `integrations/`.
@@ -44,6 +49,5 @@ Pick one, put your name on it in the issue tracker, and tick its checklist under
 - Replace the placeholder emblem with the detailed original (see `assets/brand/README.md`).
 - Propagate `docs/UNIFIED-UI.md` 0.2 (Fairlead and Windlass rows, the starboard-green accent) and `fleet.css` 0.2 to
   every Fleet repo, as that document requires.
-- Sign `Fairlead.Core.dll` for workstations with application-control policies.
 - Mid-stream failover for idempotent requests (buffer until the first token, then commit), if it proves worth the
   latency.

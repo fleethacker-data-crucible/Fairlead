@@ -16,38 +16,55 @@ namespace Fairlead.Core.Host
 {
     public sealed class HostOptions
     {
-        public FairleadSettings Settings { get; set; } = new FairleadSettings();
+        public FairleadSettings Settings { get; set; }
         /// <summary>Directory holding the built UI (index.html). When missing, the gateway still runs and / returns a notice.</summary>
-        public string? WebRoot { get; set; }
+        public string WebRoot { get; set; }
         public int PreferredPort { get; set; }
         /// <summary>Random per-session token the admin UI must send as X-Fairlead-Session. Generated when null.</summary>
-        public string? SessionToken { get; set; }
-        public Dictionary<string, object?> LauncherState { get; set; } = new Dictionary<string, object?>();
+        public string SessionToken { get; set; }
+        public Dictionary<string, object> LauncherState { get; set; }
         /// <summary>Tests inject a fake upstream; null uses the real network.</summary>
-        public System.Net.Http.HttpMessageHandler? UpstreamHandler { get; set; }
+        public System.Net.Http.HttpMessageHandler UpstreamHandler { get; set; }
         /// <summary>A config to use instead of fairlead.json (tests).</summary>
-        public FairleadConfig? Config { get; set; }
+        public FairleadConfig Config { get; set; }
         /// <summary>Start the health monitor (off in tests that drive health by hand).</summary>
-        public bool Monitor { get; set; } = true;
+        public bool Monitor { get; set; }
         /// <summary>Stop when the admin tab is gone (TechStack lifecycle). Off for Fairlead by default: it serves other tools.</summary>
         public bool AutoStop { get; set; }
-        public TimeSpan HeartbeatTimeout { get; set; } = TimeSpan.FromSeconds(20);
-        public TimeSpan LeavingGrace { get; set; } = TimeSpan.FromSeconds(5);
+        public TimeSpan HeartbeatTimeout { get; set; }
+        public TimeSpan LeavingGrace { get; set; }
+
+        public HostOptions()
+        {
+            Settings = new FairleadSettings();
+            LauncherState = new Dictionary<string, object>();
+            Monitor = true;
+            HeartbeatTimeout = TimeSpan.FromSeconds(20);
+            LeavingGrace = TimeSpan.FromSeconds(5);
+        }
     }
 
     public sealed class HostInfo
     {
         public int Port { get; set; }
-        public string Url { get; set; } = string.Empty;
+        public string Url { get; set; }
         /// <summary>Base URL tools use: http://127.0.0.1:port/v1</summary>
-        public string GatewayUrl { get; set; } = string.Empty;
-        public string SessionToken { get; set; } = string.Empty;
+        public string GatewayUrl { get; set; }
+        public string SessionToken { get; set; }
         /// <summary>URL with the session token, for opening the admin page once.</summary>
-        public string LaunchUrl { get; set; } = string.Empty;
+        public string LaunchUrl { get; set; }
         public bool PortIsRegistry { get; set; }
-        public string? LogFile { get; set; }
-        public string? RuntimeFile { get; set; }
-        public string? ConfigFile { get; set; }
+        public string LogFile { get; set; }
+        public string RuntimeFile { get; set; }
+        public string ConfigFile { get; set; }
+
+        public HostInfo()
+        {
+            Url = string.Empty;
+            GatewayUrl = string.Empty;
+            SessionToken = string.Empty;
+            LaunchUrl = string.Empty;
+        }
     }
 
     /// <summary>
@@ -61,15 +78,16 @@ namespace Fairlead.Core.Host
         public const string Version = "0.1.0";
         private readonly ManualResetEventSlim _stopped = new ManualResetEventSlim(false);
         private readonly object _presenceLock = new object();
-        private HttpServer? _server;
-        private string? _runtimeFile;
+        private HttpServer _server;
+        private string _runtimeFile;
         private DateTimeOffset? _lastHeartbeat;
         private DateTimeOffset? _leavingAt;
-        private Timer? _presenceTimer;
+        private Timer _presenceTimer;
 
         public FairleadHost(HostOptions options)
         {
-            Options = options ?? throw new ArgumentNullException("options");
+            if (options == null) throw new ArgumentNullException("options");
+            Options = options;
             Settings = options.Settings;
             Log = new Diagnostics(Settings.LogDirectory);
             Config = options.Config != null ? new ConfigStore(options.Config) : new ConfigStore(Settings.ConfigPath);
@@ -78,7 +96,7 @@ namespace Fairlead.Core.Host
             Health = new HealthMonitor(Config, Upstream, Breakers, Log);
             Metrics = new Metrics(Settings.LogDirectory);
             Engine = new GatewayEngine(Config, Upstream, Health, Breakers, Metrics, Log);
-            SessionToken = string.IsNullOrEmpty(options.SessionToken) ? NewToken() : options.SessionToken!;
+            SessionToken = string.IsNullOrEmpty(options.SessionToken) ? NewToken() : options.SessionToken;
             Admin = new Router();
             Gateway = new Router();
             StartedAt = DateTimeOffset.UtcNow;
@@ -137,8 +155,8 @@ namespace Fairlead.Core.Host
             if (StopRequested) return;
             StopRequested = true;
             Log.Info("HOST_STOP", "Stop requested.");
-            try { _presenceTimer?.Dispose(); } catch (ObjectDisposedException) { }
-            try { _server?.Stop(); } finally { _stopped.Set(); }
+            try { if (_presenceTimer != null) _presenceTimer.Dispose(); } catch (ObjectDisposedException) { }
+            try { if (_server != null) _server.Stop(); } finally { _stopped.Set(); }
             if (_runtimeFile != null)
             {
                 try { File.Delete(_runtimeFile); } catch (IOException) { }
@@ -156,7 +174,7 @@ namespace Fairlead.Core.Host
         {
             Stop();
             Health.Dispose();
-            _server?.Dispose();
+            if (_server != null) _server.Dispose();
             _stopped.Dispose();
         }
 
@@ -183,7 +201,7 @@ namespace Fairlead.Core.Host
             }
         }
 
-        private void PresenceTick(object? state)
+        private void PresenceTick(object state)
         {
             if (StopRequested || !BrowserGone(DateTimeOffset.UtcNow)) return;
             Log.Info("HOST_AUTO_STOP", "No browser heartbeat; the engine stops itself (FAIRLEAD_AUTO_STOP=1 is set).");
@@ -248,7 +266,7 @@ namespace Fairlead.Core.Host
             var webRoot = Options.WebRoot ?? Settings.WebRootDirectory;
             if (!string.IsNullOrEmpty(webRoot))
             {
-                var served = new StaticFiles(webRoot!).Serve(request);
+                var served = new StaticFiles(webRoot).Serve(request);
                 if (served != null) return served;
             }
             if (request.Path == "/" || request.Path == "/index.html")
@@ -266,7 +284,7 @@ namespace Fairlead.Core.Host
             if (request.Method == "OPTIONS")
             {
                 var pre = new HttpResponse { Status = 204 };
-                if (cors) AddCors(pre, origin!);
+                if (cors) AddCors(pre, origin);
                 return pre;
             }
             bool mismatch;
@@ -280,7 +298,7 @@ namespace Fairlead.Core.Host
             {
                 response = await handler(request).ConfigureAwait(false);
             }
-            if (cors) AddCors(response, origin!);
+            if (cors) AddCors(response, origin);
             return response;
         }
 
@@ -301,7 +319,7 @@ namespace Fairlead.Core.Host
             try
             {
                 var token = Json.Read<string>(Json.Body(request), "session");
-                return !string.IsNullOrEmpty(token) && FixedTimeEquals(token!, SessionToken);
+                return !string.IsNullOrEmpty(token) && FixedTimeEquals(token, SessionToken);
             }
             catch (BadRequestException) { return false; }
         }
@@ -309,7 +327,7 @@ namespace Fairlead.Core.Host
         private bool TokenMatches(HttpRequest request)
         {
             var token = request.Header(SessionHeader);
-            return !string.IsNullOrEmpty(token) && FixedTimeEquals(token!, SessionToken);
+            return !string.IsNullOrEmpty(token) && FixedTimeEquals(token, SessionToken);
         }
 
         private bool IsOwnOrigin(string origin)
