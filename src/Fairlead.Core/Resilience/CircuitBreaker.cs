@@ -23,11 +23,15 @@ namespace Fairlead.Core.Resilience
         private TimeSpan _cooldown = MinCooldown;
         private bool _trialInFlight;
 
-        public CircuitBreaker(string key) { Key = key; }
+        public CircuitBreaker(string key)
+        {
+            Key = key;
+            Threshold = 3;
+        }
 
         public string Key { get; private set; }
-        public int Threshold { get; set; } = 3;
-        public string? LastError { get; private set; }
+        public int Threshold { get; set; }
+        public string LastError { get; private set; }
         public FailureKind? LastFailure { get; private set; }
         public DateTimeOffset? LastFailureAt { get; private set; }
         public DateTimeOffset? LastSuccessAt { get; private set; }
@@ -126,7 +130,7 @@ namespace Fairlead.Core.Resilience
                     openUntil = _openUntil,
                     failures = _failures,
                     lastError = LastError,
-                    lastFailure = LastFailure?.ToString(),
+                    lastFailure = LastFailure == null ? null : LastFailure.ToString(),
                     lastFailureAt = LastFailureAt,
                     lastSuccessAt = LastSuccessAt,
                 };
@@ -143,9 +147,9 @@ namespace Fairlead.Core.Resilience
             return _breakers.GetOrAdd(key, k => new CircuitBreaker(k));
         }
 
-        public CircuitBreaker? Find(string key)
+        public CircuitBreaker Find(string key)
         {
-            CircuitBreaker? b;
+            CircuitBreaker b;
             return _breakers.TryGetValue(key, out b) ? b : null;
         }
 

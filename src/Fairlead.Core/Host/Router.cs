@@ -3,10 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
-using Newtonsoft.Json;
-using Newtonsoft.Json.Converters;
-using Newtonsoft.Json.Linq;
-using Newtonsoft.Json.Serialization;
+using Fairlead.Core.Serialization;
 
 namespace Fairlead.Core.Host
 {
@@ -43,13 +40,13 @@ namespace Fairlead.Core.Host
         public Router Put(string template, RouteHandler handler) { return Map("PUT", template, handler); }
 
         /// <summary>Returns null when no route matches; sets <paramref name="methodMismatch"/> when the path exists for another method.</summary>
-        public RouteHandler? Resolve(HttpRequest request, out bool methodMismatch)
+        public RouteHandler Resolve(HttpRequest request, out bool methodMismatch)
         {
             methodMismatch = false;
             var segments = request.Path.Trim('/').Split('/');
-            RouteHandler? best = null;
+            RouteHandler best = null;
             var bestScore = -1;
-            Dictionary<string, string>? bestValues = null;
+            Dictionary<string, string> bestValues = null;
             foreach (var route in _routes)
             {
                 if (route.Segments.Length != segments.Length) continue;
@@ -79,31 +76,24 @@ namespace Fairlead.Core.Host
     /// <summary>JSON helpers with the one serializer configuration the API uses everywhere.</summary>
     public static class Json
     {
-        public static readonly JsonSerializerSettings Settings = new JsonSerializerSettings
-        {
-            ContractResolver = new DefaultContractResolver { NamingStrategy = new CamelCaseNamingStrategy { ProcessDictionaryKeys = false, OverrideSpecifiedNames = true } },
-            NullValueHandling = NullValueHandling.Include,
-            Converters = { new StringEnumConverter { NamingStrategy = new CamelCaseNamingStrategy() } },
-            DateFormatHandling = DateFormatHandling.IsoDateFormat,
-            Formatting = Formatting.None,
-        };
+        public static readonly JsonSettings Settings = JsonSettings.Api;
 
-        public static string Serialize(object? value)
+        public static string Serialize(object value)
         {
-            return JsonConvert.SerializeObject(value, Settings);
+            return JsonConvert.SerializeObject(value, Formatting.None, Settings);
         }
 
-        public static HttpResponse Ok(object? value)
+        public static HttpResponse Ok(object value)
         {
             return HttpResponse.Json(200, Serialize(value));
         }
 
-        public static HttpResponse Accepted(object? value)
+        public static HttpResponse Accepted(object value)
         {
             return HttpResponse.Json(202, Serialize(value));
         }
 
-        public static HttpResponse Error(int status, string code, string message, string? requestId = null)
+        public static HttpResponse Error(int status, string code, string message, string requestId = null)
         {
             return HttpResponse.Json(status, Serialize(new { error = message, code = code, requestId = requestId }));
         }
@@ -122,13 +112,14 @@ namespace Fairlead.Core.Host
             }
         }
 
-        public static T? Read<T>(JObject body, string name, T? fallback = default(T))
+        public static T Read<T>(JObject body, string name, T fallback = default(T))
         {
             var tok = body[name];
             if (tok == null || tok.Type == JTokenType.Null) return fallback;
             try { return tok.ToObject<T>(); }
-            catch (Exception ex) when (ex is JsonException || ex is FormatException || ex is ArgumentException)
+            catch (Exception ex)
             {
+                if (!(ex is JsonException || ex is FormatException || ex is ArgumentException || ex is InvalidCastException || ex is OverflowException)) throw;
                 throw new BadRequestException("Field '" + name + "' has the wrong type.");
             }
         }
@@ -165,7 +156,7 @@ namespace Fairlead.Core.Host
         public bool Exists { get { return Directory.Exists(_root) && File.Exists(Path.Combine(_root, "index.html")); } }
         public string Root { get { return _root; } }
 
-        public HttpResponse? Serve(HttpRequest request)
+        public HttpResponse Serve(HttpRequest request)
         {
             if (request.Method != "GET" && request.Method != "HEAD") return null;
             var rel = request.Path.Trim('/');
@@ -180,7 +171,7 @@ namespace Fairlead.Core.Host
                 if (!File.Exists(full)) return null;
             }
             var ext = Path.GetExtension(full);
-            string? type;
+            string type;
             if (!Types.TryGetValue(ext, out type) || type == null) type = "application/octet-stream";
             var response = HttpResponse.Bytes(200, File.ReadAllBytes(full), type);
             response.Headers["Cache-Control"] = ext.Equals(".html", StringComparison.OrdinalIgnoreCase) ? "no-store" : "public, max-age=3600";

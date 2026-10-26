@@ -9,7 +9,7 @@ using System.Threading.Tasks;
 using Fairlead.Core.Config;
 using Fairlead.Core.Gateway;
 using Fairlead.Core.Host;
-using Newtonsoft.Json.Linq;
+using Fairlead.Core.Serialization;
 using Xunit;
 
 namespace Fairlead.Core.Tests

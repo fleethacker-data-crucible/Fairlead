@@ -1,12 +1,17 @@
 #requires -Version 5.1
-# Fairlead PowerShell module: a thin shell around Fairlead.Core.dll. All logic (gateway, routing, health,
-# translation, admin API) lives in the DLL; PowerShell does what only it can do on the workstation: read
-# fairlead.env, load the DLL, show the tray icon and open the browser.
+# Fairlead PowerShell module: a thin shell around the Fairlead core (src\Fairlead.Core, C# source compiled in memory
+# at launch; no DLL is shipped or loaded). All logic (gateway, routing, health, translation, admin API) lives in the
+# core; PowerShell does what only it can do on the workstation: read fairlead.env, compile the core, show the tray
+# icon and open the browser.
 Set-StrictMode -Version 3.0
 
 . (Join-Path $PSScriptRoot 'Tray.ps1')
 
 $script:FairleadCoreLoaded = $false
+# Framework assemblies the core compiles against on Windows PowerShell 5.1. Keep in step with the <Reference> items in
+# src\Fairlead.Core\Fairlead.Core.csproj (the C# 5 check build).
+$script:FairleadCoreReferences = @('System.dll', 'System.Core.dll', 'System.Net.Http.dll', 'System.Security.dll')
+$script:FairleadCoreLoad = $null
 
 function Get-FairleadRoot {
     <# Repository or bundle root: two levels above module\Fairlead. #>
@@ -17,56 +22,94 @@ function Get-FairleadRoot {
     return (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent)
 }
 
-function Get-FairleadCoreCandidates {
-    param([string]$Root)
-    $desktop = $PSVersionTable.PSEdition -ne 'Core'
-    $tfm = if ($desktop) { 'net48' } else { 'netstandard2.0' }
-    $list = New-Object System.Collections.Generic.List[string]
-    $custom = [Environment]::GetEnvironmentVariable('FAIRLEAD_CORE_DLL', 'Process')
-    if ($custom) { [void]$list.Add($custom) }
-    [void]$list.Add((Join-Path $Root ('lib\' + $tfm + '\Fairlead.Core.dll')))
-    foreach ($cfg in @('Release', 'Debug')) {
-        [void]$list.Add((Join-Path $Root ('src\Fairlead.Core\bin\' + $cfg + '\' + $tfm + '\Fairlead.Core.dll')))
+function Get-FairleadCoreSource {
+    <#
+    .SYNOPSIS
+      The core's C# source files (src\Fairlead.Core\**\*.cs, build output folders excluded), in a stable order.
+      FAIRLEAD_CORE_SOURCE may point at another source folder (development).
+    #>
+    [CmdletBinding()]
+    param([string]$Root = (Get-FairleadRoot))
+    $dir = [Environment]::GetEnvironmentVariable('FAIRLEAD_CORE_SOURCE', 'Process')
+    if (-not $dir) { $dir = Join-Path $Root 'src\Fairlead.Core' }
+    if (-not (Test-Path -LiteralPath $dir -PathType Container)) {
+        throw ('The Fairlead core source folder ' + $dir + ' was not found. Extract the whole release bundle (Fairlead-<version>.zip) and run Launch-Fairlead.bat from it.')
     }
-    return @($list.ToArray())
+    $dir = (Resolve-Path -LiteralPath $dir).Path
+    $files = @(Get-ChildItem -LiteralPath $dir -Filter '*.cs' -Recurse -File |
+        Where-Object { $_.FullName.Substring($dir.Length) -notmatch '(?i)[\\/](bin|obj)[\\/]' } |
+        Sort-Object FullName | ForEach-Object { $_.FullName })
+    if ($files.Count -eq 0) { throw ('No core source (*.cs) under ' + $dir + '. Extract the whole release bundle again.') }
+    return [pscustomobject]@{ Directory = $dir; Files = $files }
 }
 
 function Import-FairleadCore {
     <#
     .SYNOPSIS
-      Loads Fairlead.Core.dll (net48 for Windows PowerShell 5.1, netstandard2.0 for PowerShell 7).
+      Compiles the Fairlead core from source, in memory, and loads it into this session.
     .DESCRIPTION
-      Looks in lib\ (release bundle) and then in the build output under src\. Newtonsoft.Json.dll must sit
-      next to it. Throws with the searched paths when nothing is found.
+      The core ships as C# source (src\Fairlead.Core). The workstation's application control blocks loading custom
+      DLL files, so nothing is loaded from disk: Windows PowerShell 5.1 compiles the files with Add-Type and the
+      inbox .NET Framework 4.8 compiler (C# 5), referencing framework assemblies only. This takes a few seconds per
+      launch; the time is kept in Get-FairleadCoreLoadInfo. PowerShell 7 compiles the same files with its own
+      compiler. Calling it again in the same session does nothing.
     #>
     [CmdletBinding()]
     param([string]$Root = (Get-FairleadRoot))
     if ($script:FairleadCoreLoaded -or ('Fairlead.Core.Facade' -as [type])) { $script:FairleadCoreLoaded = $true; return }
-    $candidates = Get-FairleadCoreCandidates -Root $Root
-    $dll = $candidates | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) } | Select-Object -First 1
-    if (-not $dll) {
-        throw ("Fairlead.Core.dll was not found. Build it with build\Build-Fairlead.ps1, or use a release bundle. Searched:`n  " + ($candidates -join "`n  "))
+    if ($ExecutionContext.SessionState.LanguageMode -ne 'FullLanguage') {
+        throw ('PowerShell is running in ' + $ExecutionContext.SessionState.LanguageMode + ' mode, which does not allow compiling the Fairlead core (Add-Type). Fairlead needs FullLanguage mode; ask IT. Do not try to work around the policy.')
     }
-    $dir = Split-Path $dll -Parent
-    foreach ($dep in @('Newtonsoft.Json.dll', 'System.Security.Cryptography.ProtectedData.dll')) {
-        $path = Join-Path $dir $dep
-        if (Test-Path -LiteralPath $path) {
-            try { Add-Type -LiteralPath $path -ErrorAction Stop } catch { if ($_.Exception.Message -notmatch 'already') { throw } }
-        } elseif ($dep -eq 'Newtonsoft.Json.dll' -and -not ('Newtonsoft.Json.JsonConvert' -as [type])) {
-            throw ('Newtonsoft.Json.dll must sit next to ' + $dll + '. Rebuild with build\Build-Fairlead.ps1 or use a release bundle.')
-        }
-    }
+    $source = Get-FairleadCoreSource -Root $Root
+    $watch = [System.Diagnostics.Stopwatch]::StartNew()
     try {
-        Add-Type -LiteralPath $dll -ErrorAction Stop
+        if ($PSVersionTable.PSEdition -ne 'Core') {
+            # Windows PowerShell 5.1: the inbox CodeDom compiler (C# 5), in memory.
+            $cp = New-Object System.CodeDom.Compiler.CompilerParameters
+            $cp.GenerateInMemory = $true
+            $cp.GenerateExecutable = $false
+            $cp.IncludeDebugInformation = $false
+            $cp.TreatWarningsAsErrors = $false
+            $cp.WarningLevel = 0   # warnings never stop a launch; the C# 5 check build treats them as errors
+            $cp.CompilerOptions = '/optimize+'
+            [void]$cp.ReferencedAssemblies.AddRange([string[]]$script:FairleadCoreReferences)
+            Add-Type -Path $source.Files -CompilerParameters $cp -ErrorAction Stop
+        } else {
+            # PowerShell 7 compiles against its own .NET reference set; DPAPI (ProtectedData) ships with PowerShell 7 on Windows.
+            $refs = @()
+            try {
+                Add-Type -AssemblyName System.Security.Cryptography.ProtectedData -ErrorAction Stop
+                $refs += [System.Security.Cryptography.ProtectedData].Assembly.Location
+            } catch { }
+            if ($refs.Count -gt 0) { Add-Type -Path $source.Files -ReferencedAssemblies $refs -IgnoreWarnings -WarningAction SilentlyContinue -ErrorAction Stop }
+            else { Add-Type -Path $source.Files -IgnoreWarnings -WarningAction SilentlyContinue -ErrorAction Stop }
+        }
     } catch {
         $msg = $_.Exception.Message
         if ($msg -match '(?i)policy|blocked|application control|0x800711C7|code integrity') {
-            throw ('Windows blocked Fairlead.Core.dll (' + $msg + '). The workstation application-control policy does not allow this unsigned DLL. Ask IT to sign or allow it; do not try to work around the policy.')
+            throw ('Windows blocked compiling the Fairlead core in memory (' + $msg + '). Fairlead ships as source and loads no DLL file; ask IT whether in-memory Add-Type compilation is allowed for standard users. Do not try to work around the policy.')
         }
-        throw
+        throw ('The Fairlead core source under ' + $source.Directory + ' did not compile (' + $msg + '). Extract the release bundle again; if you changed the source, keep it to C# 5 and framework assemblies only.')
     }
+    $watch.Stop()
     $script:FairleadCoreLoaded = $true
-    Write-Verbose ('Loaded ' + $dll)
+    $script:FairleadCoreLoad = [pscustomobject]@{
+        Source       = $source.Directory
+        Files        = $source.Files.Count
+        Milliseconds = [int]$watch.Elapsed.TotalMilliseconds
+        Compiler     = $(if ($PSVersionTable.PSEdition -ne 'Core') { 'Windows PowerShell ' + $PSVersionTable.PSVersion + ' (CodeDom, C# 5)' } else { 'PowerShell ' + $PSVersionTable.PSVersion })
+    }
+    Write-Verbose ('Compiled ' + $source.Files.Count + ' core source files in ' + $script:FairleadCoreLoad.Milliseconds + ' ms')
+}
+
+function Get-FairleadCoreLoadInfo {
+    <# How this session loaded the core: source folder, file count, compile time (ms) and compiler; $null before Import-FairleadCore. #>
+    [CmdletBinding()]
+    param()
+    if (-not $script:FairleadCoreLoad -and ('Fairlead.Core.Facade' -as [type])) {
+        return [pscustomobject]@{ Source = $null; Files = 0; Milliseconds = 0; Compiler = 'already loaded in this session' }
+    }
+    return $script:FairleadCoreLoad
 }
 
 function Initialize-FairleadEnvironment {
@@ -170,4 +213,4 @@ function Get-FairleadStatus {
     }
 }
 
-Export-ModuleMember -Function Get-FairleadRoot, Import-FairleadCore, Initialize-FairleadEnvironment, Start-Fairlead, Get-FairleadStatus
+Export-ModuleMember -Function Get-FairleadRoot, Get-FairleadCoreSource, Import-FairleadCore, Get-FairleadCoreLoadInfo, Initialize-FairleadEnvironment, Start-Fairlead, Get-FairleadStatus

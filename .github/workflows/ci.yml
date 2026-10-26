@@ -28,13 +28,22 @@ jobs:
         with:
           node-version: 22
 
-      - name: Core build and tests (net8.0 + net48)
+      # Fairlead.Core.csproj is the C# 5 check (LangVersion 5, net48 reference assemblies, framework references
+      # only); the tests compile the same core .cs files for net8.0 and net48.
+      - name: Core C# 5 check build and tests (net8.0 + net48)
         shell: powershell
         run: |
           dotnet build Fairlead.sln -c Release --nologo
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           dotnet test Fairlead.sln -c Release --no-build --nologo --logger "trx;LogFileName=core.trx" --results-directory TestResults
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
+
+      # Exactly what the launcher does on the workstation: fresh Windows PowerShell 5.1 processes compile
+      # src\Fairlead.Core\**\*.cs in memory with Add-Type -CompilerParameters (the inbox C# 5 compiler).
+      # Fails on any C# 6+ syntax, a non-framework reference or an assembly loaded from disk; reports the compile time.
+      - name: Core compiles with Windows PowerShell 5.1 Add-Type (C# 5)
+        shell: powershell
+        run: .\build\Test-FairleadAddType.ps1 -Runs 3
 
       - name: UI typecheck, tests, build
         shell: powershell
@@ -69,9 +78,19 @@ jobs:
           Write-Host "::notice title=Pester on PowerShell $($PSVersionTable.PSVersion)::$($r.PassedCount) passed, $($r.FailedCount) failed"
           if ($r.FailedCount -gt 0 -or $r.Result -ne 'Passed') { exit 1 }
 
-      - name: Assemble bundle
+      - name: Assemble bundle (core as source, no DLLs)
         shell: powershell
-        run: .\build\Build-Fairlead.ps1 -SkipTests -SkipWeb
+        run: |
+          $ErrorActionPreference = 'Stop'
+          .\build\Build-Fairlead.ps1 -SkipTests -SkipWeb
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $zip = Get-ChildItem dist\Fairlead-*.zip | Select-Object -First 1
+          $entries = @([IO.Compression.ZipFile]::OpenRead($zip.FullName).Entries | ForEach-Object { $_.FullName })
+          $bin = @($entries | Where-Object { $_ -match '(?i)\.(dll|exe|pdb)$' })
+          if ($bin.Count -gt 0) { throw ('Bundle contains binaries: ' + ($bin -join ', ')) }
+          $cs = @($entries | Where-Object { $_ -match '^src[\\/]Fairlead\.Core[\\/].*\.cs$' })
+          if ($cs.Count -lt 20) { throw ('Bundle is missing the core source (' + $cs.Count + ' .cs files)') }
+          Write-Host ('::notice title=Bundle::' + $zip.Name + ': ' + $entries.Count + ' entries, ' + $cs.Count + ' core .cs files, no DLL')
 
       - uses: actions/upload-artifact@v4
         if: always()
