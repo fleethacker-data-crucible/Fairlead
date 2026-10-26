@@ -176,6 +176,14 @@ function Start-Fairlead {
     Write-Host ('Fairlead is running. Point tools at ' + $info.GatewayUrl) -ForegroundColor Cyan
     if (-not $info.PortIsRegistry) { Write-Host ('  Port ' + $preferred + ' was busy, so Fairlead took ' + $info.Port + '. Tools configured for ' + $preferred + ' will not reach it.') -ForegroundColor Yellow }
     Write-Host ('  Admin: ' + $info.Url + '   Config: ' + $info.ConfigFile) -ForegroundColor DarkGray
+    $gw = $hostObj.GatewayModels
+    if ($gw) {
+        if ($gw.Ok) { Write-Host ('  AI gateway: ' + $gw.Providers.Count + ' endpoint(s), ' + $gw.EnabledModels + ' enabled model(s) from ' + $gw.Path) -ForegroundColor DarkGray }
+        else {
+            Write-Host ('  AI gateway model file has problems; no gateway models were added (' + $gw.Path + '):') -ForegroundColor Yellow
+            foreach ($e in $gw.Errors) { Write-Host ('    ' + $e) -ForegroundColor Yellow }
+        }
+    }
     if ($autoStopOn) { Write-Host '  FAIRLEAD_AUTO_STOP=1: it stops when the admin tab closes.' -ForegroundColor DarkGray }
     else { Write-Host '  It keeps running after the browser closes. Stop it from the tray icon, "End session", or scripts\Stop-Fairlead.ps1.' -ForegroundColor DarkGray }
     if ($NoBrowser) { Write-Host ('  Admin link (open once): ' + $info.LaunchUrl) -ForegroundColor DarkGray }
@@ -199,6 +207,35 @@ function Start-Fairlead {
     }
 }
 
+function Test-FairleadModelConfig {
+    <#
+    .SYNOPSIS
+      Checks an AI gateway model file (config\ai_gateway_models.yaml) against this machine's environment, without
+      starting Fairlead.
+    .DESCRIPTION
+      Reads config\fairlead.env first, as Start-Fairlead does, then reports endpoints, models, the environment variables
+      the file names and every problem. Output names keys and variable names only: never base URLs, tokens or model ids.
+      Returns $true when the file is valid.
+    .EXAMPLE
+      Test-FairleadModelConfig
+      Test-FairleadModelConfig -Path D:\secure\ai_gateway_models.yaml
+    #>
+    [CmdletBinding()]
+    param([string]$Path, [string]$Root = (Get-FairleadRoot))
+    [void](Initialize-FairleadEnvironment -Root $Root)
+    if (-not $Path) { $Path = [Fairlead.Core.Facade]::GatewayModelPath($Root) }
+    if (-not $Path) {
+        Write-Host ('No AI gateway model file: set FAIRLEAD_GATEWAY_CONFIG or put it at ' + (Join-Path $Root 'config\ai_gateway_models.yaml') + '.') -ForegroundColor Yellow
+        return $false
+    }
+    $file = [Fairlead.Core.Facade]::TestGatewayModelFile($Path)
+    foreach ($line in $file.Summary()) {
+        $color = if ($line -match '^\s*error:') { 'Red' } elseif ($line -match '^\s*note:') { 'Yellow' } elseif ($file.Ok) { 'Green' } else { 'Gray' }
+        Write-Host $line -ForegroundColor $color
+    }
+    return $file.Ok
+}
+
 function Get-FairleadStatus {
     <# The status of the Fairlead running on this machine, from its public /v1/health and runtime file. #>
     [CmdletBinding()]
@@ -213,4 +250,4 @@ function Get-FairleadStatus {
     }
 }
 
-Export-ModuleMember -Function Get-FairleadRoot, Get-FairleadCoreSource, Import-FairleadCore, Get-FairleadCoreLoadInfo, Initialize-FairleadEnvironment, Start-Fairlead, Get-FairleadStatus
+Export-ModuleMember -Function Get-FairleadRoot, Get-FairleadCoreSource, Import-FairleadCore, Get-FairleadCoreLoadInfo, Initialize-FairleadEnvironment, Start-Fairlead, Test-FairleadModelConfig, Get-FairleadStatus
