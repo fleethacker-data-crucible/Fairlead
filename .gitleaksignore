@@ -1,0 +1,7 @@
+# Placeholders, not secrets (fleet-gate review on PR #9). Format: [commit:]file:rule:line
+# - integrations/openai-sdk/README.md:17  loopback curl example with the placeholder client key "fl-YOUR-KEY"
+# - src/Fairlead.Core.Tests/RoutingTests.cs:83  a made-up AWS-style key; the test proves such prompts stay on local models
+7016f580071ce161784136ac58335f534854f891:integrations/openai-sdk/README.md:curl-auth-header:17
+7016f580071ce161784136ac58335f534854f891:src/Fairlead.Core.Tests/RoutingTests.cs:aws-access-token:83
+integrations/openai-sdk/README.md:curl-auth-header:17
+src/Fairlead.Core.Tests/RoutingTests.cs:aws-access-token:83
