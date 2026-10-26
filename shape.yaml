@@ -1,3 +1,7 @@
+Yes. Your AI needs the endpoint construction contract: base URL source, HTTP method, path, headers, and request-body shape.
+
+Use this YAML section in the configuration file. It contains no hardcoded .mil domain.
+
 # The application must obtain this value from its runtime environment.
 # Example runtime value format: https://approved-gateway.example
 environment:
@@ -47,4 +51,136 @@ endpoints:
 
     # Final URL shape:
     # ${AI_GATEWAY_BASE_URL}/ai-gateway/mlflow/v1/responses
-    base_url_env:
+    base_url_env: "AI_GATEWAY_BASE_URL"
+    path: "/ai-gateway/mlflow/v1/responses"
+
+    headers:
+      Content-Type: "application/json"
+      Authorization:
+        scheme: "Bearer"
+        token_env: "DATABRICKS_TOKEN"
+
+    request_format: "openai_responses_v1"
+
+    request_body:
+      required_fields:
+        - "model"
+        - "input"
+
+      optional_fields:
+        - "max_output_tokens"
+
+      template:
+        model: "<configured provider model ID>"
+        max_output_tokens: "<integer>"
+        input:
+          - role: "user"
+            content:
+              - type: "input_text"
+                text: "<user prompt>"
+Then connect each model to one of those endpoint keys:
+
+models:
+  grok_4_6:
+    model_id: "system.ai.grok-4-6"
+    endpoint: "openai_responses"
+    enabled: true
+
+  gemini_3_8_flash:
+    model_id: "system.ai.gemini-3-8-flash"
+    endpoint: "mlflow_responses"
+    enabled: true
+
+  gemini_3_7_flash:
+    model_id: "system.ai.gemini-3-7-flash"
+    endpoint: "mlflow_responses"
+    enabled: true
+
+  gemini_3_6_flash:
+    model_id: "system.ai.gemini-3-6-flash"
+    endpoint: "mlflow_responses"
+    enabled: true
+
+  gemini_3_5_flash:
+    model_id: "system.ai.gemini-3-5-flash"
+    endpoint: "mlflow_responses"
+    enabled: true
+
+  gemini_3_5_flash_lite:
+    model_id: "system.ai.gemini-3-5-flash-lite"
+    endpoint: "mlflow_responses"
+    enabled: true
+
+  gpt_5_6_terra:
+    model_id: "system.ai.gpt-5-6-terra"
+    endpoint: "mlflow_responses"
+    enabled: true
+
+  gpt_5_6_luna:
+    model_id: "system.ai.gpt-5-6-luna"
+    endpoint: "mlflow_responses"
+    enabled: true
+
+  gpt_5_4:
+    model_id: "system.ai.gpt-5-4"
+    endpoint: "mlflow_responses"
+    enabled: true
+Exact request shapes your client should construct
+For grok_4_6:
+
+POST ${AI_GATEWAY_BASE_URL}/ai-gateway/openai/v1/responses
+Authorization: Bearer ${DATABRICKS_TOKEN}
+Content-Type: application/json
+{
+  "model": "system.ai.grok-4-6",
+  "max_output_tokens": 256,
+  "input": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "input_text",
+          "text": "Hello!"
+        }
+      ]
+    }
+  ]
+}
+For Gemini and GPT models in your provided list:
+
+POST ${AI_GATEWAY_BASE_URL}/ai-gateway/mlflow/v1/responses
+Authorization: Bearer ${DATABRICKS_TOKEN}
+Content-Type: application/json
+{
+  "model": "system.ai.gpt-5-4",
+  "max_output_tokens": 256,
+  "input": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "input_text",
+          "text": "Hello!"
+        }
+      ]
+    }
+  ]
+}
+Tell your AI this implementation rule
+Resolve endpoint configuration in this order:
+
+1. Resolve the requested logical route to a model registry key.
+2. Read models.<model_key>.endpoint.
+3. Read endpoints.<endpoint_key>.
+4. Read the base URL from the environment variable named in
+   endpoints.<endpoint_key>.base_url_env.
+5. Construct the final URL as:
+      remove_trailing_slash(base_url) + endpoint.path
+6. Read the bearer-token environment variable from:
+      endpoints.<endpoint_key>.headers.Authorization.token_env
+7. Construct the POST request using the endpoint request-body template.
+8. Insert models.<model_key>.model_id into the payload's model field.
+
+Do not hardcode hosts, paths, tokens, or model IDs in application code.
+Do not send YAML implementation metadata to the endpoint.
+This gives the AI an unambiguous endpoint model while keeping the deployment-specific host entirely outside the repository.
