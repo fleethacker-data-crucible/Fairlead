@@ -34,7 +34,8 @@ cd web; npm test; npm run typecheck
 Invoke-Pester tests\pester
 ```
 
-Run from source: build the UI, then `.\Launch-Fairlead.bat --console --no-tray`. The module compiles
+Run from source: `.\Launch-Fairlead.bat --console --no-tray` (the built UI is committed in `web\dist`; after a UI
+change run `npm run build` in `web` and commit `web\dist`, or CI fails). The module compiles
 `src\Fairlead.Core\**\*.cs` in memory (no build step for the core) and serves the UI from `web\dist`. To keep your
 real config untouched while experimenting, set `FAIRLEAD_DATA_DIR` and `FAIRLEAD_PORT` first.
 

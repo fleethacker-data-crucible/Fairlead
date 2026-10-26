@@ -9,3 +9,6 @@
 *.psm1 text eol=crlf
 *.psd1 text eol=crlf
 web/vendor/** -text
+
+# Built UI: stored byte-for-byte so a rebuild on any OS matches the committed copy (CI checks it).
+web/dist/** -text
