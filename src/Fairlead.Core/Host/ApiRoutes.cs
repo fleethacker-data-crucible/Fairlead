@@ -120,6 +120,27 @@ namespace Fairlead.Core.Host
                 return Task.FromResult(Json.Ok(GatewayView()));
             });
 
+            Admin.Get("/api/lazarette", r => Task.FromResult(Json.Ok(LazaretteView())));
+            Admin.Post("/api/lazarette/pair", async r =>
+            {
+                var code = Json.Read<string>(Json.Body(r), "code");
+                if (string.IsNullOrWhiteSpace(code)) throw new BadRequestException("Paste the pairing code from Lazarette (Settings, Fairlead, Pair).");
+                await Lazarette.PairAsync(code).ConfigureAwait(false);
+                Log.Info("LAZARETTE_PAIRED", "Paired with Lazarette (" + Lazarette.PairingHint + "); state " + Lazarette.State + ".");
+                return Json.Ok(LazaretteView());
+            });
+            Admin.Delete("/api/lazarette/pair", r =>
+            {
+                Lazarette.Unpair();
+                Log.Info("LAZARETTE_UNPAIRED", "Lazarette pairing removed; keys from Lazarette forgotten.");
+                return Task.FromResult(Json.Ok(LazaretteView()));
+            });
+            Admin.Post("/api/lazarette/refresh", async r =>
+            {
+                await Lazarette.PollAsync().ConfigureAwait(false);
+                return Json.Ok(LazaretteView());
+            });
+
             Admin.Post("/api/routes", SaveRoute);
             Admin.Delete("/api/routes/{id}", DeleteRoute);
             Admin.Post("/api/routing", SaveRouting);
@@ -228,7 +249,7 @@ namespace Fairlead.Core.Host
                         lastError = h == null ? null : h.LastError,
                         models = p.Models.Select(m => m.Id).Concat(DiscoveredModels(p.Id).Select(m => m.Id)).Distinct(StringComparer.OrdinalIgnoreCase).Count(),
                         breaker = b == null ? "closed" : b.State(DateTimeOffset.UtcNow).ToString().ToLowerInvariant(),
-                        keySource = SecretProtector.KeySource(p),
+                        keySource = SecretProtector.KeySource(p, Lazarette.Value),
                     };
                 }),
                 routes = cfg.Routes.Select(r => new { id = r.Id, strategy = r.Strategy, targets = r.Targets.Count }),
@@ -259,7 +280,7 @@ namespace Fairlead.Core.Host
                     p.StreamUsage,
                     models = p.Models,
                     discovered = DiscoveredModels(p.Id),
-                    keySource = SecretProtector.KeySource(p),
+                    keySource = SecretProtector.KeySource(p, Lazarette.Value),
                     keyHint = SecretProtector.KeyHint(p),
                     managed = p.Managed == true,
                     p.Path,
@@ -277,6 +298,7 @@ namespace Fairlead.Core.Host
                 c.Privacy,
                 c.CorsOrigins,
                 c.LogContent,
+                c.LazaretteHoldHours,
             };
         }
 
@@ -391,11 +413,11 @@ namespace Fairlead.Core.Host
                 var models = await Upstream.ListModelsAsync(p, CancellationToken.None, 10000).ConfigureAwait(false);
                 Breakers.ResetProvider(p.Id);
                 Health.Nudge();
-                return Json.Ok(new { ok = true, ms = sw.ElapsedMilliseconds, models = models, keySource = SecretProtector.KeySource(p) });
+                return Json.Ok(new { ok = true, ms = sw.ElapsedMilliseconds, models = models, keySource = SecretProtector.KeySource(p, Lazarette.Value) });
             }
             catch (UpstreamException ex)
             {
-                return Json.Ok(new { ok = false, ms = sw.ElapsedMilliseconds, error = ex.Message, kind = ex.Kind.ToString().ToLowerInvariant(), keySource = SecretProtector.KeySource(p) });
+                return Json.Ok(new { ok = false, ms = sw.ElapsedMilliseconds, error = ex.Message, kind = ex.Kind.ToString().ToLowerInvariant(), keySource = SecretProtector.KeySource(p, Lazarette.Value) });
             }
         }
 
@@ -482,6 +504,7 @@ namespace Fairlead.Core.Host
                 if (body["kedge"] != null) c.Kedge = ParseKedge((string)body["kedge"]);
                 if (body["requireClientKey"] != null) c.RequireClientKey = (bool)body["requireClientKey"];
                 if (body["setupComplete"] != null) c.SetupComplete = (bool)body["setupComplete"];
+                if (body["lazaretteHoldHours"] != null) c.LazaretteHoldHours = (double)body["lazaretteHoldHours"];
                 if (body["logContent"] != null) c.LogContent = (bool)body["logContent"];
                 var cors = body["corsOrigins"] as JArray;
                 if (cors != null) c.CorsOrigins = cors.Select(x => ((string)x ?? string.Empty).Trim().TrimEnd('/')).Where(x => x.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
@@ -566,6 +589,24 @@ namespace Fairlead.Core.Host
             return req;
         }
 
+        /// <summary>The Lazarette link for the UI: states and names, never a value or the pairing secret.</summary>
+        private object LazaretteView()
+        {
+            return new
+            {
+                paired = Lazarette.Paired,
+                pairing = Lazarette.PairingHint,
+                state = Lazarette.State,
+                message = Lazarette.Message,
+                lastChecked = Lazarette.LastChecked,
+                expiresAt = Lazarette.ExpiresAt,
+                holdHours = Lazarette.HoldHours,
+                port = Port,
+                registryPort = FairleadSettings.RegistryPort,
+                names = Lazarette.Names().Select(n => new { name = n.Name, state = n.State }),
+            };
+        }
+
         /// <summary>The AI gateway model file for the status page: keys, counts, problems and where each variable comes from; never values.</summary>
         private object GatewayView()
         {
@@ -588,7 +629,7 @@ namespace Fairlead.Core.Host
                 {
                     name = v,
                     kind = f.TokenVariables.Contains(v) ? "token" : f.BaseUrlVariables.Contains(v) ? "baseUrl" : "other",
-                    source = GatewayValues.HasValue(v) ? "stored" : !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(v)) ? "env" : "missing",
+                    source = GatewayValues.HasValue(v) ? "stored" : Lazarette.Value(v) != null ? "lazarette" : !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(v)) ? "env" : "missing",
                 }),
                 errors = f.Errors,
                 warnings = f.Warnings,

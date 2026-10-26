@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { LuAnchor } from 'react-icons/lu';
-import { Button, Checkbox, Field, Input, Notice, Page, Section, Textarea, cn, useToast } from '../components/ui';
+import { Button, Checkbox, Field, Input, Notice, Page, Section, Select, Textarea, cn, useToast } from '../components/ui';
 import { describeError } from '../lib/api';
 import { saveSettings, setKedge, useConfig } from '../lib/config';
 import type { Status } from '../lib/schemas';
@@ -52,6 +52,15 @@ export function SettingsPage({ status, refreshStatus }: { status: Status | undef
           <Checkbox label="Keep private requests on local models, whatever route was asked for" checked={c.privacy.forceLocalWhenSensitive} onChange={(e) => void save({ privacy: { ...c.privacy, forceLocalWhenSensitive: e.target.checked } })} />
           <Checkbox label="Require a client key from programs on this machine" checked={c.requireClientKey} onChange={(e) => void save({ requireClientKey: e.target.checked })} />
           <Checkbox label="Keep the latest prompt and answer in the Activity log (memory only, never on disk)" checked={c.logContent} onChange={(e) => void save({ logContent: e.target.checked })} />
+          <Field label="Keep keys from Lazarette after it locks or closes" hint="Keys stay in memory only and are always dropped at once when you remove the pairing or stop sharing in Lazarette. Shorter is safer; 'only while open' stops the AI gateway whenever the Lazarette tab is closed." className="max-w-md">
+            <Select value={String(c.lazaretteHoldHours)} onChange={(e) => void save({ lazaretteHoldHours: Number(e.target.value) })}>
+              <option value="0">Only while Lazarette is open and unlocked</option>
+              <option value="1">1 hour</option>
+              <option value="4">4 hours</option>
+              <option value="8">8 hours (default)</option>
+              <option value="24">24 hours</option>
+            </Select>
+          </Field>
         </div>
         {!c.requireClientKey ? <Notice tone="warn" className="mx-4 mb-3">Without keys, any program on this machine can spend your cloud credits through Fairlead. Web pages are still refused unless their origin is listed below.</Notice> : null}
       </Section>
