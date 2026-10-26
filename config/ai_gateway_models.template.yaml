@@ -1,0 +1,96 @@
+# Fairlead AI gateway model file, made from model-curls.md (same models, same order).
+#
+# TO FILL IN (GenAI.mil): replace the two <...> placeholders below with the full https address of each endpoint,
+# exactly as in the original curl commands. Change nothing else. Do NOT put the token here: Fairlead gets
+# DATABRICKS_TOKEN from Lazarette (or the environment variable of that name).
+#
+# Then import the filled-in copy in Fairlead: Providers -> AI gateway -> Import model file. It is kept encrypted on
+# the workstation; never commit the filled-in copy to a repository.
+#
+# Fairlead sends exactly what the curls do: POST, Content-Type: application/json, Authorization: Bearer <token>,
+# and a body of model, input (each message as role + content with input_text, or output_text for assistant turns)
+# and max_output_tokens when the caller sets a limit.
+
+environment:
+  required:
+    bearer_token:
+      env: "DATABRICKS_TOKEN"
+
+endpoints:
+  openai_responses:
+    method: "POST"
+    url: "<OPENAI_RESPONSES_URL>"
+    headers:
+      Content-Type: "application/json"
+      Authorization:
+        scheme: "Bearer"
+        token_env: "DATABRICKS_TOKEN"
+    request_format: "openai_responses_v1"
+    request_body:
+      required_fields:
+        - "model"
+        - "input"
+      optional_fields:
+        - "max_output_tokens"
+
+  mlflow_responses:
+    method: "POST"
+    url: "<MLFLOW_RESPONSES_URL>"
+    headers:
+      Content-Type: "application/json"
+      Authorization:
+        scheme: "Bearer"
+        token_env: "DATABRICKS_TOKEN"
+    request_format: "openai_responses_v1"
+    request_body:
+      required_fields:
+        - "model"
+        - "input"
+      optional_fields:
+        - "max_output_tokens"
+
+models:
+  grok_4_6:
+    model_id: "system.ai.grok-4-6"
+    endpoint: "openai_responses"
+    enabled: true
+
+  gemini_3_8_flash:
+    model_id: "system.ai.gemini-3-8-flash"
+    endpoint: "mlflow_responses"
+    enabled: true
+
+  gemini_3_7_flash:
+    model_id: "system.ai.gemini-3-7-flash"
+    endpoint: "mlflow_responses"
+    enabled: true
+
+  gemini_3_5_flash_lite:
+    model_id: "system.ai.gemini-3-5-flash-lite"
+    endpoint: "mlflow_responses"
+    enabled: true
+
+  gemini_3_6_flash:
+    model_id: "system.ai.gemini-3-6-flash"
+    endpoint: "mlflow_responses"
+    enabled: true
+
+  gpt_5_6_terra:
+    model_id: "system.ai.gpt-5-6-terra"
+    endpoint: "mlflow_responses"
+    enabled: true
+
+  gpt_5_6_luna:
+    model_id: "system.ai.gpt-5-6-luna"
+    endpoint: "mlflow_responses"
+    enabled: true
+
+  gemini_3_5_flash:
+    model_id: "system.ai.gemini-3-5-flash"
+    endpoint: "mlflow_responses"
+    enabled: true
+
+  gpt_5_4:
+    model_id: "system.ai.gpt-5-4"
+    endpoint: "mlflow_responses"
+    enabled: true
