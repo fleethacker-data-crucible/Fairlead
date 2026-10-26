@@ -240,6 +240,11 @@ namespace Fairlead.Core.Config
         public List<string> CorsOrigins { get; set; }
         /// <summary>Keep the latest prompt and answer text in the in-memory activity log (never on disk). Off by default.</summary>
         public bool LogContent { get; set; }
+        /// <summary>
+        /// Hours Fairlead keeps keys from Lazarette in memory after Lazarette last confirmed them, so routing survives
+        /// its tab closing. 0 forgets them as soon as Lazarette is locked or closed. Never written anywhere but memory.
+        /// </summary>
+        public double LazaretteHoldHours { get; set; }
 
         public FairleadConfig()
         {
@@ -256,6 +261,7 @@ namespace Fairlead.Core.Config
             Network = new NetworkConfig();
             Privacy = new PrivacyConfig();
             CorsOrigins = new List<string>();
+            LazaretteHoldHours = 8;
         }
 
         public ProviderConfig FindProvider(string id)

@@ -1,7 +1,7 @@
 // Config reads and writes. Every write returns the new config, which replaces the cached copy, and the
 // status is refreshed so the shell and the overview agree with what was saved.
 import { api, del, post } from './api';
-import { Config } from './schemas';
+import { Config, GatewayView, LazaretteView } from './schemas';
 import { invalidate, useResource } from './useResource';
 
 export function useConfig() {
@@ -40,3 +40,42 @@ export async function deleteClient(id: string): Promise<void> {
   invalidate('/api/config');
   invalidate('/api/status');
 }
+
+export type ImportResult = { saved: boolean; errors?: string[]; warnings?: string[]; gateway?: GatewayView };
+
+/** Sends the chosen model file; refused files come back with their problems and nothing is saved. */
+export async function importGatewayFile(yaml: string, values?: Record<string, string>): Promise<ImportResult> {
+  const r = await post<ImportResult>('/api/gateway/import', { yaml, values: values ?? null });
+  invalidate('/api/config');
+  invalidate('/api/status');
+  return r;
+}
+
+export async function saveGatewayValues(values: Record<string, string>): Promise<GatewayView> {
+  const r = await post<unknown>('/api/gateway/values', { values });
+  invalidate('/api/config');
+  invalidate('/api/status');
+  return GatewayView.parse(r);
+}
+
+export async function removeGatewayFile(): Promise<void> {
+  await del('/api/gateway');
+  invalidate('/api/config');
+  invalidate('/api/status');
+}
+
+export function useLazarette() {
+  return useResource('/api/lazarette', LazaretteView);
+}
+
+async function lazarette(promise: Promise<unknown>): Promise<LazaretteView> {
+  const raw = await promise;
+  invalidate('/api/lazarette');
+  invalidate('/api/config');
+  invalidate('/api/status');
+  return LazaretteView.parse(raw);
+}
+
+export const pairLazarette = (code: string) => lazarette(post('/api/lazarette/pair', { code }));
+export const unpairLazarette = () => lazarette(del('/api/lazarette/pair'));
+export const refreshLazarette = () => lazarette(post('/api/lazarette/refresh'));

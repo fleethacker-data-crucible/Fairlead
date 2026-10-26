@@ -110,6 +110,37 @@ namespace Fairlead.Core.Host
             Admin.Post("/api/providers/{id}/test", TestProvider);
             Admin.Post("/api/providers/{id}/discover", DiscoverProvider);
 
+            Admin.Post("/api/gateway/import", ImportGatewayFile);
+            Admin.Post("/api/gateway/values", SaveGatewayValues);
+            Admin.Delete("/api/gateway", r =>
+            {
+                GatewayValues.Clear();
+                Log.Info("GATEWAY_IMPORT_REMOVED", "The imported AI gateway model file and its stored values were deleted.");
+                LoadGatewayModels();
+                return Task.FromResult(Json.Ok(GatewayView()));
+            });
+
+            Admin.Get("/api/lazarette", r => Task.FromResult(Json.Ok(LazaretteView())));
+            Admin.Post("/api/lazarette/pair", async r =>
+            {
+                var code = Json.Read<string>(Json.Body(r), "code");
+                if (string.IsNullOrWhiteSpace(code)) throw new BadRequestException("Paste the pairing code from Lazarette (Settings, Fairlead, Pair).");
+                await Lazarette.PairAsync(code).ConfigureAwait(false);
+                Log.Info("LAZARETTE_PAIRED", "Paired with Lazarette (" + Lazarette.PairingHint + "); state " + Lazarette.State + ".");
+                return Json.Ok(LazaretteView());
+            });
+            Admin.Delete("/api/lazarette/pair", r =>
+            {
+                Lazarette.Unpair();
+                Log.Info("LAZARETTE_UNPAIRED", "Lazarette pairing removed; keys from Lazarette forgotten.");
+                return Task.FromResult(Json.Ok(LazaretteView()));
+            });
+            Admin.Post("/api/lazarette/refresh", async r =>
+            {
+                await Lazarette.PollAsync().ConfigureAwait(false);
+                return Json.Ok(LazaretteView());
+            });
+
             Admin.Post("/api/routes", SaveRoute);
             Admin.Delete("/api/routes/{id}", DeleteRoute);
             Admin.Post("/api/routing", SaveRouting);
@@ -218,22 +249,11 @@ namespace Fairlead.Core.Host
                         lastError = h == null ? null : h.LastError,
                         models = p.Models.Select(m => m.Id).Concat(DiscoveredModels(p.Id).Select(m => m.Id)).Distinct(StringComparer.OrdinalIgnoreCase).Count(),
                         breaker = b == null ? "closed" : b.State(DateTimeOffset.UtcNow).ToString().ToLowerInvariant(),
-                        keySource = SecretProtector.KeySource(p),
+                        keySource = SecretProtector.KeySource(p, Lazarette.Value),
                     };
                 }),
                 routes = cfg.Routes.Select(r => new { id = r.Id, strategy = r.Strategy, targets = r.Targets.Count }),
-                gatewayModels = GatewayModels == null ? null : new
-                {
-                    path = GatewayModels.Path,
-                    ok = GatewayModels.Ok,
-                    endpoints = GatewayModels.EndpointKeys,
-                    models = GatewayModels.ModelKeys.Count,
-                    enabledModels = GatewayModels.EnabledModels,
-                    providers = GatewayModels.Providers.Select(p => p.Id),
-                    variables = GatewayModels.RequiredVariables,
-                    errors = GatewayModels.Errors,
-                    warnings = GatewayModels.Warnings,
-                },
+                gatewayModels = GatewayView(),
                 launcher = Options.LauncherState,
                 metrics = Metrics.Summary(),
             };
@@ -260,7 +280,7 @@ namespace Fairlead.Core.Host
                     p.StreamUsage,
                     models = p.Models,
                     discovered = DiscoveredModels(p.Id),
-                    keySource = SecretProtector.KeySource(p),
+                    keySource = SecretProtector.KeySource(p, Lazarette.Value),
                     keyHint = SecretProtector.KeyHint(p),
                     managed = p.Managed == true,
                     p.Path,
@@ -278,6 +298,7 @@ namespace Fairlead.Core.Host
                 c.Privacy,
                 c.CorsOrigins,
                 c.LogContent,
+                c.LazaretteHoldHours,
             };
         }
 
@@ -367,7 +388,7 @@ namespace Fairlead.Core.Host
 
         private string ManagedMessage(string id)
         {
-            return "Provider '" + id + "' comes from the AI gateway model file" + (GatewayModels == null ? string.Empty : " (" + GatewayModels.Path + ")") + ". Change it there and restart Fairlead.";
+            return "Provider '" + id + "' comes from the AI gateway model file" + (GatewayModels == null ? string.Empty : " (" + GatewayModels.Path + ")") + ". Import a changed file under Providers, AI gateway; it takes effect at once.";
         }
 
         private Task<HttpResponse> DeleteProvider(HttpRequest r)
@@ -392,11 +413,11 @@ namespace Fairlead.Core.Host
                 var models = await Upstream.ListModelsAsync(p, CancellationToken.None, 10000).ConfigureAwait(false);
                 Breakers.ResetProvider(p.Id);
                 Health.Nudge();
-                return Json.Ok(new { ok = true, ms = sw.ElapsedMilliseconds, models = models, keySource = SecretProtector.KeySource(p) });
+                return Json.Ok(new { ok = true, ms = sw.ElapsedMilliseconds, models = models, keySource = SecretProtector.KeySource(p, Lazarette.Value) });
             }
             catch (UpstreamException ex)
             {
-                return Json.Ok(new { ok = false, ms = sw.ElapsedMilliseconds, error = ex.Message, kind = ex.Kind.ToString().ToLowerInvariant(), keySource = SecretProtector.KeySource(p) });
+                return Json.Ok(new { ok = false, ms = sw.ElapsedMilliseconds, error = ex.Message, kind = ex.Kind.ToString().ToLowerInvariant(), keySource = SecretProtector.KeySource(p, Lazarette.Value) });
             }
         }
 
@@ -483,6 +504,7 @@ namespace Fairlead.Core.Host
                 if (body["kedge"] != null) c.Kedge = ParseKedge((string)body["kedge"]);
                 if (body["requireClientKey"] != null) c.RequireClientKey = (bool)body["requireClientKey"];
                 if (body["setupComplete"] != null) c.SetupComplete = (bool)body["setupComplete"];
+                if (body["lazaretteHoldHours"] != null) c.LazaretteHoldHours = (double)body["lazaretteHoldHours"];
                 if (body["logContent"] != null) c.LogContent = (bool)body["logContent"];
                 var cors = body["corsOrigins"] as JArray;
                 if (cors != null) c.CorsOrigins = cors.Select(x => ((string)x ?? string.Empty).Trim().TrimEnd('/')).Where(x => x.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
@@ -567,6 +589,116 @@ namespace Fairlead.Core.Host
             return req;
         }
 
+        /// <summary>The Lazarette link for the UI: states and names, never a value or the pairing secret.</summary>
+        private object LazaretteView()
+        {
+            return new
+            {
+                paired = Lazarette.Paired,
+                pairing = Lazarette.PairingHint,
+                state = Lazarette.State,
+                message = Lazarette.Message,
+                lastChecked = Lazarette.LastChecked,
+                expiresAt = Lazarette.ExpiresAt,
+                holdHours = Lazarette.HoldHours,
+                port = Port,
+                registryPort = FairleadSettings.RegistryPort,
+                names = Lazarette.Names().Select(n => new { name = n.Name, state = n.State }),
+            };
+        }
+
+        /// <summary>The AI gateway model file for the status page: keys, counts, problems and where each variable comes from; never values.</summary>
+        private object GatewayView()
+        {
+            var f = GatewayModels;
+            var envPath = !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(GatewayModelFile.PathVariable));
+            if (f == null) return new { present = false, canImport = !envPath, imported = GatewayValues.HasFile };
+            return new
+            {
+                present = true,
+                source = GatewaySource,
+                path = f.Path,
+                ok = f.Ok,
+                canImport = !envPath,
+                imported = GatewayValues.HasFile,
+                endpoints = f.EndpointKeys,
+                models = f.ModelKeys.Count,
+                enabledModels = f.EnabledModels,
+                providers = f.Providers.Select(p => p.Id),
+                variables = f.RequiredVariables.Select(v => new
+                {
+                    name = v,
+                    kind = f.TokenVariables.Contains(v) ? "token" : f.BaseUrlVariables.Contains(v) ? "baseUrl" : "other",
+                    source = GatewayValues.HasValue(v) ? "stored" : Lazarette.Value(v) != null ? "lazarette" : !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(v)) ? "env" : "missing",
+                }),
+                errors = f.Errors,
+                warnings = f.Warnings,
+            };
+        }
+
+        /// <summary>
+        /// Takes the model file from the browser, refuses it when its structure is wrong (nothing is saved then), else
+        /// keeps it encrypted in the data folder and reloads the gateway providers. Values it names can come in the same call.
+        /// </summary>
+        private Task<HttpResponse> ImportGatewayFile(HttpRequest r)
+        {
+            if (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(GatewayModelFile.PathVariable)))
+                throw new BadRequestException(GatewayModelFile.PathVariable + " is set, so Fairlead reads the model file from that path and an import would be ignored. Remove the variable first.");
+            var body = Json.Body(r);
+            var yaml = Json.Read<string>(body, "yaml");
+            if (string.IsNullOrWhiteSpace(yaml)) throw new BadRequestException("Choose the model file (YAML) to import.");
+            if (yaml.Length > GatewayStore.MaxFileChars) throw new BadRequestException("The model file is too large; a gateway model file is a few KB.");
+            var check = GatewayModelFile.Inspect(yaml, "the chosen file");
+            if (!check.Ok) return Task.FromResult(Json.Ok(new { saved = false, errors = check.Errors, warnings = check.Warnings }));
+            var values = ReadGatewayValues(body, check);
+            GatewayValues.SaveFile(yaml);
+            if (values.Count > 0) GatewayValues.SetValues(values);
+            Log.Info("GATEWAY_IMPORTED", "AI gateway model file imported (" + check.EndpointKeys.Count + " endpoints, " + check.ModelKeys.Count + " models); kept encrypted at " + GatewayValues.Location + ".");
+            LoadGatewayModels();
+            return Task.FromResult(Json.Ok(new { saved = true, gateway = GatewayView() }));
+        }
+
+        /// <summary>Stores the gateway address (or another non-secret variable the current file names), encrypted, then reloads.</summary>
+        private Task<HttpResponse> SaveGatewayValues(HttpRequest r)
+        {
+            var f = GatewayModels;
+            if (f == null) throw new BadRequestException("Import the AI gateway model file first.");
+            var values = ReadGatewayValues(Json.Body(r), f);
+            if (values.Count == 0) throw new BadRequestException("Nothing to save.");
+            GatewayValues.SetValues(values);
+            Log.Info("GATEWAY_VALUES_SAVED", "Stored " + string.Join(", ", values.Keys) + " for the AI gateway (encrypted).");
+            LoadGatewayModels();
+            return Task.FromResult(Json.Ok(GatewayView()));
+        }
+
+        /// <summary>
+        /// The "values" object: only variables the file names, never a token (tokens live in Lazarette or the
+        /// environment); addresses must be https (http only for this machine).
+        /// </summary>
+        private static Dictionary<string, string> ReadGatewayValues(JToken body, GatewayModelFile f)
+        {
+            var result = new Dictionary<string, string>(StringComparer.Ordinal);
+            var values = body == null ? null : body["values"] as JObject;
+            if (values == null) return result;
+            foreach (var p in values.Properties())
+            {
+                if (!f.RequiredVariables.Contains(p.Name)) throw new BadRequestException("The model file does not use " + p.Name + ".");
+                if (f.TokenVariables.Contains(p.Name)) throw new BadRequestException(p.Name + " is a token: Fairlead does not store tokens. Keep it in Lazarette (or set the environment variable).");
+                if (p.Value.Type != JTokenType.String && p.Value.Type != JTokenType.Null) throw new BadRequestException(p.Name + " must be text.");
+                var v = p.Value.Type == JTokenType.Null ? string.Empty : ((string)p.Value).Trim();
+                if (v.Length > 8192) throw new BadRequestException(p.Name + " is too long.");
+                if (v.Length > 0 && f.BaseUrlVariables.Contains(p.Name))
+                {
+                    Uri u;
+                    var ok = Uri.TryCreate(v, UriKind.Absolute, out u) && (u.Scheme == "https" || (u.Scheme == "http" && u.IsLoopback))
+                        && string.IsNullOrEmpty(u.Query) && string.IsNullOrEmpty(u.Fragment) && string.IsNullOrEmpty(u.UserInfo);
+                    if (!ok) throw new BadRequestException(p.Name + " must be the gateway's https address, for example https://gateway.example, with no query or credentials.");
+                }
+                result[p.Name] = v;
+            }
+            return result;
+        }
+
         private static KedgeMode ParseKedge(string mode)
         {
             switch ((mode ?? string.Empty).Trim().ToLowerInvariant())
@@ -585,7 +717,7 @@ namespace Fairlead.Core.Host
                 case "openai": return ProviderKind.OpenAi;
                 case "anthropic": return ProviderKind.Anthropic;
                 case "ollama": return ProviderKind.Ollama;
-                case "responses": throw new BadRequestException("Responses providers come from the AI gateway model file (config\\ai_gateway_models.yaml), not from this page.");
+                case "responses": throw new BadRequestException("Responses providers come from the AI gateway model file: import it under Providers, AI gateway.");
                 default: throw new BadRequestException("Provider kind must be openai, anthropic or ollama.");
             }
         }

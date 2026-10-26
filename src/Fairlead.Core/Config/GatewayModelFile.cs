@@ -34,6 +34,8 @@ namespace Fairlead.Core.Config
             EndpointKeys = new List<string>();
             ModelKeys = new List<string>();
             RequiredVariables = new List<string>();
+            BaseUrlVariables = new List<string>();
+            TokenVariables = new List<string>();
         }
 
         public string Path { get; set; }
@@ -46,6 +48,10 @@ namespace Fairlead.Core.Config
         public int EnabledModels { get; set; }
         /// <summary>Every environment variable the file names (base URLs, tokens, environment.required).</summary>
         public List<string> RequiredVariables { get; private set; }
+        /// <summary>The variables named by endpoints.*.base_url_env (gateway addresses).</summary>
+        public List<string> BaseUrlVariables { get; private set; }
+        /// <summary>The variables named by endpoints.*.headers.Authorization.token_env (bearer tokens).</summary>
+        public List<string> TokenVariables { get; private set; }
 
         public bool Ok { get { return Errors.Count == 0; } }
 
@@ -72,6 +78,15 @@ namespace Fairlead.Core.Config
                 return missing;
             }
             return Parse(File.ReadAllText(path), path, env);
+        }
+
+        /// <summary>
+        /// Checks the file's own structure, as if every variable it names were set, so an import can be refused before
+        /// anything is saved. Missing values are not errors here; the status page asks for them.
+        /// </summary>
+        public static GatewayModelFile Inspect(string text, string path)
+        {
+            return Parse(text, path, name => name == TimeoutVariable ? null : "https://placeholder.invalid");
         }
 
         public static GatewayModelFile Parse(string text, string path, Func<string, string> env)
@@ -158,8 +173,10 @@ namespace Fairlead.Core.Config
 
         private void NeedVariable(string name, string where, Func<string, string> env)
         {
-            if (!RequiredVariables.Contains(name)) RequiredVariables.Add(name);
-            if (string.IsNullOrWhiteSpace(env(name))) Errors.Add("Environment variable " + name + " (" + where + ") is not set.");
+            // One message per variable, however many places name it.
+            if (RequiredVariables.Contains(name)) return;
+            RequiredVariables.Add(name);
+            if (string.IsNullOrWhiteSpace(env(name))) Errors.Add(name + " (" + where + ") is not set.");
         }
 
         private string VariableAt(JToken token, string where)
@@ -228,6 +245,7 @@ namespace Fairlead.Core.Config
                 if (baseVar != null)
                 {
                     NeedVariable(baseVar, where + ".base_url_env", env);
+                    if (!BaseUrlVariables.Contains(baseVar)) BaseUrlVariables.Add(baseVar);
                     var value = env(baseVar);
                     if (!string.IsNullOrWhiteSpace(value))
                     {
@@ -235,7 +253,7 @@ namespace Fairlead.Core.Config
                         value = value.Trim();
                         var loopback = Uri.TryCreate(value, UriKind.Absolute, out u) && u.IsLoopback;
                         if (u == null || (u.Scheme != "https" && !(loopback && u.Scheme == "http")) || !string.IsNullOrEmpty(u.Query) || !string.IsNullOrEmpty(u.Fragment) || !string.IsNullOrEmpty(u.UserInfo))
-                            Errors.Add("Environment variable " + baseVar + " must hold an absolute https URL with no query or credentials.");
+                            Errors.Add("The gateway address in " + baseVar + " must hold an absolute https URL with no query or credentials.");
                         else baseUrl = value.TrimEnd('/');
                     }
                 }
@@ -258,7 +276,11 @@ namespace Fairlead.Core.Config
                             if (scheme == null || scheme.Type != JTokenType.String || !string.Equals((string)scheme, "Bearer", StringComparison.OrdinalIgnoreCase))
                                 Errors.Add(hw + ".scheme must be Bearer.");
                             tokenVar = VariableAt(auth["token_env"], hw + ".token_env");
-                            if (tokenVar != null) NeedVariable(tokenVar, hw + ".token_env", env);
+                            if (tokenVar != null)
+                            {
+                                NeedVariable(tokenVar, hw + ".token_env", env);
+                                if (!TokenVariables.Contains(tokenVar)) TokenVariables.Add(tokenVar);
+                            }
                             continue;
                         }
                         if (hp.Value.Type != JTokenType.String) { Errors.Add(hw + " must be a text value."); continue; }

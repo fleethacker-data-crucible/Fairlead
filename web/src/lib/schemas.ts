@@ -53,6 +53,31 @@ export const MetricsSummary = z.object({
 }).passthrough();
 export type MetricsSummary = z.infer<typeof MetricsSummary>;
 
+export const GatewayVariable = z.object({
+  name: z.string(),
+  kind: z.enum(['baseUrl', 'token', 'other']),
+  source: z.enum(['stored', 'lazarette', 'env', 'missing']),
+});
+export type GatewayVariable = z.infer<typeof GatewayVariable>;
+
+/** The AI gateway model file: keys, counts, problems and where each variable comes from; never values. */
+export const GatewayView = z.object({
+  present: z.boolean().default(false),
+  canImport: z.boolean().default(true),
+  imported: z.boolean().default(false),
+  source: z.enum(['imported', 'environment', 'file']).nullable().optional(),
+  path: z.string().optional(),
+  ok: z.boolean().default(false),
+  endpoints: z.array(z.string()).default([]),
+  models: z.number().default(0),
+  enabledModels: z.number().default(0),
+  providers: z.array(z.string()).default([]),
+  variables: z.array(GatewayVariable).default([]),
+  errors: z.array(z.string()).default([]),
+  warnings: z.array(z.string()).default([]),
+}).passthrough();
+export type GatewayView = z.infer<typeof GatewayView>;
+
 export const Status = z.object({
   version: z.string(),
   port: z.number(),
@@ -81,12 +106,7 @@ export const Status = z.object({
     keySource: z.string(),
   }).passthrough()),
   routes: z.array(z.object({ id: z.string(), strategy: z.string(), targets: z.number() }).passthrough()),
-  gatewayModels: z.object({
-    path: z.string(),
-    ok: z.boolean(),
-    errors: z.array(z.string()).default([]),
-    warnings: z.array(z.string()).default([]),
-  }).passthrough().nullable().optional(),
+  gatewayModels: GatewayView.nullable().optional(),
   metrics: MetricsSummary,
 }).passthrough();
 export type Status = z.infer<typeof Status>;
@@ -117,7 +137,7 @@ export const Provider = z.object({
   streamUsage: z.boolean().default(true),
   models: z.array(ModelInfo),
   discovered: z.array(ModelInfo).default([]),
-  keySource: z.enum(['stored', 'env', 'none']),
+  keySource: z.enum(['stored', 'lazarette', 'env', 'none']),
   keyHint: s,
   /** From the AI gateway model file: shown, never edited here. */
   managed: z.boolean().default(false),
@@ -175,6 +195,7 @@ export const Config = z.object({
   privacy: z.object({ detectSecrets: z.boolean(), forceLocalWhenSensitive: z.boolean() }).passthrough(),
   corsOrigins: z.array(z.string()),
   logContent: z.boolean(),
+  lazaretteHoldHours: z.number().default(8),
 }).passthrough();
 export type Config = z.infer<typeof Config>;
 
@@ -254,3 +275,18 @@ export type ProviderHealth = z.infer<typeof ProviderHealth>;
 
 export const LogEntries = z.array(z.object({ time: z.string(), level: z.string(), event: z.string(), message: s, route: s, requestId: s }).passthrough());
 export type LogEntries = z.infer<typeof LogEntries>;
+
+/** Fairlead's link to Lazarette: states and names only; never a value or the pairing secret. */
+export const LazaretteView = z.object({
+  paired: z.boolean(),
+  pairing: z.string().nullable().optional(),
+  state: z.string(),
+  message: z.string().nullable().optional(),
+  lastChecked: z.string().nullable().optional(),
+  expiresAt: z.string().nullable().optional(),
+  holdHours: z.number(),
+  port: z.number(),
+  registryPort: z.number(),
+  names: z.array(z.object({ name: z.string(), state: z.string() })).default([]),
+}).passthrough();
+export type LazaretteView = z.infer<typeof LazaretteView>;

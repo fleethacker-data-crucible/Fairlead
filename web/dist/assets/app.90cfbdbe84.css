@@ -7,6 +7,7 @@
     --font-mono: var(--fl-font-mono);
     --color-black: #000;
     --spacing: 0.25rem;
+    --container-md: 28rem;
     --text-sm: 0.875rem;
     --text-sm--line-height: calc(1.25 / 0.875);
     --font-weight-medium: 500;
@@ -403,11 +404,17 @@
   .max-w-\[calc\(100vw-2rem\)\] {
     max-width: calc(100vw - 2rem);
   }
+  .max-w-md {
+    max-width: var(--container-md);
+  }
   .min-w-0 {
     min-width: 0px;
   }
   .min-w-\[12rem\] {
     min-width: 12rem;
+  }
+  .min-w-\[280px\] {
+    min-width: 280px;
   }
   .flex-1 {
     flex: 1;

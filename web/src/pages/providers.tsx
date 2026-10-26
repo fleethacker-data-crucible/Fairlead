@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import { LuCloud, LuHardDrive, LuPlus, LuRefreshCw, LuTrash2 } from 'react-icons/lu';
+import { GatewayCard } from '../components/gateway';
+import { LazaretteCard } from '../components/lazarette';
 import { describeModel } from '../components/targets';
 import { Button, Checkbox, ConfirmDialog, Empty, Field, Input, Notice, Page, Pill, Section, Select, useToast } from '../components/ui';
 import { describeError } from '../lib/api';
@@ -43,12 +45,8 @@ export function ProvidersPage({ status }: { status: Status | undefined }) {
         </span>
       }
     >
-      {status?.gatewayModels && !status.gatewayModels.ok ? (
-        <Notice tone="warn">
-          The AI gateway model file has problems, so none of its models were added ({status.gatewayModels.path}):
-          <ul className="mt-1 list-disc pl-5">{status.gatewayModels.errors.map((e) => <li key={e}>{e}</li>)}</ul>
-        </Notice>
-      ) : null}
+      <GatewayCard gateway={status?.gatewayModels} />
+      <LazaretteCard />
       {config.error ? <Notice tone="err">{config.error}</Notice> : null}
       {providers.length === 0 ? <Section><Empty title="No providers" emblem>Add a local server or a cloud API with the menu above.</Empty></Section> : (
         <div className="grid gap-5 lg:grid-cols-[280px_minmax(0,1fr)]">
@@ -87,11 +85,11 @@ function ManagedProvider({ provider, probeMs }: { provider: Provider; probeMs: n
   return (
     <Section title={<span className="flex items-center gap-2">{provider.name}<span className="mono text-ink-3">{provider.id}</span></span>}
       aside={<Button size="sm" busy={busy} onClick={() => void check()}>Check reachability</Button>}>
-      <Notice tone="info" className="mx-4 mt-4">From the AI gateway model file. Change endpoints and models there and restart Fairlead; the address and token come from environment variables, never from this page.</Notice>
+      <Notice tone="info" className="mx-4 mt-4">From the AI gateway model file. To change endpoints or models, import a new version above; it takes effect at once. The address is set above; the token comes from Lazarette or the environment, never from this page.</Notice>
       <dl className="grid gap-x-6 gap-y-2 px-4 py-4 text-[13px] md:grid-cols-2">
         <div><dt className="text-ink-3">API style</dt><dd>OpenAI Responses (called without streaming)</dd></div>
         <div><dt className="text-ink-3">Endpoint path</dt><dd className="mono">{provider.path ?? ''}</dd></div>
-        <div><dt className="text-ink-3">Token</dt><dd>{provider.keySource === 'env' ? <>from <span className="mono">{provider.apiKeyEnv}</span></> : <span className="text-err">not set ({provider.apiKeyEnv})</span>}</dd></div>
+        <div><dt className="text-ink-3">Token</dt><dd>{provider.keySource === 'env' ? <>from <span className="mono">{provider.apiKeyEnv}</span></> : provider.keySource === 'lazarette' ? <>from Lazarette (<span className="mono">{provider.apiKeyEnv}</span>)</> : <span className="text-err">not set ({provider.apiKeyEnv})</span>}</dd></div>
         <div><dt className="text-ink-3">Retries on transient errors</dt><dd>{provider.retries ?? 0}, then the route's next target</dd></div>
         <div><dt className="text-ink-3">Timeout</dt><dd>{provider.timeoutSeconds} s</dd></div>
         <div><dt className="text-ink-3">Last probe</dt><dd>{ms(probeMs)}</dd></div>
@@ -153,10 +151,10 @@ function EditableProvider({ provider, probeMs, onDeleted }: { provider: Provider
           <Field label="Base URL" hint={draft.kind === 'openAi' ? 'Include /v1, e.g. https://api.openai.com/v1' : 'The server root, e.g. http://127.0.0.1:11434'} className="md:col-span-2">
             <Input value={draft.baseUrl} onChange={(e) => setDraft({ ...draft, baseUrl: e.target.value })} className="mono" />
           </Field>
-          <Field label={`API key${provider.keySource === 'stored' ? ` (saved ${provider.keyHint ?? ''})` : provider.keySource === 'env' ? ` (from ${provider.apiKeyEnv})` : ''}`} hint="Encrypted for your Windows account. Changing the base URL forgets a saved key unless you enter it again.">
+          <Field label={`API key${provider.keySource === 'stored' ? ` (saved ${provider.keyHint ?? ''})` : provider.keySource === 'lazarette' ? ` (from Lazarette as ${provider.apiKeyEnv})` : provider.keySource === 'env' ? ` (from ${provider.apiKeyEnv})` : ''}`} hint="Encrypted for your Windows account. Changing the base URL forgets a saved key unless you enter it again.">
             <Input type="password" autoComplete="off" value={key} placeholder={provider.keySource === 'none' ? (draft.local ? 'Usually none for local servers' : 'Paste API key') : 'Leave empty to keep'} onChange={(e) => setKey(e.target.value)} />
           </Field>
-          <Field label="Or read the key from this environment variable"><Input value={draft.apiKeyEnv ?? ''} onChange={(e) => setDraft({ ...draft, apiKeyEnv: e.target.value })} className="mono" placeholder="ANTHROPIC_API_KEY" /></Field>
+          <Field label="Or get it by this name from Lazarette, else this environment variable"><Input value={draft.apiKeyEnv ?? ''} onChange={(e) => setDraft({ ...draft, apiKeyEnv: e.target.value })} className="mono" placeholder="ANTHROPIC_API_KEY" /></Field>
           <Field label="Timeout (seconds)" hint="Until the first response headers, and the longest a stream may go quiet."><Input type="number" min={5} max={3600} value={draft.timeoutSeconds} onChange={(e) => setDraft({ ...draft, timeoutSeconds: Number(e.target.value) })} /></Field>
           <div className="flex flex-col justify-end gap-2">
             <Checkbox label="Local: runs on this machine or network (used in Kedge mode and for private requests)" checked={draft.local} onChange={(e) => setDraft({ ...draft, local: e.target.checked })} />
