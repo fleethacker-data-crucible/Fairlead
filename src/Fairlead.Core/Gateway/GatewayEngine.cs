@@ -237,9 +237,12 @@ namespace Fairlead.Core.Gateway
                 var first = queue.Dequeue();
                 if (!Acquire(first, record)) { continue; }
                 var cancels = new Dictionary<Task<UpstreamResponse>, CancellationTokenSource>();
+                var retries = new Dictionary<Task<UpstreamResponse>, RetryCount>();
                 var primaryCts = CancellationTokenSource.CreateLinkedTokenSource(aborted);
-                Task<UpstreamResponse> primary = SendAsync(first, body, dialect, operation, primaryCts.Token);
+                var primaryRetries = new RetryCount();
+                Task<UpstreamResponse> primary = SendAsync(first, body, dialect, operation, primaryCts.Token, primaryRetries);
                 cancels[primary] = primaryCts;
+                retries[primary] = primaryRetries;
                 var primaryStarted = sw.ElapsedMilliseconds;
                 Candidate second = null;
                 Task<UpstreamResponse> backup = null;
@@ -259,8 +262,10 @@ namespace Fairlead.Core.Gateway
                         {
                             record.Decision.Add("Hedge: " + first.Ref + " slow after " + plan.HedgeAfterMs + " ms; racing " + second.Ref + ".");
                             var backupCts = CancellationTokenSource.CreateLinkedTokenSource(aborted);
-                            backup = SendAsync(second, body, dialect, operation, backupCts.Token);
+                            var backupRetries = new RetryCount();
+                            backup = SendAsync(second, body, dialect, operation, backupCts.Token, backupRetries);
                             cancels[backup] = backupCts;
+                            retries[backup] = backupRetries;
                             backupStarted = sw.ElapsedMilliseconds;
                         }
                     }
@@ -278,7 +283,7 @@ namespace Fairlead.Core.Gateway
                         var response = await finished.ConfigureAwait(false);
                         Breaker(entry.Key).Success();
                         _breakers.For(entry.Key.Provider.Id).Success();
-                        record.Attempts.Add(new AttemptRecord { Target = entry.Key.Ref, Outcome = "ok", Status = response.Status, Ms = (int)(sw.ElapsedMilliseconds - started) });
+                        record.Attempts.Add(new AttemptRecord { Target = entry.Key.Ref, Outcome = "ok", Status = response.Status, Ms = (int)(sw.ElapsedMilliseconds - started), Retries = retries[finished].Value });
                         foreach (var loser in racing)
                         {
                             record.Attempts.Add(new AttemptRecord { Target = loser.Key.Ref, Outcome = "lost-race", Ms = (int)(sw.ElapsedMilliseconds - (loser.Key == first ? primaryStarted : backupStarted)) });
@@ -289,7 +294,7 @@ namespace Fairlead.Core.Gateway
                     catch (UpstreamException ex)
                     {
                         last = ex;
-                        record.Attempts.Add(new AttemptRecord { Target = entry.Key.Ref, Outcome = ex.Kind.ToString().ToLowerInvariant(), Status = ex.Status, Ms = (int)(sw.ElapsedMilliseconds - started), Error = ex.Message });
+                        record.Attempts.Add(new AttemptRecord { Target = entry.Key.Ref, Outcome = ex.Kind.ToString().ToLowerInvariant(), Status = ex.Status, Ms = (int)(sw.ElapsedMilliseconds - started), Error = ex.Message, Retries = retries[finished].Value });
                         OnFailure(entry.Key, ex);
                         if (ex.Kind == FailureKind.BadRequest)
                         {
@@ -349,7 +354,63 @@ namespace Fairlead.Core.Gateway
             }, TaskScheduler.Default);
         }
 
-        private Task<UpstreamResponse> SendAsync(Candidate c, JObject body, Dialect dialect, string operation, CancellationToken aborted)
+        private sealed class RetryCount
+        {
+            public int Value;
+        }
+
+        private static readonly Random Jitter = new Random();
+
+        /// <summary>
+        /// Exponential backoff with jitter: the window doubles from <paramref name="baseMs"/> up to <paramref name="maxMs"/>,
+        /// and the wait is a random point in its upper half (<paramref name="random01"/> in [0, 1)).
+        /// </summary>
+        public static int BackoffMs(int attempt, int baseMs, int maxMs, double random01)
+        {
+            var window = Math.Min((double)maxMs, baseMs * Math.Pow(2, Math.Max(0, attempt)));
+            return (int)(window / 2 + random01 * window / 2);
+        }
+
+        /// <summary>Failures worth another try on the same target: a 5xx, 429, a timeout or a dropped connection. Never 401/403, 400 or 404.</summary>
+        public static bool IsTransient(FailureKind kind)
+        {
+            return kind == FailureKind.Server || kind == FailureKind.RateLimited || kind == FailureKind.Timeout || kind == FailureKind.Network;
+        }
+
+        /// <summary>Sends to one target, retrying transient failures as many times as the provider allows before giving up on it.</summary>
+        private async Task<UpstreamResponse> SendWithRetriesAsync(Candidate c, string operation, JObject outgoing, CancellationToken aborted, RetryCount count)
+        {
+            var p = c.Provider;
+            var max = Math.Max(0, p.Retries ?? 0);
+            var baseMs = Math.Max(50, p.RetryBaseMs ?? 500);
+            var maxMs = Math.Max(baseMs, p.RetryMaxMs ?? 8000);
+            for (var attempt = 0; ; attempt++)
+            {
+                int delay;
+                try
+                {
+                    return await _upstream.SendAsync(p, operation, outgoing, aborted).ConfigureAwait(false);
+                }
+                catch (UpstreamException ex)
+                {
+                    if (attempt >= max || !IsTransient(ex.Kind)) throw;
+                    double r;
+                    lock (Jitter) r = Jitter.NextDouble();
+                    delay = BackoffMs(attempt, baseMs, maxMs, r);
+                    if (ex.RetryAfter.HasValue)
+                    {
+                        // A Retry-After longer than the backoff ceiling means "not soon": fail over instead of waiting.
+                        if (ex.RetryAfter.Value.TotalMilliseconds > maxMs) throw;
+                        delay = Math.Max(delay, (int)ex.RetryAfter.Value.TotalMilliseconds);
+                    }
+                    count.Value++;
+                    _log.Warn("UPSTREAM_RETRY", c.Ref + ": " + ex.Kind.ToString().ToLowerInvariant() + "; try " + (attempt + 2) + " of " + (max + 1) + " in " + delay + " ms.");
+                }
+                await Task.Delay(delay, aborted).ConfigureAwait(false);
+            }
+        }
+
+        private Task<UpstreamResponse> SendAsync(Candidate c, JObject body, Dialect dialect, string operation, CancellationToken aborted, RetryCount count)
         {
             var target = UpstreamClient.DialectOf(c.Provider.Kind);
             JObject outgoing;
@@ -373,7 +434,7 @@ namespace Fairlead.Core.Gateway
             {
                 outgoing = Translate.OpenAiToAnthropicRequest(body, c.Model);
             }
-            return _upstream.SendAsync(c.Provider, operation, outgoing, aborted);
+            return SendWithRetriesAsync(c, operation, outgoing, aborted, count);
         }
 
         // ---------- responses ----------

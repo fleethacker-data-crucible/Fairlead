@@ -13,6 +13,7 @@
         'Get-FairleadCoreLoadInfo',
         'Initialize-FairleadEnvironment',
         'Start-Fairlead',
+        'Test-FairleadModelConfig',
         'Get-FairleadStatus'
     )
     CmdletsToExport   = @()
