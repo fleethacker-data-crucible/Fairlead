@@ -16,6 +16,8 @@ namespace Fairlead.Core.Telemetry
         public int? Status { get; set; }
         public int Ms { get; set; }
         public string Error { get; set; }
+        /// <summary>Extra tries on this same target before this outcome (transient failures, with backoff).</summary>
+        public int Retries { get; set; }
 
         public AttemptRecord()
         {
