@@ -53,6 +53,7 @@ Any OpenAI SDK: `base_url="http://127.0.0.1:8776/v1"`, `api_key="fl-..."`, `mode
 
 ## Documentation
 
+- [Vision: the Fleet's intelligence router](docs/VISION.md): Fairlead as the default for AI endpoints, git repositories and databases; migration inventory and open questions
 - [Architecture](docs/ARCHITECTURE.md): components, request path, security
 - [Routing and Kedge mode](docs/ROUTING.md): routes, rules, aliases, failover, health
 - [Operations](docs/OPERATIONS.md): running, stopping, config files, troubleshooting
