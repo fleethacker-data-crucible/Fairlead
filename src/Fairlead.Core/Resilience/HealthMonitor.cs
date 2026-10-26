@@ -16,35 +16,41 @@ namespace Fairlead.Core.Resilience
     /// <summary>Where traffic goes right now: cloud and local, or local only (Kedge mode).</summary>
     public sealed class ConnectivitySnapshot
     {
-        public InternetState Internet { get; set; } = InternetState.Unknown;
+        private InternetState _internet = InternetState.Unknown;
+        public InternetState Internet { get { return _internet; } set { _internet = value; } }
         /// <summary>Local models only. True when forced on, or when the internet is down in auto mode.</summary>
         public bool Kedge { get; set; }
         /// <summary>"forced", "offline" or null.</summary>
-        public string? KedgeReason { get; set; }
+        public string KedgeReason { get; set; }
         public KedgeMode Mode { get; set; }
         public DateTimeOffset? Since { get; set; }
         public DateTimeOffset? LastProbe { get; set; }
         /// <summary>Probe targets that answered in the last probe.</summary>
-        public List<string> Reached { get; set; } = new List<string>();
-        public bool OsReportsNetwork { get; set; } = true;
+        private List<string> _reached = new List<string>();
+        public List<string> Reached { get { return _reached; } set { _reached = value; } }
+        private bool _osReportsNetwork = true;
+        public bool OsReportsNetwork { get { return _osReportsNetwork; } set { _osReportsNetwork = value; } }
     }
 
     public sealed class ProviderHealth
     {
-        public string Id { get; set; } = string.Empty;
+        private string _id = string.Empty;
+        public string Id { get { return _id; } set { _id = value; } }
         public bool Local { get; set; }
         /// <summary>The last probe reached the endpoint (TCP for cloud, the model list for local).</summary>
         public bool? Reachable { get; set; }
         /// <summary>The key was accepted by the last deep check; null until one has run.</summary>
         public bool? AuthOk { get; set; }
         public int? ProbeMs { get; set; }
-        public string? LastError { get; set; }
+        public string LastError { get; set; }
         public DateTimeOffset? LastChecked { get; set; }
         public DateTimeOffset? LastDeepCheck { get; set; }
         /// <summary>Models found by discovery (Ollama tags, /models); merged with the configured list when routing.</summary>
-        public List<ModelInfo> Models { get; set; } = new List<ModelInfo>();
+        private List<ModelInfo> _models = new List<ModelInfo>();
+        public List<ModelInfo> Models { get { return _models; } set { _models = value; } }
         /// <summary>Models a local server has in memory right now (Ollama /api/ps); preferred when Fairlead picks one itself.</summary>
-        public List<string> Loaded { get; set; } = new List<string>();
+        private List<string> _loaded = new List<string>();
+        public List<string> Loaded { get { return _loaded; } set { _loaded = value; } }
     }
 
     /// <summary>
@@ -71,7 +77,7 @@ namespace Fairlead.Core.Resilience
         private ConnectivitySnapshot _state = new ConnectivitySnapshot();
         private int _failStreak;
         private int _okStreak;
-        private Task? _loop;
+        private Task _loop;
         private bool _deepPending = true;
         private DateTimeOffset _lastPassiveSuccess = DateTimeOffset.MinValue;
 
@@ -97,10 +103,10 @@ namespace Fairlead.Core.Resilience
         }
 
         /// <summary>Raised when the internet state or Kedge mode changes.</summary>
-        public event Action<ConnectivitySnapshot>? Changed;
+        public event Action<ConnectivitySnapshot> Changed;
 
         /// <summary>Set by tests to drive the internet state without sockets.</summary>
-        internal Func<CancellationToken, Task<List<string>>>? InternetProbeOverride { get; set; }
+        internal Func<CancellationToken, Task<List<string>>> InternetProbeOverride { get; set; }
 
         public ConnectivitySnapshot Connectivity
         {
@@ -112,9 +118,9 @@ namespace Fairlead.Core.Resilience
             get { lock (_stateLock) return _state.Kedge; }
         }
 
-        public ProviderHealth? Provider(string id)
+        public ProviderHealth Provider(string id)
         {
-            ProviderHealth? h;
+            ProviderHealth h;
             return _providers.TryGetValue(id, out h) ? h : null;
         }
 
@@ -126,8 +132,8 @@ namespace Fairlead.Core.Resilience
         public void Start()
         {
             if (_loop != null) return;
-            try { NetworkChange.NetworkAvailabilityChanged += OnNetworkAvailability; } catch (Exception ex) when (ex is PlatformNotSupportedException || ex is NotImplementedException) { }
-            try { NetworkChange.NetworkAddressChanged += OnNetworkAddress; } catch (Exception ex) when (ex is PlatformNotSupportedException || ex is NotImplementedException) { }
+            try { NetworkChange.NetworkAvailabilityChanged += OnNetworkAvailability; } catch (Exception ex) { if (!(ex is PlatformNotSupportedException || ex is NotImplementedException)) throw; }
+            try { NetworkChange.NetworkAddressChanged += OnNetworkAddress; } catch (Exception ex) { if (!(ex is PlatformNotSupportedException || ex is NotImplementedException)) throw; }
             _loop = Task.Run(() => Loop(_cts.Token));
         }
 
@@ -146,7 +152,7 @@ namespace Fairlead.Core.Resilience
             if (wasDown) Nudge();
         }
 
-        private void OnNetworkAvailability(object? sender, NetworkAvailabilityEventArgs e)
+        private void OnNetworkAvailability(object sender, NetworkAvailabilityEventArgs e)
         {
             _log.Info("NETWORK_CHANGE", e.IsAvailable ? "Windows reports a network is available." : "Windows reports no network.");
             lock (_stateLock)
@@ -164,7 +170,7 @@ namespace Fairlead.Core.Resilience
             Nudge();
         }
 
-        private void OnNetworkAddress(object? sender, EventArgs e)
+        private void OnNetworkAddress(object sender, EventArgs e)
         {
             Nudge();
         }
@@ -174,8 +180,11 @@ namespace Fairlead.Core.Resilience
             while (!token.IsCancellationRequested)
             {
                 try { await ProbeOnceAsync(token).ConfigureAwait(false); }
-                catch (OperationCanceledException) when (token.IsCancellationRequested) { break; }
-                catch (Exception ex) { _log.Warn("PROBE_FAILED", ex.GetType().Name + ": " + ex.Message); }
+                catch (Exception ex)
+                {
+                    if (ex is OperationCanceledException && token.IsCancellationRequested) break;
+                    _log.Warn("PROBE_FAILED", ex.GetType().Name + ": " + ex.Message);
+                }
                 var interval = TimeSpan.FromSeconds(_config.Current.Network.ProbeIntervalSeconds);
                 // Probe faster while the internet is down, so the return to cloud is quick too.
                 if (Connectivity.Internet == InternetState.Down) interval = TimeSpan.FromSeconds(Math.Max(3, interval.TotalSeconds / 3));
@@ -202,7 +211,7 @@ namespace Fairlead.Core.Resilience
             }
             foreach (var stale in _providers.Keys.Where(k => cfg.FindProvider(k) == null).ToList())
             {
-                ProviderHealth? removed;
+                ProviderHealth removed;
                 _providers.TryRemove(stale, out removed);
             }
             await Task.WhenAll(tasks).ConfigureAwait(false);
@@ -232,13 +241,13 @@ namespace Fairlead.Core.Resilience
             // The cloud endpoints themselves count: some networks block public DNS resolvers but allow the APIs.
             foreach (var p in cfg.Providers.Where(x => x.Enabled && !x.Local))
             {
-                Uri? u;
+                Uri u;
                 if (Uri.TryCreate(p.BaseUrl, UriKind.Absolute, out u)) targets.Add(new KeyValuePair<string, int>(u.Host, u.Port));
             }
             var distinct = targets.GroupBy(t => t.Key + ":" + t.Value).Select(g => g.First()).ToList();
             var results = await Task.WhenAll(distinct.Select(async t =>
                 (await UpstreamClient.TcpReachableAsync(t.Key, t.Value, cfg.Network.ProbeTimeoutMs, token).ConfigureAwait(false)) ? t.Key + ":" + t.Value : null)).ConfigureAwait(false);
-            return results.Where(r => r != null).Select(r => r!).ToList();
+            return results.Where(r => r != null).Select(r => r).ToList();
         }
 
         private async Task ProbeProviderAsync(ProviderConfig p, bool internetUp, bool deep, NetworkConfig net, CancellationToken token)
@@ -263,8 +272,8 @@ namespace Fairlead.Core.Resilience
                 }
                 else if (!p.Local)
                 {
-                    Uri? u;
-                    var ok = Uri.TryCreate(p.BaseUrl, UriKind.Absolute, out u) && await UpstreamClient.TcpReachableAsync(u!.Host, u.Port, net.ProbeTimeoutMs, token).ConfigureAwait(false);
+                    Uri u;
+                    var ok = Uri.TryCreate(p.BaseUrl, UriKind.Absolute, out u) && await UpstreamClient.TcpReachableAsync(u.Host, u.Port, net.ProbeTimeoutMs, token).ConfigureAwait(false);
                     h.Reachable = ok;
                     h.LastError = ok ? h.LastError : "Not reachable over TCP.";
                 }
@@ -341,7 +350,7 @@ namespace Fairlead.Core.Resilience
             try { NetworkChange.NetworkAvailabilityChanged -= OnNetworkAvailability; } catch (Exception) { }
             try { NetworkChange.NetworkAddressChanged -= OnNetworkAddress; } catch (Exception) { }
             try { _cts.Cancel(); } catch (ObjectDisposedException) { }
-            try { _loop?.Wait(TimeSpan.FromSeconds(2)); } catch (AggregateException) { }
+            try { if (_loop != null) _loop.Wait(TimeSpan.FromSeconds(2)); } catch (AggregateException) { }
             _cts.Dispose();
             _wake.Dispose();
         }

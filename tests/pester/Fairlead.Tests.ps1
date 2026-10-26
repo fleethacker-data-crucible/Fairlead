@@ -1,6 +1,6 @@
 #requires -Version 5.1
 # Pester 5 tests for the PowerShell layer and the repository rules. Run: Invoke-Pester tests/pester
-# Needs a built Fairlead.Core.dll (dotnet build) or FAIRLEAD_CORE_DLL pointing at one.
+# Import-FairleadCore compiles src\Fairlead.Core with Add-Type (or loads FAIRLEAD_CORE_DLL when set).
 
 BeforeAll {
     $script:Root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path

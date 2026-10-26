@@ -4,8 +4,8 @@
   Builds and tests Fairlead, then assembles a self-contained bundle for the workstation.
 .DESCRIPTION
   Runs on a development machine with the .NET 8 SDK and Node.js 20+. The output folder dist\Fairlead
-  (and dist\Fairlead-<version>.zip) needs neither: it holds the compiled DLLs, the built admin UI, the
-  PowerShell module, scripts and config templates. Copy it to the workstation and run Launch-Fairlead.bat.
+  (and dist\Fairlead-<version>.zip) needs neither: it holds the engine's C# source (compiled at start by
+  Windows PowerShell 5.1), the built admin UI, the PowerShell module, scripts and config templates. Copy it to the workstation and run Launch-Fairlead.bat.
 .PARAMETER SkipTests
   Skip xUnit, UI unit tests and Pester.
 .PARAMETER SkipWeb
@@ -97,13 +97,13 @@ if (-not $SkipTests) {
 Step ('Assembling ' + $bundle)
 if (Test-Path $bundle) { Remove-Item $bundle -Recurse -Force }
 New-Item -ItemType Directory -Force $bundle | Out-Null
-$outBase = Join-Path $root ('src\Fairlead.Core\bin\' + $Configuration)
-foreach ($tfm in @('net48', 'netstandard2.0')) {
-    $src = Join-Path $outBase $tfm
-    if (-not (Test-Path (Join-Path $src 'Fairlead.Core.dll'))) { throw ('Missing build output ' + $src) }
-    $dst = Join-Path $bundle ('lib\' + $tfm)
-    New-Item -ItemType Directory -Force $dst | Out-Null
-    Copy-Item (Join-Path $src '*.dll') $dst
+# The engine ships as C# source; Launch-Fairlead.bat compiles it at start with Add-Type (no DLLs in the bundle).
+$engine = Join-Path $root 'src\Fairlead.Core'
+foreach ($f in Get-ChildItem -LiteralPath $engine -Recurse -Filter *.cs -File | Where-Object { $_.FullName -notmatch '\\(bin|obj)\\' }) {
+    $rel = $f.FullName.Substring($root.Length).TrimStart('\')
+    $dst = Join-Path $bundle $rel
+    New-Item -ItemType Directory -Force (Split-Path $dst) | Out-Null
+    Copy-Item -LiteralPath $f.FullName $dst
 }
 Copy-Item (Join-Path $root 'web\dist') (Join-Path $bundle 'web\dist') -Recurse
 Copy-Item (Join-Path $root 'module') (Join-Path $bundle 'module') -Recurse

@@ -10,7 +10,8 @@ namespace Fairlead.Core.Config
     /// <summary>A model a provider serves. Unknown capabilities stay null and never exclude a model.</summary>
     public sealed class ModelInfo
     {
-        public string Id { get; set; } = string.Empty;
+        private string _id = string.Empty;
+        public string Id { get { return _id; } set { _id = value; } }
         public int? ContextWindow { get; set; }
         public bool? Tools { get; set; }
         public bool? Vision { get; set; }
@@ -24,27 +25,36 @@ namespace Fairlead.Core.Config
 
     public sealed class ProviderConfig
     {
-        public string Id { get; set; } = string.Empty;
-        public string Name { get; set; } = string.Empty;
-        public ProviderKind Kind { get; set; } = ProviderKind.OpenAi;
+        private string _id = string.Empty;
+        public string Id { get { return _id; } set { _id = value; } }
+        private string _name = string.Empty;
+        public string Name { get { return _name; } set { _name = value; } }
+        private ProviderKind _kind = ProviderKind.OpenAi;
+        public ProviderKind Kind { get { return _kind; } set { _kind = value; } }
         /// <summary>Preset this provider was created from (openai, anthropic, gemini, groq, ollama, lmstudio...), for defaults only.</summary>
-        public string? Preset { get; set; }
+        public string Preset { get; set; }
         /// <summary>OpenAI-compatible: the /v1 base (https://api.openai.com/v1). Anthropic and Ollama: the server root.</summary>
-        public string BaseUrl { get; set; } = string.Empty;
+        private string _baseUrl = string.Empty;
+        public string BaseUrl { get { return _baseUrl; } set { _baseUrl = value; } }
         /// <summary>Runs on this machine or network: used in Kedge mode and for private requests.</summary>
         public bool Local { get; set; }
-        public bool Enabled { get; set; } = true;
+        private bool _enabled = true;
+        public bool Enabled { get { return _enabled; } set { _enabled = value; } }
         /// <summary>The API key, protected with Windows DPAPI for the current user ("dpapi:..."). Never sent to the browser.</summary>
-        public string? ApiKeyProtected { get; set; }
+        public string ApiKeyProtected { get; set; }
         /// <summary>Environment variable to read the key from when none is stored (ANTHROPIC_API_KEY...).</summary>
-        public string? ApiKeyEnv { get; set; }
-        public int TimeoutSeconds { get; set; } = 120;
-        public Dictionary<string, string> Headers { get; set; } = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        public List<ModelInfo> Models { get; set; } = new List<ModelInfo>();
+        public string ApiKeyEnv { get; set; }
+        private int _timeoutSeconds = 120;
+        public int TimeoutSeconds { get { return _timeoutSeconds; } set { _timeoutSeconds = value; } }
+        private Dictionary<string, string> _headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        public Dictionary<string, string> Headers { get { return _headers; } set { _headers = value; } }
+        private List<ModelInfo> _models = new List<ModelInfo>();
+        public List<ModelInfo> Models { get { return _models; } set { _models = value; } }
         /// <summary>Ask OpenAI-compatible servers for a final usage chunk when streaming (stream_options.include_usage).</summary>
-        public bool StreamUsage { get; set; } = true;
+        private bool _streamUsage = true;
+        public bool StreamUsage { get { return _streamUsage; } set { _streamUsage = value; } }
 
-        public ModelInfo? FindModel(string id)
+        public ModelInfo FindModel(string id)
         {
             return Models.FirstOrDefault(m => string.Equals(m.Id, id, StringComparison.OrdinalIgnoreCase));
         }
@@ -65,15 +75,20 @@ namespace Fairlead.Core.Config
     /// <summary>A virtual model tools ask for by name ("auto", "smart", "fast", "local").</summary>
     public sealed class RouteConfig
     {
-        public string Id { get; set; } = string.Empty;
-        public string Description { get; set; } = string.Empty;
-        public RouteStrategy Strategy { get; set; } = RouteStrategy.Failover;
+        private string _id = string.Empty;
+        public string Id { get { return _id; } set { _id = value; } }
+        private string _description = string.Empty;
+        public string Description { get { return _description; } set { _description = value; } }
+        private RouteStrategy _strategy = RouteStrategy.Failover;
+        public RouteStrategy Strategy { get { return _strategy; } set { _strategy = value; } }
         /// <summary>Ordered "providerId/modelId" references.</summary>
-        public List<string> Targets { get; set; } = new List<string>();
+        private List<string> _targets = new List<string>();
+        public List<string> Targets { get { return _targets; } set { _targets = value; } }
         /// <summary>When the first target has not answered (headers) after this many ms, race the next one. 0 = off.</summary>
         public int HedgeAfterMs { get; set; }
         /// <summary>When every target is down or filtered out, fall back to the local route.</summary>
-        public bool LocalFallback { get; set; } = true;
+        private bool _localFallback = true;
+        public bool LocalFallback { get { return _localFallback; } set { _localFallback = value; } }
     }
 
     /// <summary>One condition set for the auto route. All set fields must match; the first matching rule wins.</summary>
@@ -85,51 +100,69 @@ namespace Fairlead.Core.Config
         public bool? HasTools { get; set; }
         public bool? HasImages { get; set; }
         /// <summary>Any of these (case-insensitive) in the latest user message.</summary>
-        public List<string>? Keywords { get; set; }
+        public List<string> Keywords { get; set; }
         /// <summary>Client key name the rule applies to.</summary>
-        public string? Client { get; set; }
+        public string Client { get; set; }
     }
 
     public sealed class RoutingRule
     {
-        public string Name { get; set; } = string.Empty;
-        public string Route { get; set; } = string.Empty;
-        public bool Enabled { get; set; } = true;
-        public RuleCondition When { get; set; } = new RuleCondition();
+        private string _name = string.Empty;
+        public string Name { get { return _name; } set { _name = value; } }
+        private string _route = string.Empty;
+        public string Route { get { return _route; } set { _route = value; } }
+        private bool _enabled = true;
+        public bool Enabled { get { return _enabled; } set { _enabled = value; } }
+        private RuleCondition _when = new RuleCondition();
+        public RuleCondition When { get { return _when; } set { _when = value; } }
     }
 
     /// <summary>A key a tool uses to call the gateway. Only the SHA-256 hash is kept; the key is shown once.</summary>
     public sealed class ClientKey
     {
-        public string Id { get; set; } = string.Empty;
-        public string Name { get; set; } = string.Empty;
+        private string _id = string.Empty;
+        public string Id { get { return _id; } set { _id = value; } }
+        private string _name = string.Empty;
+        public string Name { get { return _name; } set { _name = value; } }
         /// <summary>First characters of the key, to recognise it in a tool's settings.</summary>
-        public string Prefix { get; set; } = string.Empty;
-        public string Hash { get; set; } = string.Empty;
-        public DateTimeOffset Created { get; set; } = DateTimeOffset.UtcNow;
+        private string _prefix = string.Empty;
+        public string Prefix { get { return _prefix; } set { _prefix = value; } }
+        private string _hash = string.Empty;
+        public string Hash { get { return _hash; } set { _hash = value; } }
+        private DateTimeOffset _created = DateTimeOffset.UtcNow;
+        public DateTimeOffset Created { get { return _created; } set { _created = value; } }
         /// <summary>Routes this key may use; empty = all.</summary>
-        public List<string> Routes { get; set; } = new List<string>();
+        private List<string> _routes = new List<string>();
+        public List<string> Routes { get { return _routes; } set { _routes = value; } }
     }
 
     public sealed class NetworkConfig
     {
         /// <summary>host:port pairs probed with a plain TCP connect to decide whether the internet is reachable.</summary>
-        public List<string> ProbeHosts { get; set; } = new List<string> { "1.1.1.1:443", "8.8.8.8:443", "9.9.9.9:443" };
-        public int ProbeIntervalSeconds { get; set; } = 15;
-        public int ProbeTimeoutMs { get; set; } = 2500;
+        private List<string> _probeHosts = new List<string> { "1.1.1.1:443", "8.8.8.8:443", "9.9.9.9:443" };
+        public List<string> ProbeHosts { get { return _probeHosts; } set { _probeHosts = value; } }
+        private int _probeIntervalSeconds = 15;
+        public int ProbeIntervalSeconds { get { return _probeIntervalSeconds; } set { _probeIntervalSeconds = value; } }
+        private int _probeTimeoutMs = 2500;
+        public int ProbeTimeoutMs { get { return _probeTimeoutMs; } set { _probeTimeoutMs = value; } }
         /// <summary>Consecutive failed probes before declaring the internet down (hysteresis against flapping).</summary>
-        public int OfflineAfterFailures { get; set; } = 2;
-        public int OnlineAfterSuccesses { get; set; } = 2;
+        private int _offlineAfterFailures = 2;
+        public int OfflineAfterFailures { get { return _offlineAfterFailures; } set { _offlineAfterFailures = value; } }
+        private int _onlineAfterSuccesses = 2;
+        public int OnlineAfterSuccesses { get { return _onlineAfterSuccesses; } set { _onlineAfterSuccesses = value; } }
         /// <summary>How often cloud keys are verified with a real API call (the cheap model list).</summary>
-        public int DeepCheckMinutes { get; set; } = 10;
+        private int _deepCheckMinutes = 10;
+        public int DeepCheckMinutes { get { return _deepCheckMinutes; } set { _deepCheckMinutes = value; } }
     }
 
     public sealed class PrivacyConfig
     {
         /// <summary>Scan requests for secrets (keys, private keys, passwords) and mark them sensitive.</summary>
-        public bool DetectSecrets { get; set; } = true;
+        private bool _detectSecrets = true;
+        public bool DetectSecrets { get { return _detectSecrets; } set { _detectSecrets = value; } }
         /// <summary>Sensitive requests never leave the machine, whatever route was asked for.</summary>
-        public bool ForceLocalWhenSensitive { get; set; } = true;
+        private bool _forceLocalWhenSensitive = true;
+        public bool ForceLocalWhenSensitive { get { return _forceLocalWhenSensitive; } set { _forceLocalWhenSensitive = value; } }
     }
 
     public enum KedgeMode
@@ -145,33 +178,46 @@ namespace Fairlead.Core.Config
     /// <summary>fairlead.json: everything the one-time browser setup writes.</summary>
     public sealed class FairleadConfig
     {
-        public int Version { get; set; } = 1;
+        private int _version = 1;
+        public int Version { get { return _version; } set { _version = value; } }
         public bool SetupComplete { get; set; }
-        public List<ProviderConfig> Providers { get; set; } = new List<ProviderConfig>();
-        public List<RouteConfig> Routes { get; set; } = new List<RouteConfig>();
-        public List<RoutingRule> Rules { get; set; } = new List<RoutingRule>();
+        private List<ProviderConfig> _providers = new List<ProviderConfig>();
+        public List<ProviderConfig> Providers { get { return _providers; } set { _providers = value; } }
+        private List<RouteConfig> _routes = new List<RouteConfig>();
+        public List<RouteConfig> Routes { get { return _routes; } set { _routes = value; } }
+        private List<RoutingRule> _rules = new List<RoutingRule>();
+        public List<RoutingRule> Rules { get { return _rules; } set { _rules = value; } }
         /// <summary>Glob (model name a tool sends) to route id, e.g. "claude-*haiku*" -> fast.</summary>
-        public Dictionary<string, string> Aliases { get; set; } = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        private Dictionary<string, string> _aliases = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        public Dictionary<string, string> Aliases { get { return _aliases; } set { _aliases = value; } }
         /// <summary>Route for model names nothing else matches.</summary>
-        public string DefaultRoute { get; set; } = "auto";
+        private string _defaultRoute = "auto";
+        public string DefaultRoute { get { return _defaultRoute; } set { _defaultRoute = value; } }
         /// <summary>Route the auto route uses when no rule matches.</summary>
-        public string AutoFallbackRoute { get; set; } = "smart";
-        public KedgeMode Kedge { get; set; } = KedgeMode.Auto;
-        public bool RequireClientKey { get; set; } = true;
-        public List<ClientKey> Clients { get; set; } = new List<ClientKey>();
-        public NetworkConfig Network { get; set; } = new NetworkConfig();
-        public PrivacyConfig Privacy { get; set; } = new PrivacyConfig();
+        private string _autoFallbackRoute = "smart";
+        public string AutoFallbackRoute { get { return _autoFallbackRoute; } set { _autoFallbackRoute = value; } }
+        private KedgeMode _kedge = KedgeMode.Auto;
+        public KedgeMode Kedge { get { return _kedge; } set { _kedge = value; } }
+        private bool _requireClientKey = true;
+        public bool RequireClientKey { get { return _requireClientKey; } set { _requireClientKey = value; } }
+        private List<ClientKey> _clients = new List<ClientKey>();
+        public List<ClientKey> Clients { get { return _clients; } set { _clients = value; } }
+        private NetworkConfig _network = new NetworkConfig();
+        public NetworkConfig Network { get { return _network; } set { _network = value; } }
+        private PrivacyConfig _privacy = new PrivacyConfig();
+        public PrivacyConfig Privacy { get { return _privacy; } set { _privacy = value; } }
         /// <summary>Browser origins allowed to call /v1 directly (web apps built at the hackathon). Empty = none.</summary>
-        public List<string> CorsOrigins { get; set; } = new List<string>();
+        private List<string> _corsOrigins = new List<string>();
+        public List<string> CorsOrigins { get { return _corsOrigins; } set { _corsOrigins = value; } }
         /// <summary>Keep the latest prompt and answer text in the in-memory activity log (never on disk). Off by default.</summary>
         public bool LogContent { get; set; }
 
-        public ProviderConfig? FindProvider(string id)
+        public ProviderConfig FindProvider(string id)
         {
             return Providers.FirstOrDefault(p => string.Equals(p.Id, id, StringComparison.OrdinalIgnoreCase));
         }
 
-        public RouteConfig? FindRoute(string id)
+        public RouteConfig FindRoute(string id)
         {
             return Routes.FirstOrDefault(r => string.Equals(r.Id, id, StringComparison.OrdinalIgnoreCase));
         }

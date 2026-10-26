@@ -20,9 +20,9 @@ directly. It runs on the operator's workstation, serves an OpenAI- and Anthropic
 | Layer | Choice | Why |
 |---|---|---|
 | Launcher | `Launch-Fairlead.bat` → `powershell.exe -STA -File scripts\Start-Fairlead.ps1` | The only entry point the workstation allows; STA for the WinForms tray icon. |
-| Shell | PowerShell module `module/Fairlead` | Reads `config\fairlead.env`, loads the DLL, shows the tray icon, opens the browser on first run. Nothing else. |
-| Core | C# library `Fairlead.Core` (`net48` + `netstandard2.0`) | Real concurrency for many simultaneous streams, testable logic. `net48` loads in PowerShell 5.1. |
-| JSON | Newtonsoft.Json 13 (bundled) | Identical on .NET Framework and .NET; `JObject` keeps unknown fields so same-dialect relays lose nothing. |
+| Shell | PowerShell module `module/Fairlead` | Reads `config\fairlead.env`, compiles and loads the engine, shows the tray icon, opens the browser on first run. Nothing else. |
+| Core | C# 5 source `src/Fairlead.Core`, compiled at start by `Add-Type` (framework assemblies only) | The Fleet stack: no DLLs to ship or sign. The same source also builds as `net48` + `netstandard2.0` for the xUnit tests (`LangVersion` 5 keeps it honest). |
+| JSON | Built-in `Fairlead.Core.JsonLite` (`JObject`/`JArray`/`JValue`, `JsonConvert`) | No third-party code. Same API shape as Newtonsoft, so `JObject` still keeps unknown fields and same-dialect relays lose nothing; `fairlead.json` is written exactly as before. |
 | Server | `TcpListener` with chunked responses | `HttpListener` needs URL reservations a standard user lacks. Chunked transfer streams tokens as they arrive. |
 | Upstream | One shared `HttpClient`, system proxy, no redirects | Connection pooling; TLS 1.2 and 64 connections per host forced on .NET Framework. |
 | UI | React 19 + TypeScript, Tailwind 4 on the Fleet tokens, zod | Built to static files by esbuild + Tailwind's compiler; every response validated. |
@@ -34,8 +34,8 @@ directly. It runs on the operator's workstation, serves an OpenAI- and Anthropic
 ```
 Launch-Fairlead.bat
   └─ scripts/Start-Fairlead.ps1 (single-instance guard)
-       └─ module/Fairlead (PowerShell: env file, DLL load, tray icon)
-            └─ Fairlead.Core.dll
+       └─ module/Fairlead (PowerShell: env file, engine compile, tray icon)
+            └─ Fairlead.Core (C# 5 source, compiled in memory)
                  ├─ Host        loopback server (chunked streaming), admin API, gateway routes, static UI, session token
                  ├─ Gateway     GatewayEngine: authenticate client → profile → plan → attempts (+hedge) → relay/translate → record
                  ├─ Routing     RequestProfile (tokens, tools, images, secrets), RoutePlanner (routes, rules, aliases, filters, order)
@@ -80,5 +80,6 @@ with an error event in the caller's dialect; replaying a half-delivered answer f
 
 ## Risk to watch
 
-`Fairlead.Core.dll` is unsigned. If the workstation's application-control policy blocks unsigned DLLs,
-`Import-FairleadCore` stops with a clear message; have IT sign or allow it.
+Fairlead compiles its engine at start with `Add-Type`, like Phoenix LAI. If the workstation's application-control
+policy ever blocks runtime compilation, `Import-FairleadCore` stops with a clear message; ask IT rather than work
+around it.

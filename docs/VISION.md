@@ -69,11 +69,9 @@ runner, not the workstation.
 
 These are deliberately undecided.
 
-1. **Fairlead's own build versus the DLL rule.** Fairlead 0.1 ships a compiled `Fairlead.Core.dll` (`net48`) and
-   bundles Newtonsoft.Json, and the roadmap plans to sign the DLL. Application control on the workstation blocks
-   custom DLLs. Does the core move to C# source compiled by `Add-Type` (C# 5, framework assemblies only, which means
-   replacing Newtonsoft.Json and `HttpClient` usage that needs newer language features)? Or does signing get
-   approved as an exception?
+1. **Fairlead's own build versus the DLL rule.** Settled (2026-10-26): the core is C# 5 source compiled by
+   `Add-Type` at start, with a built-in JSON library in place of Newtonsoft.Json; no DLL ships, so nothing needs
+   signing.
 2. **Git access model.** Should Fairlead proxy GitHub/GitLab API calls, act as a credential broker that hands tools a
    short-lived token, or both? Archive download and push through the commits API (Gangplank) are large transfers.
    Should they pass through the router?

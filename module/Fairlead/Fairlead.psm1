@@ -1,7 +1,8 @@
 #requires -Version 5.1
-# Fairlead PowerShell module: a thin shell around Fairlead.Core.dll. All logic (gateway, routing, health,
-# translation, admin API) lives in the DLL; PowerShell does what only it can do on the workstation: read
-# fairlead.env, load the DLL, show the tray icon and open the browser.
+# Fairlead PowerShell module: a thin shell around the Fairlead engine (src\Fairlead.Core, C# 5 compiled at start
+# with Add-Type). All logic (gateway, routing, health, translation, admin API) lives in the engine; PowerShell does
+# what only it can do on the workstation: read fairlead.env, compile and load the engine, show the tray icon and open
+# the browser.
 Set-StrictMode -Version 3.0
 
 . (Join-Path $PSScriptRoot 'Tray.ps1')
@@ -17,56 +18,51 @@ function Get-FairleadRoot {
     return (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent)
 }
 
-function Get-FairleadCoreCandidates {
+function Get-FairleadCoreSources {
+    <# The engine's C# source files (src\Fairlead.Core, without build output). #>
     param([string]$Root)
-    $desktop = $PSVersionTable.PSEdition -ne 'Core'
-    $tfm = if ($desktop) { 'net48' } else { 'netstandard2.0' }
-    $list = New-Object System.Collections.Generic.List[string]
-    $custom = [Environment]::GetEnvironmentVariable('FAIRLEAD_CORE_DLL', 'Process')
-    if ($custom) { [void]$list.Add($custom) }
-    [void]$list.Add((Join-Path $Root ('lib\' + $tfm + '\Fairlead.Core.dll')))
-    foreach ($cfg in @('Release', 'Debug')) {
-        [void]$list.Add((Join-Path $Root ('src\Fairlead.Core\bin\' + $cfg + '\' + $tfm + '\Fairlead.Core.dll')))
-    }
-    return @($list.ToArray())
+    $dir = Join-Path $Root 'src\Fairlead.Core'
+    if (-not (Test-Path -LiteralPath $dir)) { return @() }
+    return @(Get-ChildItem -LiteralPath $dir -Recurse -Filter *.cs -File |
+        Where-Object { $_.FullName -notmatch '\\(bin|obj)\\' } |
+        ForEach-Object { $_.FullName })
 }
 
 function Import-FairleadCore {
     <#
     .SYNOPSIS
-      Loads Fairlead.Core.dll (net48 for Windows PowerShell 5.1, netstandard2.0 for PowerShell 7).
+      Compiles the Fairlead engine from src\Fairlead.Core\*.cs in memory and loads it.
     .DESCRIPTION
-      Looks in lib\ (release bundle) and then in the build output under src\. Newtonsoft.Json.dll must sit
-      next to it. Throws with the searched paths when nothing is found.
+      The Fleet stack: C# 5 source compiled at start by Windows PowerShell 5.1 (Add-Type, the inbox .NET Framework
+      compiler), framework assemblies only, no DLLs shipped. FAIRLEAD_CORE_DLL may point at a prebuilt
+      Fairlead.Core.dll instead (development only).
     #>
     [CmdletBinding()]
     param([string]$Root = (Get-FairleadRoot))
     if ($script:FairleadCoreLoaded -or ('Fairlead.Core.Facade' -as [type])) { $script:FairleadCoreLoaded = $true; return }
-    $candidates = Get-FairleadCoreCandidates -Root $Root
-    $dll = $candidates | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) } | Select-Object -First 1
-    if (-not $dll) {
-        throw ("Fairlead.Core.dll was not found. Build it with build\Build-Fairlead.ps1, or use a release bundle. Searched:`n  " + ($candidates -join "`n  "))
+    $custom = [Environment]::GetEnvironmentVariable('FAIRLEAD_CORE_DLL', 'Process')
+    if ($custom) {
+        Add-Type -LiteralPath $custom -ErrorAction Stop
+        $script:FairleadCoreLoaded = $true
+        return
     }
-    $dir = Split-Path $dll -Parent
-    foreach ($dep in @('Newtonsoft.Json.dll', 'System.Security.Cryptography.ProtectedData.dll')) {
-        $path = Join-Path $dir $dep
-        if (Test-Path -LiteralPath $path) {
-            try { Add-Type -LiteralPath $path -ErrorAction Stop } catch { if ($_.Exception.Message -notmatch 'already') { throw } }
-        } elseif ($dep -eq 'Newtonsoft.Json.dll' -and -not ('Newtonsoft.Json.JsonConvert' -as [type])) {
-            throw ('Newtonsoft.Json.dll must sit next to ' + $dll + '. Rebuild with build\Build-Fairlead.ps1 or use a release bundle.')
-        }
-    }
+    $files = Get-FairleadCoreSources -Root $Root
+    if ($files.Count -eq 0) { throw ('The Fairlead engine source was not found under ' + (Join-Path $Root 'src\Fairlead.Core') + '. Copy the whole Fairlead folder.') }
+    $cp = New-Object System.CodeDom.Compiler.CompilerParameters
+    $cp.GenerateInMemory = $true
+    $cp.CompilerOptions = '/optimize+'
+    foreach ($r in @('System.dll', 'System.Core.dll', 'System.Net.Http.dll', 'System.Security.dll')) { [void]$cp.ReferencedAssemblies.Add($r) }
     try {
-        Add-Type -LiteralPath $dll -ErrorAction Stop
+        Add-Type -Path $files -CompilerParameters $cp -ErrorAction Stop
     } catch {
         $msg = $_.Exception.Message
         if ($msg -match '(?i)policy|blocked|application control|0x800711C7|code integrity') {
-            throw ('Windows blocked Fairlead.Core.dll (' + $msg + '). The workstation application-control policy does not allow this unsigned DLL. Ask IT to sign or allow it; do not try to work around the policy.')
+            throw ('Windows blocked compiling the Fairlead engine (' + $msg + '). The application-control policy does not allow runtime C# compilation here; ask IT, do not work around the policy.')
         }
-        throw
+        throw ('The Fairlead engine did not compile: ' + $msg)
     }
     $script:FairleadCoreLoaded = $true
-    Write-Verbose ('Loaded ' + $dll)
+    Write-Verbose ('Compiled ' + $files.Count + ' engine files')
 }
 
 function Initialize-FairleadEnvironment {
@@ -119,7 +115,7 @@ function Start-Fairlead {
     $envInfo = Initialize-FairleadEnvironment -Root $Root
     $settings = $envInfo.Settings
     if (-not $WebRoot) { $WebRoot = Find-FairleadWebRoot -Root $Root }
-    if (-not $WebRoot) { Write-Warning 'No built admin UI found (web\dist). The gateway will run; build the UI with build\Build-Fairlead.ps1.' }
+    if (-not $WebRoot) { Write-Warning 'No admin UI found (web\dist is missing from this copy). The gateway will run without its setup page.' }
     $launcher = New-Object 'System.Collections.Generic.Dictionary[string,object]'
     $launcher['powershell'] = $PSVersionTable.PSVersion.ToString()
     $launcher['edition'] = $PSVersionTable.PSEdition

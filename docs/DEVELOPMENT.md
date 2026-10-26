@@ -2,8 +2,12 @@
 
 ## Prerequisites (build machine only)
 
-- .NET 8 SDK (builds `net48` too, via reference assemblies)
-- Node.js 20+
+The workstation needs none of this: it compiles the engine from source at start and serves the committed `web/dist`.
+The build machine is for tests and for UI changes.
+
+- .NET 8 SDK (runs the xUnit tests; builds `net48` too, via reference assemblies). The core is C# 5
+  (`LangVersion` 5) with no package references, so it also compiles with the workstation's `Add-Type`.
+- Node.js 20+ (rebuild `web/dist` after a UI change and commit it)
 - Windows PowerShell 5.1 with Pester 5 (`Install-Module Pester -Scope CurrentUser`)
 - Edge or Chrome, only to regenerate brand assets
 

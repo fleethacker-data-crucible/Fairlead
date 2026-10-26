@@ -10,27 +10,33 @@ namespace Fairlead.Core.Routing
 {
     public sealed class Candidate
     {
-        public ProviderConfig Provider { get; set; } = new ProviderConfig();
-        public string Model { get; set; } = string.Empty;
-        public ModelInfo? Info { get; set; }
+        private ProviderConfig _provider = new ProviderConfig();
+        public ProviderConfig Provider { get { return _provider; } set { _provider = value; } }
+        private string _model = string.Empty;
+        public string Model { get { return _model; } set { _model = value; } }
+        public ModelInfo Info { get; set; }
         public string Ref { get { return Provider.Id + "/" + Model; } }
         public bool Local { get { return Provider.Local; } }
         /// <summary>Breaker open or probe failed: tried only after every healthy candidate.</summary>
         public bool Parked { get; set; }
-        public string? ParkedBecause { get; set; }
+        public string ParkedBecause { get; set; }
     }
 
     public sealed class RoutePlan
     {
-        public string Route { get; set; } = string.Empty;
-        public List<string> Decision { get; set; } = new List<string>();
-        public List<Candidate> Candidates { get; set; } = new List<Candidate>();
+        private string _route = string.Empty;
+        public string Route { get { return _route; } set { _route = value; } }
+        private List<string> _decision = new List<string>();
+        public List<string> Decision { get { return _decision; } set { _decision = value; } }
+        private List<Candidate> _candidates = new List<Candidate>();
+        public List<Candidate> Candidates { get { return _candidates; } set { _candidates = value; } }
         public int HedgeAfterMs { get; set; }
         public bool LocalOnly { get; set; }
         public bool Kedge { get; set; }
         /// <summary>Set when nothing can serve the request; the gateway answers 503 with it.</summary>
-        public string? Error { get; set; }
-        public int ErrorStatus { get; set; } = 503;
+        public string Error { get; set; }
+        private int _errorStatus = 503;
+        public int ErrorStatus { get { return _errorStatus; } set { _errorStatus = value; } }
     }
 
     /// <summary>
@@ -41,7 +47,12 @@ namespace Fairlead.Core.Routing
     {
         private readonly ConcurrentDictionary<string, int> _turns = new ConcurrentDictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 
-        public RoutePlan Plan(FairleadConfig cfg, RequestProfile profile, HealthMonitor? health, BreakerBoard breakers, Metrics? metrics, ClientKey? client, string operation = "chat")
+        private static ProviderHealth HealthOf(HealthMonitor health, string providerId)
+        {
+            return health == null ? null : health.Provider(providerId);
+        }
+
+        public RoutePlan Plan(FairleadConfig cfg, RequestProfile profile, HealthMonitor health, BreakerBoard breakers, Metrics metrics, ClientKey client, string operation = "chat")
         {
             var plan = new RoutePlan();
             var now = DateTimeOffset.UtcNow;
@@ -116,16 +127,16 @@ namespace Fairlead.Core.Routing
             else
             {
                 var first = ordered[0];
-                plan.Decision.Add("First choice " + first.Ref + (first.Parked ? " (last resort: " + first.ParkedBecause + ")" : string.Empty) + (ordered.Count > 1 ? ", then " + string.Join(", ", ordered.Skip(1).Take(3).Select(c => c.Ref)) + (ordered.Count > 4 ? "…" : string.Empty) : string.Empty) + ".");
+                plan.Decision.Add("First choice " + first.Ref + (first.Parked ? " (last resort: " + first.ParkedBecause + ")" : string.Empty) + (ordered.Count > 1 ? ", then " + string.Join(", ", ordered.Skip(1).Take(3).Select(c => c.Ref)) + (ordered.Count > 4 ? "\u2026" : string.Empty) : string.Empty) + ".");
             }
             return plan;
         }
 
-        private static RouteConfig? ResolveRoute(FairleadConfig cfg, RequestProfile profile, RoutePlan plan, HealthMonitor? health)
+        private static RouteConfig ResolveRoute(FairleadConfig cfg, RequestProfile profile, RoutePlan plan, HealthMonitor health)
         {
             if (!string.IsNullOrEmpty(profile.RouteOverride))
             {
-                var o = cfg.FindRoute(profile.RouteOverride!);
+                var o = cfg.FindRoute(profile.RouteOverride);
                 if (o != null) { plan.Decision.Add("X-Fairlead-Route header asks for '" + o.Id + "'."); return o; }
                 plan.Decision.Add("X-Fairlead-Route '" + profile.RouteOverride + "' is not a route; ignored.");
             }
@@ -158,7 +169,7 @@ namespace Fairlead.Core.Routing
             // A bare model id that one provider serves ("qwen2.5:14b", "gpt-4.1") goes straight to it.
             foreach (var p in cfg.Providers.Where(x => x.Enabled))
             {
-                if (p.FindModel(model) != null || (health?.Provider(p.Id)?.Models.Any(m => string.Equals(m.Id, model, StringComparison.OrdinalIgnoreCase)) ?? false))
+                if (p.FindModel(model) != null || (HealthOf(health, p.Id) != null && HealthOf(health, p.Id).Models.Any(m => string.Equals(m.Id, model, StringComparison.OrdinalIgnoreCase))))
                 {
                     plan.Decision.Add("Model '" + model + "' is served by " + p.Id + ".");
                     return new RouteConfig { Id = p.Id + "/" + model, Strategy = RouteStrategy.Failover, Targets = new List<string> { p.Id + "/" + model }, LocalFallback = true };
@@ -170,7 +181,7 @@ namespace Fairlead.Core.Routing
             return def;
         }
 
-        public static string ApplyRules(FairleadConfig cfg, RequestProfile profile, RoutePlan? plan)
+        public static string ApplyRules(FairleadConfig cfg, RequestProfile profile, RoutePlan plan)
         {
             foreach (var rule in cfg.Rules)
             {
@@ -219,7 +230,7 @@ namespace Fairlead.Core.Routing
             return parts.Count == 0 ? "always" : string.Join(", ", parts);
         }
 
-        private static List<Candidate> Expand(FairleadConfig cfg, RouteConfig route, RequestProfile profile, HealthMonitor? health, BreakerBoard breakers, RoutePlan plan, string operation, DateTimeOffset now)
+        private static List<Candidate> Expand(FairleadConfig cfg, RouteConfig route, RequestProfile profile, HealthMonitor health, BreakerBoard breakers, RoutePlan plan, string operation, DateTimeOffset now)
         {
             var list = new List<Candidate>();
             foreach (var target in route.Targets)
@@ -231,7 +242,7 @@ namespace Fairlead.Core.Routing
                 if (!provider.Enabled) { plan.Decision.Add("Skip " + target + ": provider disabled."); continue; }
                 if (plan.LocalOnly && !provider.Local) continue;
                 if (operation == "embeddings" && provider.Kind == ProviderKind.Anthropic) { plan.Decision.Add("Skip " + target + ": Anthropic has no embeddings endpoint."); continue; }
-                var info = provider.FindModel(model) ?? health?.Provider(provider.Id)?.Models.FirstOrDefault(m => string.Equals(m.Id, model, StringComparison.OrdinalIgnoreCase));
+                var info = provider.FindModel(model) ?? (HealthOf(health, provider.Id) == null ? null : HealthOf(health, provider.Id).Models.FirstOrDefault(m => string.Equals(m.Id, model, StringComparison.OrdinalIgnoreCase)));
                 var why = Unfit(info, profile, operation);
                 if (why != null) { plan.Decision.Add("Skip " + target + ": " + why + "."); continue; }
                 list.Add(Park(new Candidate { Provider = provider, Model = model, Info = info }, health, breakers, now));
@@ -240,7 +251,7 @@ namespace Fairlead.Core.Routing
         }
 
         /// <summary>Why a model cannot take the request, from what is known about it; unknown capabilities never exclude.</summary>
-        public static string? Unfit(ModelInfo? info, RequestProfile profile, string operation)
+        public static string Unfit(ModelInfo info, RequestProfile profile, string operation)
         {
             if (info == null) return null;
             if (operation == "embeddings") return null;
@@ -255,7 +266,7 @@ namespace Fairlead.Core.Routing
             return null;
         }
 
-        private static Candidate Park(Candidate c, HealthMonitor? health, BreakerBoard breakers, DateTimeOffset now)
+        private static Candidate Park(Candidate c, HealthMonitor health, BreakerBoard breakers, DateTimeOffset now)
         {
             var pb = breakers.Find(c.Provider.Id);
             var mb = breakers.Find(c.Ref);
@@ -263,20 +274,20 @@ namespace Fairlead.Core.Routing
             else if (mb != null && mb.State(now) == BreakerState.Open) { c.Parked = true; c.ParkedBecause = "model unavailable: " + (mb.LastError ?? "recent failures"); }
             else
             {
-                var h = health?.Provider(c.Provider.Id);
+                var h = HealthOf(health, c.Provider.Id);
                 if (h != null && h.Reachable == false) { c.Parked = true; c.ParkedBecause = "probe failed: " + (h.LastError ?? "unreachable"); }
                 else if (h != null && h.AuthOk == false) { c.Parked = true; c.ParkedBecause = "key rejected"; }
             }
             return c;
         }
 
-        private void Order(RouteConfig route, List<Candidate> list, Metrics? metrics)
+        private void Order(RouteConfig route, List<Candidate> list, Metrics metrics)
         {
             if (list.Count < 2) return;
             if (route.Strategy == RouteStrategy.Fastest && metrics != null)
             {
-                var known = list.Where(c => metrics.Stats(c.Ref)?.EwmaFirstByteMs != null).OrderBy(c => metrics.Stats(c.Ref)!.EwmaFirstByteMs!.Value).ToList();
-                var unknown = list.Where(c => metrics.Stats(c.Ref)?.EwmaFirstByteMs == null).ToList();
+                var known = list.Where(c => metrics.Stats(c.Ref) != null && metrics.Stats(c.Ref).EwmaFirstByteMs != null).OrderBy(c => metrics.Stats(c.Ref).EwmaFirstByteMs.Value).ToList();
+                var unknown = list.Where(c => metrics.Stats(c.Ref) == null || metrics.Stats(c.Ref).EwmaFirstByteMs == null).ToList();
                 list.Clear();
                 list.AddRange(known);
                 list.AddRange(unknown);
@@ -291,7 +302,7 @@ namespace Fairlead.Core.Routing
             }
         }
 
-        private static Candidate? AutoLocal(FairleadConfig cfg, RequestProfile profile, HealthMonitor? health, BreakerBoard breakers, string operation, DateTimeOffset now)
+        private static Candidate AutoLocal(FairleadConfig cfg, RequestProfile profile, HealthMonitor health, BreakerBoard breakers, string operation, DateTimeOffset now)
         {
             if (health == null) return null;
             foreach (var p in cfg.Providers.Where(x => x.Enabled && x.Local))

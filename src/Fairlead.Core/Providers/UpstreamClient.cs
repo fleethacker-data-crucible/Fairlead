@@ -11,8 +11,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Fairlead.Core.Config;
 using Fairlead.Core.Protocol;
-using Newtonsoft.Json;
-using Newtonsoft.Json.Linq;
+using Fairlead.Core.JsonLite;
 
 namespace Fairlead.Core.Providers
 {
@@ -36,7 +35,7 @@ namespace Fairlead.Core.Providers
 
     public sealed class UpstreamException : Exception
     {
-        public UpstreamException(FailureKind kind, string message, int? status = null, TimeSpan? retryAfter = null, Exception? inner = null)
+        public UpstreamException(FailureKind kind, string message, int? status = null, TimeSpan? retryAfter = null, Exception inner = null)
             : base(message, inner)
         {
             Kind = kind;
@@ -48,7 +47,7 @@ namespace Fairlead.Core.Providers
         public int? Status { get; private set; }
         public TimeSpan? RetryAfter { get; private set; }
         /// <summary>The upstream error body, when there was one (already redacted).</summary>
-        public string? Body { get; set; }
+        public string Body { get; set; }
     }
 
     /// <summary>A successful (2xx) upstream answer whose body has not been read yet.</summary>
@@ -116,7 +115,7 @@ namespace Fairlead.Core.Providers
             ServicePointManager.Expect100Continue = false;
         }
 
-        public UpstreamClient(HttpMessageHandler? handler = null)
+        public UpstreamClient(HttpMessageHandler handler = null)
         {
             if (handler == null)
             {
@@ -171,7 +170,7 @@ namespace Fairlead.Core.Providers
         /// Sends one request and returns once the response headers are in. Non-2xx answers, network failures and
         /// timeouts all surface as <see cref="UpstreamException"/> with a <see cref="FailureKind"/>.
         /// </summary>
-        public async Task<UpstreamResponse> SendAsync(ProviderConfig p, string operation, JObject body, CancellationToken token, IDictionary<string, string>? passHeaders = null)
+        public async Task<UpstreamResponse> SendAsync(ProviderConfig p, string operation, JObject body, CancellationToken token, IDictionary<string, string> passHeaders = null)
         {
             var timeoutMs = Math.Max(5, p.TimeoutSeconds) * 1000;
             var cts = CancellationTokenSource.CreateLinkedTokenSource(token);
@@ -281,11 +280,11 @@ namespace Fairlead.Core.Providers
                     {
                         if (!response.IsSuccessStatusCode) return list;
                         var root = JObject.Parse(await response.Content.ReadAsStringAsync().ConfigureAwait(false));
-                        foreach (var m in Translate.Arr(root["models"])) { var n = (string?)m["name"]; if (!string.IsNullOrEmpty(n)) list.Add(n!); }
+                        foreach (var m in Translate.Arr(root["models"])) { var n = (string)m["name"]; if (!string.IsNullOrEmpty(n)) list.Add(n); }
                     }
                 }
             }
-            catch (Exception ex) when (ex is HttpRequestException || ex is OperationCanceledException || ex is JsonException) { }
+            catch (Exception ex) { if (!(ex is HttpRequestException || ex is OperationCanceledException || ex is JsonException)) throw; }
             return list;
         }
 
@@ -302,11 +301,11 @@ namespace Fairlead.Core.Providers
             {
                 foreach (var m in Translate.Arr(root["models"]))
                 {
-                    var caps = Translate.Arr(m["capabilities"]).Select(c => (string?)c).ToList();
+                    var caps = Translate.Arr(m["capabilities"]).Select(c => (string)c).ToList();
                     var info = new ModelInfo
                     {
-                        Id = (string?)m["name"] ?? (string?)m["model"] ?? string.Empty,
-                        ContextWindow = (int?)m["details"]?["context_length"],
+                        Id = (string)m["name"] ?? (string)m["model"] ?? string.Empty,
+                        ContextWindow = (int?)m["details"].Get("context_length"),
                         Discovered = true,
                     };
                     if (caps.Count > 0)
@@ -317,7 +316,7 @@ namespace Fairlead.Core.Providers
                     }
                     else
                     {
-                        var family = ((string?)m["details"]?["family"] ?? string.Empty).ToLowerInvariant();
+                        var family = ((string)m["details"].Get("family") ?? string.Empty).ToLowerInvariant();
                         info.Embedding = family.Contains("bert") || info.Id.IndexOf("embed", StringComparison.OrdinalIgnoreCase) >= 0;
                     }
                     if (info.Id.Length > 0) list.Add(info);
@@ -326,13 +325,13 @@ namespace Fairlead.Core.Providers
             }
             foreach (var m in Translate.Arr(root["data"]))
             {
-                var id = (string?)m["id"];
+                var id = (string)m["id"];
                 if (string.IsNullOrEmpty(id)) continue;
                 // OpenAI lists image, audio and moderation models next to chat ones; they cannot answer /chat/completions.
-                if (NonChat.IsMatch(id!)) continue;
-                var info = new ModelInfo { Id = id!, Discovered = true };
+                if (NonChat.IsMatch(id)) continue;
+                var info = new ModelInfo { Id = id, Discovered = true };
                 info.ContextWindow = (int?)m["context_length"] ?? (int?)m["context_window"] ?? (int?)m["max_context_length"];
-                if (id!.IndexOf("embed", StringComparison.OrdinalIgnoreCase) >= 0) info.Embedding = true;
+                if (id.IndexOf("embed", StringComparison.OrdinalIgnoreCase) >= 0) info.Embedding = true;
                 list.Add(info);
             }
             return list;
@@ -398,14 +397,14 @@ namespace Fairlead.Core.Providers
             {
                 var j = JToken.Parse(body);
                 var err = j["error"];
-                if (err != null && err.Type == JTokenType.String) return (string?)err ?? string.Empty;
-                var m = (string?)err?["message"] ?? (string?)j["message"] ?? (string?)j["detail"];
-                if (!string.IsNullOrEmpty(m)) return m!;
+                if (err != null && err.Type == JTokenType.String) return (string)err ?? string.Empty;
+                var m = (string)err.Get("message") ?? (string)j["message"] ?? (string)j["detail"];
+                if (!string.IsNullOrEmpty(m)) return m;
             }
             catch (JsonException) { }
             catch (InvalidOperationException) { }
             var t = body.Trim();
-            return t.Length > 300 ? t.Substring(0, 300) + "…" : t;
+            return t.Length > 300 ? t.Substring(0, 300) + "\u2026" : t;
         }
 
         private static string Describe(HttpRequestException ex)

@@ -5,40 +5,49 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using Fairlead.Core.Protocol;
-using Newtonsoft.Json;
+using Fairlead.Core.JsonLite;
 
 namespace Fairlead.Core.Telemetry
 {
     public sealed class AttemptRecord
     {
-        public string Target { get; set; } = string.Empty;
-        public string Outcome { get; set; } = string.Empty; // ok, network, timeout, server, ratelimited, auth, modelnotfound, badrequest, skipped, cancelled, lost-race
+        private string _target = string.Empty;
+        public string Target { get { return _target; } set { _target = value; } }
+        private string _outcome = string.Empty;
+        public string Outcome { get { return _outcome; } set { _outcome = value; } } // ok, network, timeout, server, ratelimited, auth, modelnotfound, badrequest, skipped, cancelled, lost-race
         public int? Status { get; set; }
         public int Ms { get; set; }
-        public string? Error { get; set; }
+        public string Error { get; set; }
     }
 
     /// <summary>One gateway request as the activity log shows it. No prompt text unless content logging is on.</summary>
     public sealed class RequestRecord
     {
-        public string Id { get; set; } = string.Empty;
-        public DateTimeOffset Time { get; set; } = DateTimeOffset.UtcNow;
-        public string? Client { get; set; }
-        public string Dialect { get; set; } = string.Empty;
-        public string Endpoint { get; set; } = string.Empty;
-        public string RequestedModel { get; set; } = string.Empty;
-        public string? Route { get; set; }
+        private string _id = string.Empty;
+        public string Id { get { return _id; } set { _id = value; } }
+        private DateTimeOffset _time = DateTimeOffset.UtcNow;
+        public DateTimeOffset Time { get { return _time; } set { _time = value; } }
+        public string Client { get; set; }
+        private string _dialect = string.Empty;
+        public string Dialect { get { return _dialect; } set { _dialect = value; } }
+        private string _endpoint = string.Empty;
+        public string Endpoint { get { return _endpoint; } set { _endpoint = value; } }
+        private string _requestedModel = string.Empty;
+        public string RequestedModel { get { return _requestedModel; } set { _requestedModel = value; } }
+        public string Route { get; set; }
         /// <summary>Plain-language trace of how the route and target were chosen.</summary>
-        public List<string> Decision { get; set; } = new List<string>();
-        public List<AttemptRecord> Attempts { get; set; } = new List<AttemptRecord>();
-        public string? Target { get; set; }
+        private List<string> _decision = new List<string>();
+        public List<string> Decision { get { return _decision; } set { _decision = value; } }
+        private List<AttemptRecord> _attempts = new List<AttemptRecord>();
+        public List<AttemptRecord> Attempts { get { return _attempts; } set { _attempts = value; } }
+        public string Target { get; set; }
         public bool Local { get; set; }
         public bool Kedge { get; set; }
         public bool Sensitive { get; set; }
         public bool Failover { get; set; }
         public bool Stream { get; set; }
         public int Status { get; set; }
-        public string? Error { get; set; }
+        public string Error { get; set; }
         public int? FirstByteMs { get; set; }
         public int TotalMs { get; set; }
         public int EstimatedTokens { get; set; }
@@ -46,13 +55,14 @@ namespace Fairlead.Core.Telemetry
         public int? OutputTokens { get; set; }
         /// <summary>USD, only when the operator entered prices for the model.</summary>
         public decimal? Cost { get; set; }
-        public string? PromptPreview { get; set; }
-        public string? ResponsePreview { get; set; }
+        public string PromptPreview { get; set; }
+        public string ResponsePreview { get; set; }
     }
 
     public sealed class TargetStats
     {
-        public string Target { get; set; } = string.Empty;
+        private string _target = string.Empty;
+        public string Target { get { return _target; } set { _target = value; } }
         public long Requests { get; set; }
         public long Failures { get; set; }
         /// <summary>Exponentially weighted time to first byte; drives the "fastest" strategy.</summary>
@@ -71,7 +81,7 @@ namespace Fairlead.Core.Telemetry
         private readonly object _lock = new object();
         private readonly LinkedList<RequestRecord> _recent = new LinkedList<RequestRecord>();
         private readonly ConcurrentDictionary<string, TargetStats> _targets = new ConcurrentDictionary<string, TargetStats>(StringComparer.OrdinalIgnoreCase);
-        private readonly string? _file;
+        private readonly string _file;
         private readonly int _capacity;
         private long _total;
         private long _failed;
@@ -80,22 +90,23 @@ namespace Fairlead.Core.Telemetry
         private long _kedge;
         private long _sensitive;
 
-        public Metrics(string? logDirectory, int capacity = 1000)
+        public Metrics(string logDirectory, int capacity = 1000)
         {
             _capacity = capacity;
             if (!string.IsNullOrEmpty(logDirectory))
             {
                 try
                 {
-                    Directory.CreateDirectory(logDirectory!);
-                    _file = Path.Combine(logDirectory!, "fairlead-requests-" + DateTimeOffset.UtcNow.ToString("yyyyMMdd") + ".jsonl");
+                    Directory.CreateDirectory(logDirectory);
+                    _file = Path.Combine(logDirectory, "fairlead-requests-" + DateTimeOffset.UtcNow.ToString("yyyyMMdd") + ".jsonl");
                 }
                 catch (IOException) { _file = null; }
                 catch (UnauthorizedAccessException) { _file = null; }
             }
         }
 
-        public DateTimeOffset StartedAt { get; } = DateTimeOffset.UtcNow;
+        private DateTimeOffset _startedAt = DateTimeOffset.UtcNow;
+        public DateTimeOffset StartedAt { get { return _startedAt; } }
 
         public void Record(RequestRecord r)
         {
@@ -146,9 +157,9 @@ namespace Fairlead.Core.Telemetry
             }
         }
 
-        public TargetStats? Stats(string target)
+        public TargetStats Stats(string target)
         {
-            TargetStats? s;
+            TargetStats s;
             return _targets.TryGetValue(target, out s) ? s : null;
         }
 
@@ -157,7 +168,7 @@ namespace Fairlead.Core.Telemetry
             lock (_lock) return _recent.Take(count).ToList();
         }
 
-        public RequestRecord? Find(string id)
+        public RequestRecord Find(string id)
         {
             lock (_lock) return _recent.FirstOrDefault(r => r.Id == id);
         }
@@ -185,7 +196,7 @@ namespace Fairlead.Core.Telemetry
                         cost = window.Any(r => r.Cost.HasValue) ? window.Sum(r => r.Cost ?? 0m) : (decimal?)null,
                         p50Ms = Percentile(window.Where(r => r.Status < 400).Select(r => r.TotalMs).ToList(), 0.5),
                         p95Ms = Percentile(window.Where(r => r.Status < 400).Select(r => r.TotalMs).ToList(), 0.95),
-                        p50FirstByteMs = Percentile(window.Where(r => r.FirstByteMs.HasValue).Select(r => r.FirstByteMs!.Value).ToList(), 0.5),
+                        p50FirstByteMs = Percentile(window.Where(r => r.FirstByteMs.HasValue).Select(r => r.FirstByteMs.Value).ToList(), 0.5),
                     },
                     targets = _targets.Values.OrderByDescending(t => t.Requests).ToList(),
                 };

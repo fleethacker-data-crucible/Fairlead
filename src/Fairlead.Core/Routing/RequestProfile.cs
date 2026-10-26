@@ -4,7 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
 using Fairlead.Core.Protocol;
-using Newtonsoft.Json.Linq;
+using Fairlead.Core.JsonLite;
 
 namespace Fairlead.Core.Routing
 {
@@ -12,7 +12,8 @@ namespace Fairlead.Core.Routing
     public sealed class RequestProfile
     {
         public Dialect Dialect { get; set; }
-        public string RequestedModel { get; set; } = string.Empty;
+        private string _requestedModel = string.Empty;
+        public string RequestedModel { get { return _requestedModel; } set { _requestedModel = value; } }
         public bool Stream { get; set; }
         /// <summary>Rough prompt size (characters / 4, plus tool schemas). Good enough to pick a context window.</summary>
         public int EstimatedTokens { get; set; }
@@ -20,20 +21,22 @@ namespace Fairlead.Core.Routing
         public bool HasTools { get; set; }
         public bool HasImages { get; set; }
         /// <summary>The latest user message, for keyword rules. Never logged unless content logging is on.</summary>
-        public string LastUserText { get; set; } = string.Empty;
+        private string _lastUserText = string.Empty;
+        public string LastUserText { get { return _lastUserText; } set { _lastUserText = value; } }
         public bool Sensitive { get; set; }
         /// <summary>Why the request is sensitive ("header", "aws-key", "private-key"...).</summary>
-        public List<string> SensitiveReasons { get; set; } = new List<string>();
-        public string? ClientName { get; set; }
+        private List<string> _sensitiveReasons = new List<string>();
+        public List<string> SensitiveReasons { get { return _sensitiveReasons; } set { _sensitiveReasons = value; } }
+        public string ClientName { get; set; }
         /// <summary>X-Fairlead-Route: the caller asks for a route by header (overrides the model name).</summary>
-        public string? RouteOverride { get; set; }
+        public string RouteOverride { get; set; }
 
         public static RequestProfile From(JObject body, Dialect dialect, bool detectSecrets)
         {
             var p = new RequestProfile
             {
                 Dialect = dialect,
-                RequestedModel = (string?)body["model"] ?? string.Empty,
+                RequestedModel = (string)body["model"] ?? string.Empty,
                 Stream = body.Value<bool?>("stream") == true,
             };
             var chars = 0;
@@ -51,26 +54,26 @@ namespace Fairlead.Core.Routing
             }
             foreach (var m in Translate.Arr(body["messages"]))
             {
-                var role = (string?)m["role"];
+                var role = (string)m["role"];
                 var content = m["content"];
                 var text = new StringBuilder();
-                if (content != null && content.Type == JTokenType.String) text.Append((string?)content);
+                if (content != null && content.Type == JTokenType.String) text.Append((string)content);
                 foreach (var part in Translate.Arr(content))
                 {
-                    var type = (string?)part["type"];
+                    var type = (string)part["type"];
                     if (type == "image" || type == "image_url") { p.HasImages = true; chars += 1500 * 4; continue; }
-                    if (type == "text") text.Append((string?)part["text"]).Append('\n');
+                    if (type == "text") text.Append((string)part["text"]).Append('\n');
                     else if (type == "tool_result") text.Append(Translate.BlocksText(part["content"])).Append('\n');
-                    else if (type == "tool_use") text.Append(part["input"]?.ToString()).Append('\n');
+                    else if (type == "tool_use") text.Append(part["input"] == null ? null : part["input"].ToString()).Append('\n');
                 }
-                foreach (var call in Translate.Arr(m["tool_calls"])) text.Append((string?)call["function"]?["arguments"]).Append('\n');
+                foreach (var call in Translate.Arr(m["tool_calls"])) text.Append((string)call["function"].Get("arguments")).Append('\n');
                 chars += text.Length;
                 all.Append(text).Append('\n');
                 if (role == "user")
                 {
                     var t = text.ToString().Trim();
                     // A user turn that only carries tool results is not what the person asked; keep the last real one.
-                    var onlyResults = Translate.Arr(content).Any() && Translate.Arr(content).All(b => (string?)b["type"] == "tool_result");
+                    var onlyResults = Translate.Arr(content).Any() && Translate.Arr(content).All(b => (string)b["type"] == "tool_result");
                     if (t.Length > 0 && !onlyResults) p.LastUserText = t;
                 }
             }
@@ -78,7 +81,7 @@ namespace Fairlead.Core.Routing
             if (tools != null && tools.Count > 0)
             {
                 p.HasTools = true;
-                chars += tools.ToString(Newtonsoft.Json.Formatting.None).Length;
+                chars += tools.ToString(Formatting.None).Length;
             }
             p.EstimatedTokens = (int)Math.Ceiling(chars / 4.0);
             if (detectSecrets)
@@ -105,7 +108,7 @@ namespace Fairlead.Core.Routing
         {
             P("private-key", @"-----BEGIN (?:RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY-----"),
             P("aws-key", @"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b"),
-            P("api-key", @"\b(?:sk-ant-[A-Za-z0-9_\-]{20,}|sk-(?:proj-)?[A-Za-z0-9_\-]{32,}|AIza[0-9A-Za-z_\-]{35}|gsk_[A-Za-z0-9]{40,}|xox[baprs]-[A-Za-z0-9-]{10,})\b"),
+            P("api-key", @"\b(?:sk-ant-[A-Za-z0-9_\-]{20,}|sk-(?:proj-).Get(A-Za-z0-9_\-){32,}|AIza[0-9A-Za-z_\-]{35}|gsk_[A-Za-z0-9]{40,}|xox[baprs]-[A-Za-z0-9-]{10,})\b"),
             P("github-token", @"\b(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{60,})\b"),
             P("jwt", @"\beyJ[A-Za-z0-9_\-]{10,}\.eyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\b"),
             P("connection-string", @"(?i)\b(?:password|pwd)\s*=\s*[^;\s]{4,};"),

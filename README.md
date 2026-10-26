@@ -36,9 +36,12 @@ names.
 ## Quick start
 
 ```powershell
-build\Build-Fairlead.ps1        # on the build machine (.NET 8 SDK, Node 20+); output in dist\Fairlead
 .\Launch-Fairlead.bat           # on the workstation: tray icon; the setup page opens on first run
 ```
+
+Nothing to build or install: the launcher compiles the engine from `src\Fairlead.Core` with Windows PowerShell 5.1
+(C# 5, `Add-Type`, framework assemblies only), and the admin UI ships prebuilt in `web\dist`. Only a change to the
+UI needs the build machine (`build\Build-Fairlead.ps1`: .NET 8 SDK for the tests, Node 20+ for the UI).
 
 Then point a tool at it, for example Claude Code:
 

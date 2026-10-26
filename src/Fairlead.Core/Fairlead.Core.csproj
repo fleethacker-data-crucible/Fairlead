@@ -8,8 +8,9 @@
       netstandard2.0 offers so the net48 build never drifts.
     -->
     <TargetFrameworks>net48;netstandard2.0</TargetFrameworks>
-    <LangVersion>12</LangVersion>
-    <Nullable>enable</Nullable>
+    <!-- C# 5: the workstation compiles this source at start with the inbox .NET Framework compiler (Add-Type). -->
+    <LangVersion>5</LangVersion>
+    <Nullable>disable</Nullable>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <WarningsNotAsErrors>CS1591</WarningsNotAsErrors>
     <AssemblyName>Fairlead.Core</AssemblyName>
@@ -17,15 +18,8 @@
     <Version>0.1.0</Version>
     <Deterministic>true</Deterministic>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
-    <!-- Libraries don't copy NuGet dependencies to bin by default; the module and the bundle need
-         Newtonsoft.Json.dll (and ProtectedData on netstandard2.0) next to Fairlead.Core.dll. -->
-    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
     <Description>Fairlead model router core: OpenAI- and Anthropic-compatible gateway, routing, failover to local models, loopback host.</Description>
   </PropertyGroup>
-
-  <ItemGroup>
-    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
-  </ItemGroup>
 
   <ItemGroup Condition="'$(TargetFramework)' == 'net48'">
     <Reference Include="System.Net.Http" />

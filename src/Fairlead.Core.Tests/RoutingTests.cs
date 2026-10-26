@@ -6,7 +6,7 @@ using Fairlead.Core.Protocol;
 using Fairlead.Core.Providers;
 using Fairlead.Core.Resilience;
 using Fairlead.Core.Routing;
-using Newtonsoft.Json.Linq;
+using Fairlead.Core.JsonLite;
 using Xunit;
 
 namespace Fairlead.Core.Tests

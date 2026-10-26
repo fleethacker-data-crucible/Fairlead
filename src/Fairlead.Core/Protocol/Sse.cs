@@ -3,26 +3,25 @@ using System.IO;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using Newtonsoft.Json;
-using Newtonsoft.Json.Linq;
+using Fairlead.Core.JsonLite;
 
 namespace Fairlead.Core.Protocol
 {
     /// <summary>One server-sent event: the optional event name and the joined data lines.</summary>
     public sealed class SseEvent
     {
-        public SseEvent(string? name, string data)
+        public SseEvent(string name, string data)
         {
             Name = name;
             Data = data;
         }
 
-        public string? Name { get; private set; }
+        public string Name { get; private set; }
         public string Data { get; private set; }
         public bool IsDone { get { return Data == "[DONE]"; } }
 
         /// <summary>The data as JSON, or null when it is not JSON ([DONE], comments, keep-alives).</summary>
-        public JObject? Json()
+        public JObject Json()
         {
             if (Data.Length == 0 || Data[0] != '{') return null;
             try { return JObject.Parse(Data); }
@@ -51,10 +50,10 @@ namespace Fairlead.Core.Protocol
         }
 
         /// <summary>The next event, or null at the end of the stream.</summary>
-        public async Task<SseEvent?> NextAsync(CancellationToken token)
+        public async Task<SseEvent> NextAsync(CancellationToken token)
         {
-            string? name = null;
-            StringBuilder? data = null;
+            string name = null;
+            StringBuilder data = null;
             while (true)
             {
                 token.ThrowIfCancellationRequested();

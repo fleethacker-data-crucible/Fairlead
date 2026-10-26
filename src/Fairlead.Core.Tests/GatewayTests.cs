@@ -9,7 +9,7 @@ using System.Threading.Tasks;
 using Fairlead.Core.Config;
 using Fairlead.Core.Gateway;
 using Fairlead.Core.Host;
-using Newtonsoft.Json.Linq;
+using Fairlead.Core.JsonLite;
 using Xunit;
 
 namespace Fairlead.Core.Tests
@@ -176,7 +176,7 @@ namespace Fairlead.Core.Tests
             var req = new HttpRequestMessage(HttpMethod.Get, host.BaseUrl + "/v1/models");
             req.Headers.TryAddWithoutValidation("Authorization", "Bearer " + key);
             var r = await _http.SendAsync(req);
-            var ids = JObject.Parse(await r.Content.ReadAsStringAsync())["data"]!.Select(d => (string?)d["id"]).ToList();
+            var ids = (JObject.Parse(await r.Content.ReadAsStringAsync())["data"] as JArray)!.Select(d => (string?)d["id"]).ToList();
             Assert.Equal("auto", ids[0]);
             Assert.Contains("ollama/qwen", ids);
             Assert.Contains("anthropic/claude-big", ids);
