@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="assets/brand/emblem-dark.png">
-    <img src="assets/brand/emblem-light.png" width="280" alt="Fairlead emblem: a roller fairlead with a line led between its rollers, under a starboard light, above the FAIRLEAD wordmark">
+    <img src="assets/brand/emblem-light.png" width="280" alt="Fairlead emblem: a brass roller fairlead on a ship's rail with a rope led between its rollers, a green starboard light beside it and waves below, inside a brass compass ring, above the FAIRLEAD wordmark">
   </picture>
 </p>
 
