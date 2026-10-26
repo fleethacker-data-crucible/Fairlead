@@ -1,0 +1,50 @@
+# The application must obtain this value from its runtime environment.
+# Example runtime value format: https://approved-gateway.example
+environment:
+  required:
+    gateway_base_url:
+      env: "AI_GATEWAY_BASE_URL"
+
+    bearer_token:
+      env: "DATABRICKS_TOKEN"
+
+endpoints:
+  openai_responses:
+    method: "POST"
+
+    # Final URL shape:
+    # ${AI_GATEWAY_BASE_URL}/ai-gateway/openai/v1/responses
+    base_url_env: "AI_GATEWAY_BASE_URL"
+    path: "/ai-gateway/openai/v1/responses"
+
+    headers:
+      Content-Type: "application/json"
+      Authorization:
+        scheme: "Bearer"
+        token_env: "DATABRICKS_TOKEN"
+
+    request_format: "openai_responses_v1"
+
+    request_body:
+      required_fields:
+        - "model"
+        - "input"
+
+      optional_fields:
+        - "max_output_tokens"
+
+      template:
+        model: "<configured provider model ID>"
+        max_output_tokens: "<integer>"
+        input:
+          - role: "user"
+            content:
+              - type: "input_text"
+                text: "<user prompt>"
+
+  mlflow_responses:
+    method: "POST"
+
+    # Final URL shape:
+    # ${AI_GATEWAY_BASE_URL}/ai-gateway/mlflow/v1/responses
+    base_url_env:
