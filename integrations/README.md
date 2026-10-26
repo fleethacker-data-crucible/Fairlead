@@ -28,6 +28,6 @@ but someone has to run it with the real tool and tick the checklist in its folde
 | Aider | [aider](aider/README.md) | Hackathon | |
 | LangChain / LlamaIndex | [langchain](langchain/README.md) | Hackathon | |
 | Halyard (Fleet) | [halyard](halyard/README.md) | Hackathon | |
-| Windlass (huge local models) | [windlass](windlass/README.md) | Hackathon | contract defined; Windlass is being built in its own repo |
+| Windlass (huge local models) | [windlass](windlass/README.md) | Hackathon | Windlass v0.2 serves this contract (C# on PS 5.1, same PC); not yet run against Fairlead |
 
 To add a tool, copy [`_template`](_template/README.md).
