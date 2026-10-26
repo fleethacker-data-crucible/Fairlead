@@ -1,0 +1,84 @@
+# Example AI gateway model file. Copy to config\ai_gateway_models.yaml (git-ignored) and replace the model ids with
+# the ones your gateway serves. The format is the gateway's; Fairlead reads environment, endpoints and models and
+# ignores other sections. No host, URL or token belongs here: they come from the environment variables named below.
+# Check your copy with: Test-FairleadModelConfig
+
+environment:
+  required:
+    gateway_base_url:
+      env: "AI_GATEWAY_BASE_URL"
+
+    bearer_token:
+      env: "DATABRICKS_TOKEN"
+
+endpoints:
+  openai_responses:
+    method: "POST"
+
+    # Final URL: ${AI_GATEWAY_BASE_URL}/ai-gateway/openai/v1/responses
+    base_url_env: "AI_GATEWAY_BASE_URL"
+    path: "/ai-gateway/openai/v1/responses"
+
+    headers:
+      Content-Type: "application/json"
+      Authorization:
+        scheme: "Bearer"
+        token_env: "DATABRICKS_TOKEN"
+
+    request_format: "openai_responses_v1"
+
+    request_body:
+      required_fields:
+        - "model"
+        - "input"
+
+      optional_fields:
+        - "max_output_tokens"
+
+      template:
+        model: "<configured provider model ID>"
+        max_output_tokens: "<integer>"
+        input:
+          - role: "user"
+            content:
+              - type: "input_text"
+                text: "<user prompt>"
+
+  mlflow_responses:
+    method: "POST"
+
+    # Final URL: ${AI_GATEWAY_BASE_URL}/ai-gateway/mlflow/v1/responses
+    base_url_env: "AI_GATEWAY_BASE_URL"
+    path: "/ai-gateway/mlflow/v1/responses"
+
+    headers:
+      Content-Type: "application/json"
+      Authorization:
+        scheme: "Bearer"
+        token_env: "DATABRICKS_TOKEN"
+
+    request_format: "openai_responses_v1"
+
+    request_body:
+      required_fields:
+        - "model"
+        - "input"
+
+      optional_fields:
+        - "max_output_tokens"
+
+models:
+  example_reasoning:
+    model_id: "example.provider-model-1"
+    endpoint: "openai_responses"
+    enabled: true
+
+  example_fast:
+    model_id: "example.provider-model-2"
+    endpoint: "mlflow_responses"
+    enabled: true
+
+  example_disabled:
+    model_id: "example.provider-model-3"
+    endpoint: "mlflow_responses"
+    enabled: false

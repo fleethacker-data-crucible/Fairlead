@@ -9,6 +9,9 @@ data/
 
 # Local secrets and environment (NEVER commit real values)
 config/fairlead.env
+# The AI gateway model file: deployment-specific endpoints and model ids. Only the .example.yaml is committed.
+config/ai_gateway_models.yaml
+config/*.local.yaml
 .env
 .env.*
 !**/*.env.example

@@ -245,6 +245,7 @@ namespace Fairlead.Core.Routing
                 if (!provider.Enabled) { plan.Decision.Add("Skip " + target + ": provider disabled."); continue; }
                 if (plan.LocalOnly && !provider.Local) continue;
                 if (operation == "embeddings" && provider.Kind == ProviderKind.Anthropic) { plan.Decision.Add("Skip " + target + ": Anthropic has no embeddings endpoint."); continue; }
+                if (operation == "embeddings" && provider.Kind == ProviderKind.Responses) { plan.Decision.Add("Skip " + target + ": a Responses gateway serves chat only."); continue; }
                 var info = provider.FindModel(model) ?? HealthModels(health, provider.Id).FirstOrDefault(m => string.Equals(m.Id, model, StringComparison.OrdinalIgnoreCase));
                 var why = Unfit(info, profile, operation);
                 if (why != null) { plan.Decision.Add("Skip " + target + ": " + why + "."); continue; }
