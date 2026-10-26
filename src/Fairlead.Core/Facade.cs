@@ -19,14 +19,14 @@ namespace Fairlead.Core
             return FairleadSettings.FromEnvironment(rootDirectory);
         }
 
-        public static FairleadHost CreateHost(FairleadSettings settings, string? webRoot, int preferredPort, Dictionary<string, object?>? launcherState, bool autoStop)
+        public static FairleadHost CreateHost(FairleadSettings settings, string webRoot, int preferredPort, Dictionary<string, object> launcherState, bool autoStop)
         {
             return new FairleadHost(new HostOptions
             {
                 Settings = settings,
                 WebRoot = webRoot,
                 PreferredPort = preferredPort,
-                LauncherState = launcherState ?? new Dictionary<string, object?>(),
+                LauncherState = launcherState ?? new Dictionary<string, object>(),
                 AutoStop = autoStop,
             });
         }

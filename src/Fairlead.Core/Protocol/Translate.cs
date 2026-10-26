@@ -2,8 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
-using Newtonsoft.Json;
-using Newtonsoft.Json.Linq;
+using Fairlead.Core.Serialization;
 
 namespace Fairlead.Core.Protocol
 {
@@ -18,17 +17,17 @@ namespace Fairlead.Core.Protocol
 
         public bool Known { get { return Input.HasValue || Output.HasValue; } }
 
-        public static TokenUsage FromOpenAi(JToken? usage)
+        public static TokenUsage FromOpenAi(JToken usage)
         {
             var u = new TokenUsage();
             if (usage == null || usage.Type != JTokenType.Object) return u;
             u.Input = (int?)usage["prompt_tokens"];
             u.Output = (int?)usage["completion_tokens"];
-            u.CacheRead = (int?)usage["prompt_tokens_details"]?["cached_tokens"];
+            u.CacheRead = (int?)usage["prompt_tokens_details"].At("cached_tokens");
             return u;
         }
 
-        public static TokenUsage FromAnthropic(JToken? usage)
+        public static TokenUsage FromAnthropic(JToken usage)
         {
             var u = new TokenUsage();
             if (usage == null || usage.Type != JTokenType.Object) return u;
@@ -60,17 +59,17 @@ namespace Fairlead.Core.Protocol
 
         public static JObject AnthropicToOpenAiRequest(JObject a, string model, bool maxCompletionTokens, bool streamUsage)
         {
-            var o = new JObject { ["model"] = model };
+            var o = new JObject { { "model", model } };
             var messages = new JArray();
             var system = SystemText(a["system"]);
-            if (!string.IsNullOrEmpty(system)) messages.Add(new JObject { ["role"] = "system", ["content"] = system });
+            if (!string.IsNullOrEmpty(system)) messages.Add(new JObject { { "role", "system" }, { "content", system } });
             foreach (var m in Arr(a["messages"]))
             {
-                var role = (string?)m["role"] ?? "user";
+                var role = (string)m["role"] ?? "user";
                 var content = m["content"];
                 if (content == null || content.Type == JTokenType.String)
                 {
-                    messages.Add(new JObject { ["role"] = role, ["content"] = content == null ? string.Empty : (string?)content });
+                    messages.Add(new JObject { { "role", role }, { "content", content == null ? string.Empty : (string)content } });
                     continue;
                 }
                 if (role == "assistant")
@@ -79,20 +78,20 @@ namespace Fairlead.Core.Protocol
                     var calls = new JArray();
                     foreach (var b in Arr(content))
                     {
-                        var type = (string?)b["type"];
-                        if (type == "text") text.Append((string?)b["text"]);
+                        var type = (string)b["type"];
+                        if (type == "text") text.Append((string)b["text"]);
                         else if (type == "tool_use")
                         {
                             calls.Add(new JObject
                             {
-                                ["id"] = (string?)b["id"],
-                                ["type"] = "function",
-                                ["function"] = new JObject { ["name"] = (string?)b["name"], ["arguments"] = (b["input"] ?? new JObject()).ToString(Formatting.None) },
+                                { "id", (string)b["id"] },
+                                { "type", "function" },
+                                { "function", new JObject { { "name", (string)b["name"] }, { "arguments", (b["input"] ?? new JObject()).ToString(Formatting.None) } } },
                             });
                         }
                         // thinking / redacted_thinking blocks are Anthropic-only and are dropped.
                     }
-                    var msg = new JObject { ["role"] = "assistant", ["content"] = text.Length == 0 && calls.Count > 0 ? null : text.ToString() };
+                    var msg = new JObject { { "role", "assistant" }, { "content", text.Length == 0 && calls.Count > 0 ? null : text.ToString() } };
                     if (calls.Count > 0) msg["tool_calls"] = calls;
                     messages.Add(msg);
                     continue;
@@ -101,42 +100,43 @@ namespace Fairlead.Core.Protocol
                 var parts = new JArray();
                 foreach (var b in Arr(content))
                 {
-                    var type = (string?)b["type"];
+                    var type = (string)b["type"];
                     if (type == "tool_result")
                     {
                         var resultText = BlocksText(b["content"]);
                         if (b.Value<bool?>("is_error") == true) resultText = "Error: " + resultText;
-                        messages.Add(new JObject { ["role"] = "tool", ["tool_call_id"] = (string?)b["tool_use_id"], ["content"] = resultText });
+                        messages.Add(new JObject { { "role", "tool" }, { "tool_call_id", (string)b["tool_use_id"] }, { "content", resultText } });
                     }
-                    else if (type == "text") parts.Add(new JObject { ["type"] = "text", ["text"] = (string?)b["text"] });
+                    else if (type == "text") parts.Add(new JObject { { "type", "text" }, { "text", (string)b["text"] } });
                     else if (type == "image")
                     {
                         var src = b["source"];
-                        var url = (string?)src?["type"] == "base64"
-                            ? "data:" + (string?)src?["media_type"] + ";base64," + (string?)src?["data"]
-                            : (string?)src?["url"];
-                        if (url != null) parts.Add(new JObject { ["type"] = "image_url", ["image_url"] = new JObject { ["url"] = url } });
+                        var url = (string)src.At("type") == "base64"
+                            ? "data:" + (string)src.At("media_type") + ";base64," + (string)src.At("data")
+                            : (string)src.At("url");
+                        if (url != null) parts.Add(new JObject { { "type", "image_url" }, { "image_url", new JObject { { "url", url } } } });
                     }
                     else if (type == "document")
                     {
                         var src = b["source"];
-                        if ((string?)src?["type"] == "text") parts.Add(new JObject { ["type"] = "text", ["text"] = (string?)src?["data"] });
+                        if ((string)src.At("type") == "text") parts.Add(new JObject { { "type", "text" }, { "text", (string)src.At("data") } });
                     }
                 }
-                if (parts.Count == 1 && (string?)parts[0]["type"] == "text") messages.Add(new JObject { ["role"] = "user", ["content"] = parts[0]["text"] });
-                else if (parts.Count > 0) messages.Add(new JObject { ["role"] = "user", ["content"] = parts });
+                if (parts.Count == 1 && (string)parts[0]["type"] == "text") messages.Add(new JObject { { "role", "user" }, { "content", parts[0]["text"] } });
+                else if (parts.Count > 0) messages.Add(new JObject { { "role", "user" }, { "content", parts } });
             }
             o["messages"] = messages;
             var max = a["max_tokens"];
             if (max != null) o[maxCompletionTokens ? "max_completion_tokens" : "max_tokens"] = max;
             Copy(a, o, "temperature");
             Copy(a, o, "top_p");
-            if (a["stop_sequences"] is JArray stops && stops.Count > 0) o["stop"] = stops;
+            var stops = a["stop_sequences"] as JArray;
+            if (stops != null && stops.Count > 0) o["stop"] = stops;
             var stream = a.Value<bool?>("stream") == true;
             if (stream)
             {
                 o["stream"] = true;
-                if (streamUsage) o["stream_options"] = new JObject { ["include_usage"] = true };
+                if (streamUsage) o["stream_options"] = new JObject { { "include_usage", true } };
             }
             var tools = new JArray();
             foreach (var t in Arr(a["tools"]))
@@ -145,36 +145,36 @@ namespace Fairlead.Core.Protocol
                 if (t["input_schema"] == null) continue;
                 tools.Add(new JObject
                 {
-                    ["type"] = "function",
-                    ["function"] = new JObject { ["name"] = (string?)t["name"], ["description"] = (string?)t["description"] ?? string.Empty, ["parameters"] = t["input_schema"] },
+                    { "type", "function" },
+                    { "function", new JObject { { "name", (string)t["name"] }, { "description", (string)t["description"] ?? string.Empty }, { "parameters", t["input_schema"] } } },
                 });
             }
             if (tools.Count > 0) o["tools"] = tools;
             var choice = a["tool_choice"];
             if (choice != null && tools.Count > 0)
             {
-                switch ((string?)choice["type"])
+                switch ((string)choice["type"])
                 {
                     case "any": o["tool_choice"] = "required"; break;
                     case "none": o["tool_choice"] = "none"; break;
-                    case "tool": o["tool_choice"] = new JObject { ["type"] = "function", ["function"] = new JObject { ["name"] = (string?)choice["name"] } }; break;
+                    case "tool": o["tool_choice"] = new JObject { { "type", "function" }, { "function", new JObject { { "name", (string)choice["name"] } } } }; break;
                     default: o["tool_choice"] = "auto"; break;
                 }
                 if (choice.Value<bool?>("disable_parallel_tool_use") == true) o["parallel_tool_calls"] = false;
             }
-            var user = (string?)a["metadata"]?["user_id"];
+            var user = (string)a["metadata"].At("user_id");
             if (!string.IsNullOrEmpty(user)) o["user"] = user;
             return o;
         }
 
         public static JObject OpenAiToAnthropicRequest(JObject o, string model)
         {
-            var a = new JObject { ["model"] = model };
+            var a = new JObject { { "model", model } };
             var system = new List<string>();
             var messages = new JArray();
             foreach (var m in Arr(o["messages"]))
             {
-                var role = (string?)m["role"] ?? "user";
+                var role = (string)m["role"] ?? "user";
                 if (role == "system" || role == "developer")
                 {
                     var s = ContentText(m["content"]);
@@ -183,22 +183,22 @@ namespace Fairlead.Core.Protocol
                 }
                 if (role == "tool" || role == "function")
                 {
-                    var block = new JObject { ["type"] = "tool_result", ["tool_use_id"] = (string?)m["tool_call_id"] ?? (string?)m["name"] ?? "tool", ["content"] = ContentText(m["content"]) };
+                    var block = new JObject { { "type", "tool_result" }, { "tool_use_id", (string)m["tool_call_id"] ?? (string)m["name"] ?? "tool" }, { "content", ContentText(m["content"]) } };
                     AppendBlock(messages, "user", block);
                     continue;
                 }
                 if (role == "assistant")
                 {
                     var text = ContentText(m["content"]);
-                    if (!string.IsNullOrEmpty(text)) AppendBlock(messages, "assistant", new JObject { ["type"] = "text", ["text"] = text });
+                    if (!string.IsNullOrEmpty(text)) AppendBlock(messages, "assistant", new JObject { { "type", "text" }, { "text", text } });
                     foreach (var call in Arr(m["tool_calls"]))
                     {
                         AppendBlock(messages, "assistant", new JObject
                         {
-                            ["type"] = "tool_use",
-                            ["id"] = (string?)call["id"] ?? ("toolu_" + Guid.NewGuid().ToString("N").Substring(0, 20)),
-                            ["name"] = (string?)call["function"]?["name"],
-                            ["input"] = ParseArguments((string?)call["function"]?["arguments"]),
+                            { "type", "tool_use" },
+                            { "id", (string)call["id"] ?? ("toolu_" + Guid.NewGuid().ToString("N").Substring(0, 20)) },
+                            { "name", (string)call["function"].At("name") },
+                            { "input", ParseArguments((string)call["function"].At("arguments")) },
                         });
                     }
                     continue;
@@ -206,24 +206,24 @@ namespace Fairlead.Core.Protocol
                 var content = m["content"];
                 if (content == null || content.Type == JTokenType.String)
                 {
-                    AppendBlock(messages, "user", new JObject { ["type"] = "text", ["text"] = (string?)content ?? string.Empty });
+                    AppendBlock(messages, "user", new JObject { { "type", "text" }, { "text", (string)content ?? string.Empty } });
                     continue;
                 }
                 foreach (var part in Arr(content))
                 {
-                    var type = (string?)part["type"];
-                    if (type == "text") AppendBlock(messages, "user", new JObject { ["type"] = "text", ["text"] = (string?)part["text"] });
+                    var type = (string)part["type"];
+                    if (type == "text") AppendBlock(messages, "user", new JObject { { "type", "text" }, { "text", (string)part["text"] } });
                     else if (type == "image_url")
                     {
-                        var url = (string?)part["image_url"]?["url"] ?? string.Empty;
+                        var url = (string)part["image_url"].At("url") ?? string.Empty;
                         AppendBlock(messages, "user", ImageBlock(url));
                     }
                 }
             }
             if (system.Count > 0) a["system"] = string.Join("\n\n", system);
             // Anthropic requires the conversation to start with a user turn.
-            if (messages.Count > 0 && (string?)messages[0]["role"] == "assistant")
-                messages.Insert(0, new JObject { ["role"] = "user", ["content"] = new JArray { new JObject { ["type"] = "text", ["text"] = "(continue)" } } });
+            if (messages.Count > 0 && (string)messages[0]["role"] == "assistant")
+                messages.Insert(0, new JObject { { "role", "user" }, { "content", new JArray { new JObject { { "type", "text" }, { "text", "(continue)" } } } } });
             a["messages"] = messages;
             var max = o["max_completion_tokens"] ?? o["max_tokens"];
             a["max_tokens"] = max != null && max.Type == JTokenType.Integer ? max : new JValue(4096);
@@ -232,7 +232,7 @@ namespace Fairlead.Core.Protocol
             Copy(o, a, "top_p");
             var stop = o["stop"];
             if (stop != null && stop.Type == JTokenType.String) a["stop_sequences"] = new JArray { stop };
-            else if (stop is JArray sa && sa.Count > 0) a["stop_sequences"] = sa;
+            else if (stop is JArray && ((JArray)stop).Count > 0) a["stop_sequences"] = stop;
             if (o.Value<bool?>("stream") == true) a["stream"] = true;
             var tools = new JArray();
             foreach (var t in Arr(o["tools"]))
@@ -241,9 +241,9 @@ namespace Fairlead.Core.Protocol
                 if (f == null) continue;
                 tools.Add(new JObject
                 {
-                    ["name"] = (string?)f["name"],
-                    ["description"] = (string?)f["description"] ?? string.Empty,
-                    ["input_schema"] = f["parameters"] ?? new JObject { ["type"] = "object", ["properties"] = new JObject() },
+                    { "name", (string)f["name"] },
+                    { "description", (string)f["description"] ?? string.Empty },
+                    { "input_schema", f["parameters"] ?? new JObject { { "type", "object" }, { "properties", new JObject() } } },
                 });
             }
             if (tools.Count > 0) a["tools"] = tools;
@@ -252,14 +252,15 @@ namespace Fairlead.Core.Protocol
             {
                 if (choice.Type == JTokenType.String)
                 {
-                    var c = (string?)choice;
-                    a["tool_choice"] = c == "required" ? new JObject { ["type"] = "any" } : c == "none" ? new JObject { ["type"] = "none" } : new JObject { ["type"] = "auto" };
+                    var c = (string)choice;
+                    a["tool_choice"] = c == "required" ? new JObject { { "type", "any" } } : c == "none" ? new JObject { { "type", "none" } } : new JObject { { "type", "auto" } };
                 }
-                else if (choice["function"] != null) a["tool_choice"] = new JObject { ["type"] = "tool", ["name"] = (string?)choice["function"]?["name"] };
-                if (o.Value<bool?>("parallel_tool_calls") == false && a["tool_choice"] is JObject tc) tc["disable_parallel_tool_use"] = true;
+                else if (choice["function"] != null) a["tool_choice"] = new JObject { { "type", "tool" }, { "name", (string)choice["function"].At("name") } };
+                var tc = a["tool_choice"] as JObject;
+                if (o.Value<bool?>("parallel_tool_calls") == false && tc != null) tc["disable_parallel_tool_use"] = true;
             }
-            var user = (string?)o["user"];
-            if (!string.IsNullOrEmpty(user)) a["metadata"] = new JObject { ["user_id"] = user };
+            var user = (string)o["user"];
+            if (!string.IsNullOrEmpty(user)) a["metadata"] = new JObject { { "user_id", user } };
             return a;
         }
 
@@ -268,32 +269,32 @@ namespace Fairlead.Core.Protocol
         public static JObject OpenAiToAnthropicResponse(JObject o, string model)
         {
             var choice = Arr(o["choices"]).FirstOrDefault();
-            var message = choice?["message"];
+            var message = choice.At("message");
             var content = new JArray();
-            var text = ContentText(message?["content"]);
-            if (!string.IsNullOrEmpty(text)) content.Add(new JObject { ["type"] = "text", ["text"] = text });
-            foreach (var call in Arr(message?["tool_calls"]))
+            var text = ContentText(message.At("content"));
+            if (!string.IsNullOrEmpty(text)) content.Add(new JObject { { "type", "text" }, { "text", text } });
+            foreach (var call in Arr(message.At("tool_calls")))
             {
                 content.Add(new JObject
                 {
-                    ["type"] = "tool_use",
-                    ["id"] = (string?)call["id"] ?? ("toolu_" + Guid.NewGuid().ToString("N").Substring(0, 20)),
-                    ["name"] = (string?)call["function"]?["name"],
-                    ["input"] = ParseArguments((string?)call["function"]?["arguments"]),
+                    { "type", "tool_use" },
+                    { "id", (string)call["id"] ?? ("toolu_" + Guid.NewGuid().ToString("N").Substring(0, 20)) },
+                    { "name", (string)call["function"].At("name") },
+                    { "input", ParseArguments((string)call["function"].At("arguments")) },
                 });
             }
-            if (content.Count == 0) content.Add(new JObject { ["type"] = "text", ["text"] = string.Empty });
+            if (content.Count == 0) content.Add(new JObject { { "type", "text" }, { "text", string.Empty } });
             var usage = TokenUsage.FromOpenAi(o["usage"]);
             return new JObject
             {
-                ["id"] = "msg_" + Guid.NewGuid().ToString("N").Substring(0, 24),
-                ["type"] = "message",
-                ["role"] = "assistant",
-                ["model"] = model,
-                ["content"] = content,
-                ["stop_reason"] = StopReasonToAnthropic((string?)choice?["finish_reason"], content.Any(b => (string?)b["type"] == "tool_use")),
-                ["stop_sequence"] = null,
-                ["usage"] = new JObject { ["input_tokens"] = usage.Input ?? 0, ["output_tokens"] = usage.Output ?? 0 },
+                { "id", "msg_" + Guid.NewGuid().ToString("N").Substring(0, 24) },
+                { "type", "message" },
+                { "role", "assistant" },
+                { "model", model },
+                { "content", content },
+                { "stop_reason", StopReasonToAnthropic((string)choice.At("finish_reason"), content.Any(b => (string)b["type"] == "tool_use")) },
+                { "stop_sequence", null },
+                { "usage", new JObject { { "input_tokens", usage.Input ?? 0 }, { "output_tokens", usage.Output ?? 0 } } },
             };
         }
 
@@ -303,48 +304,48 @@ namespace Fairlead.Core.Protocol
             var calls = new JArray();
             foreach (var b in Arr(a["content"]))
             {
-                var type = (string?)b["type"];
-                if (type == "text") text.Append((string?)b["text"]);
+                var type = (string)b["type"];
+                if (type == "text") text.Append((string)b["text"]);
                 else if (type == "tool_use")
                 {
                     calls.Add(new JObject
                     {
-                        ["id"] = (string?)b["id"],
-                        ["type"] = "function",
-                        ["function"] = new JObject { ["name"] = (string?)b["name"], ["arguments"] = (b["input"] ?? new JObject()).ToString(Formatting.None) },
+                        { "id", (string)b["id"] },
+                        { "type", "function" },
+                        { "function", new JObject { { "name", (string)b["name"] }, { "arguments", (b["input"] ?? new JObject()).ToString(Formatting.None) } } },
                     });
                 }
             }
-            var message = new JObject { ["role"] = "assistant", ["content"] = text.Length == 0 && calls.Count > 0 ? null : text.ToString() };
+            var message = new JObject { { "role", "assistant" }, { "content", text.Length == 0 && calls.Count > 0 ? null : text.ToString() } };
             if (calls.Count > 0) message["tool_calls"] = calls;
             var usage = TokenUsage.FromAnthropic(a["usage"]);
             return new JObject
             {
-                ["id"] = "chatcmpl-" + Guid.NewGuid().ToString("N").Substring(0, 24),
-                ["object"] = "chat.completion",
-                ["created"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
-                ["model"] = model,
-                ["choices"] = new JArray
+                { "id", "chatcmpl-" + Guid.NewGuid().ToString("N").Substring(0, 24) },
+                { "object", "chat.completion" },
+                { "created", DateTimeOffset.UtcNow.ToUnixTimeSeconds() },
+                { "model", model },
+                { "choices", new JArray
                 {
-                    new JObject { ["index"] = 0, ["message"] = message, ["finish_reason"] = StopReasonToOpenAi((string?)a["stop_reason"]) },
-                },
-                ["usage"] = new JObject { ["prompt_tokens"] = usage.Input ?? 0, ["completion_tokens"] = usage.Output ?? 0, ["total_tokens"] = (usage.Input ?? 0) + (usage.Output ?? 0) },
+                    new JObject { { "index", 0 }, { "message", message }, { "finish_reason", StopReasonToOpenAi((string)a["stop_reason"]) } },
+                } },
+                { "usage", new JObject { { "prompt_tokens", usage.Input ?? 0 }, { "completion_tokens", usage.Output ?? 0 }, { "total_tokens", (usage.Input ?? 0) + (usage.Output ?? 0) } } },
             };
         }
 
         /// <summary>An error body in the caller's dialect.</summary>
-        public static JObject Error(Dialect dialect, int status, string message, string? code = null)
+        public static JObject Error(Dialect dialect, int status, string message, string code = null)
         {
             if (dialect == Dialect.Anthropic)
             {
-                return new JObject { ["type"] = "error", ["error"] = new JObject { ["type"] = AnthropicErrorType(status), ["message"] = message } };
+                return new JObject { { "type", "error" }, { "error", new JObject { { "type", AnthropicErrorType(status) }, { "message", message } } } };
             }
-            return new JObject { ["error"] = new JObject { ["message"] = message, ["type"] = OpenAiErrorType(status), ["code"] = code } };
+            return new JObject { { "error", new JObject { { "message", message }, { "type", OpenAiErrorType(status) }, { "code", code } } } };
         }
 
         // ---------- helpers ----------
 
-        public static string StopReasonToAnthropic(string? finish, bool hasToolUse)
+        public static string StopReasonToAnthropic(string finish, bool hasToolUse)
         {
             switch (finish)
             {
@@ -356,7 +357,7 @@ namespace Fairlead.Core.Protocol
             }
         }
 
-        public static string StopReasonToOpenAi(string? stop)
+        public static string StopReasonToOpenAi(string stop)
         {
             switch (stop)
             {
@@ -404,86 +405,88 @@ namespace Fairlead.Core.Protocol
                 {
                     return new JObject
                     {
-                        ["type"] = "image",
-                        ["source"] = new JObject { ["type"] = "base64", ["media_type"] = url.Substring(5, semi - 5), ["data"] = url.Substring(comma + 1) },
+                        { "type", "image" },
+                        { "source", new JObject { { "type", "base64" }, { "media_type", url.Substring(5, semi - 5) }, { "data", url.Substring(comma + 1) } } },
                     };
                 }
             }
-            return new JObject { ["type"] = "image", ["source"] = new JObject { ["type"] = "url", ["url"] = url } };
+            return new JObject { { "type", "image" }, { "source", new JObject { { "type", "url" }, { "url", url } } } };
         }
 
         /// <summary>Anthropic requires alternating roles; consecutive blocks of one role share a message.</summary>
         private static void AppendBlock(JArray messages, string role, JObject block)
         {
             var last = messages.Count > 0 ? messages[messages.Count - 1] as JObject : null;
-            if (last != null && (string?)last["role"] == role && last["content"] is JArray blocks)
+            var blocks = last == null ? null : last["content"] as JArray;
+            if (last != null && (string)last["role"] == role && blocks != null)
             {
                 // Tool results must come before any text in the user turn that carries them.
-                if ((string?)block["type"] == "tool_result")
+                if ((string)block["type"] == "tool_result")
                 {
                     var firstNonResult = 0;
-                    while (firstNonResult < blocks.Count && (string?)blocks[firstNonResult]["type"] == "tool_result") firstNonResult++;
+                    while (firstNonResult < blocks.Count && (string)blocks[firstNonResult]["type"] == "tool_result") firstNonResult++;
                     blocks.Insert(firstNonResult, block);
                 }
                 else blocks.Add(block);
                 return;
             }
-            messages.Add(new JObject { ["role"] = role, ["content"] = new JArray { block } });
+            messages.Add(new JObject { { "role", role }, { "content", new JArray { block } } });
         }
 
-        public static JObject ParseArguments(string? arguments)
+        public static JObject ParseArguments(string arguments)
         {
             if (string.IsNullOrWhiteSpace(arguments)) return new JObject();
             try
             {
-                var t = JToken.Parse(arguments!);
-                return t as JObject ?? new JObject { ["value"] = t };
+                var t = JToken.Parse(arguments);
+                return t as JObject ?? new JObject { { "value", t } };
             }
             catch (JsonException)
             {
-                return new JObject { ["_raw"] = arguments };
+                return new JObject { { "_raw", arguments } };
             }
         }
 
         /// <summary>Text of an OpenAI content value: a string or an array of parts.</summary>
-        public static string ContentText(JToken? content)
+        public static string ContentText(JToken content)
         {
             if (content == null || content.Type == JTokenType.Null) return string.Empty;
-            if (content.Type == JTokenType.String) return (string?)content ?? string.Empty;
+            if (content.Type == JTokenType.String) return (string)content ?? string.Empty;
             var sb = new StringBuilder();
             foreach (var p in Arr(content))
             {
-                var t = (string?)p["text"];
+                var t = (string)p["text"];
                 if (t != null) { if (sb.Length > 0) sb.Append('\n'); sb.Append(t); }
             }
             return sb.ToString();
         }
 
         /// <summary>Text of an Anthropic system / tool_result value: a string or an array of blocks.</summary>
-        public static string BlocksText(JToken? value)
+        public static string BlocksText(JToken value)
         {
             if (value == null || value.Type == JTokenType.Null) return string.Empty;
-            if (value.Type == JTokenType.String) return (string?)value ?? string.Empty;
+            if (value.Type == JTokenType.String) return (string)value ?? string.Empty;
             var sb = new StringBuilder();
             foreach (var b in Arr(value))
             {
-                if ((string?)b["type"] == "text")
+                if ((string)b["type"] == "text")
                 {
                     if (sb.Length > 0) sb.Append('\n');
-                    sb.Append((string?)b["text"]);
+                    sb.Append((string)b["text"]);
                 }
             }
             return sb.ToString();
         }
 
-        private static string SystemText(JToken? system)
+        private static string SystemText(JToken system)
         {
             return BlocksText(system);
         }
 
-        public static IEnumerable<JToken> Arr(JToken? t)
+        public static IEnumerable<JToken> Arr(JToken t)
         {
-            return t is JArray a ? a : Enumerable.Empty<JToken>();
+            var a = t as JArray;
+            return a != null ? (IEnumerable<JToken>)a : Enumerable.Empty<JToken>();
         }
 
         private static void Copy(JObject from, JObject to, string name)
@@ -501,28 +504,30 @@ namespace Fairlead.Core.Protocol
         private bool _started;
         private bool _finished;
         private int _blockIndex = -1;
-        private string? _openBlock; // "text" or "tool:<openai index>"
+        private string _openBlock; // "text" or "tool:<openai index>"
         private readonly Dictionary<int, int> _toolBlocks = new Dictionary<int, int>();
-        private string? _finish;
+        private string _finish;
         private bool _sawTool;
 
         public OpenAiToAnthropicStream(string model)
         {
+            Usage = new TokenUsage();
+            Text = new StringBuilder();
             _model = model;
         }
 
-        public TokenUsage Usage { get; } = new TokenUsage();
-        public StringBuilder Text { get; } = new StringBuilder();
+        public TokenUsage Usage { get; private set; }
+        public StringBuilder Text { get; private set; }
 
         public IEnumerable<string> Feed(JObject chunk)
         {
             var output = new List<string>();
             Start(output);
-            if (chunk["usage"] != null && chunk["usage"]!.Type == JTokenType.Object) Usage.Merge(TokenUsage.FromOpenAi(chunk["usage"]));
+            if (chunk["usage"] != null && chunk["usage"].Type == JTokenType.Object) Usage.Merge(TokenUsage.FromOpenAi(chunk["usage"]));
             foreach (var choice in Translate.Arr(chunk["choices"]))
             {
                 var delta = choice["delta"];
-                var text = (string?)delta?["content"];
+                var text = (string)delta.At("content");
                 if (!string.IsNullOrEmpty(text))
                 {
                     if (_openBlock != "text")
@@ -530,12 +535,12 @@ namespace Fairlead.Core.Protocol
                         CloseBlock(output);
                         _blockIndex++;
                         _openBlock = "text";
-                        output.Add(SseWriter.Named("content_block_start", new JObject { ["type"] = "content_block_start", ["index"] = _blockIndex, ["content_block"] = new JObject { ["type"] = "text", ["text"] = string.Empty } }));
+                        output.Add(SseWriter.Named("content_block_start", new JObject { { "type", "content_block_start" }, { "index", _blockIndex }, { "content_block", new JObject { { "type", "text" }, { "text", string.Empty } } } }));
                     }
                     Text.Append(text);
-                    output.Add(SseWriter.Named("content_block_delta", new JObject { ["type"] = "content_block_delta", ["index"] = _blockIndex, ["delta"] = new JObject { ["type"] = "text_delta", ["text"] = text } }));
+                    output.Add(SseWriter.Named("content_block_delta", new JObject { { "type", "content_block_delta" }, { "index", _blockIndex }, { "delta", new JObject { { "type", "text_delta" }, { "text", text } } } }));
                 }
-                foreach (var call in Translate.Arr(delta?["tool_calls"]))
+                foreach (var call in Translate.Arr(delta.At("tool_calls")))
                 {
                     var idx = (int?)call["index"] ?? 0;
                     var key = "tool:" + idx;
@@ -548,24 +553,24 @@ namespace Fairlead.Core.Protocol
                         _sawTool = true;
                         output.Add(SseWriter.Named("content_block_start", new JObject
                         {
-                            ["type"] = "content_block_start",
-                            ["index"] = _blockIndex,
-                            ["content_block"] = new JObject
+                            { "type", "content_block_start" },
+                            { "index", _blockIndex },
+                            { "content_block", new JObject
                             {
-                                ["type"] = "tool_use",
-                                ["id"] = (string?)call["id"] ?? ("toolu_" + Guid.NewGuid().ToString("N").Substring(0, 20)),
-                                ["name"] = (string?)call["function"]?["name"] ?? "tool",
-                                ["input"] = new JObject(),
-                            },
+                                { "type", "tool_use" },
+                                { "id", (string)call["id"] ?? ("toolu_" + Guid.NewGuid().ToString("N").Substring(0, 20)) },
+                                { "name", (string)call["function"].At("name") ?? "tool" },
+                                { "input", new JObject() },
+                            } },
                         }));
                     }
-                    var args = (string?)call["function"]?["arguments"];
+                    var args = (string)call["function"].At("arguments");
                     if (!string.IsNullOrEmpty(args) && _openBlock == key)
                     {
-                        output.Add(SseWriter.Named("content_block_delta", new JObject { ["type"] = "content_block_delta", ["index"] = _toolBlocks[idx], ["delta"] = new JObject { ["type"] = "input_json_delta", ["partial_json"] = args } }));
+                        output.Add(SseWriter.Named("content_block_delta", new JObject { { "type", "content_block_delta" }, { "index", _toolBlocks[idx] }, { "delta", new JObject { { "type", "input_json_delta" }, { "partial_json", args } } } }));
                     }
                 }
-                var finish = (string?)choice["finish_reason"];
+                var finish = (string)choice["finish_reason"];
                 if (!string.IsNullOrEmpty(finish)) _finish = finish;
             }
             return output;
@@ -581,11 +586,11 @@ namespace Fairlead.Core.Protocol
             _finished = true;
             output.Add(SseWriter.Named("message_delta", new JObject
             {
-                ["type"] = "message_delta",
-                ["delta"] = new JObject { ["stop_reason"] = Translate.StopReasonToAnthropic(_finish, _sawTool), ["stop_sequence"] = null },
-                ["usage"] = new JObject { ["output_tokens"] = Usage.Output ?? 0 },
+                { "type", "message_delta" },
+                { "delta", new JObject { { "stop_reason", Translate.StopReasonToAnthropic(_finish, _sawTool) }, { "stop_sequence", null } } },
+                { "usage", new JObject { { "output_tokens", Usage.Output ?? 0 } } },
             }));
-            output.Add(SseWriter.Named("message_stop", new JObject { ["type"] = "message_stop" }));
+            output.Add(SseWriter.Named("message_stop", new JObject { { "type", "message_stop" } }));
             return output;
         }
 
@@ -595,25 +600,25 @@ namespace Fairlead.Core.Protocol
             _started = true;
             output.Add(SseWriter.Named("message_start", new JObject
             {
-                ["type"] = "message_start",
-                ["message"] = new JObject
+                { "type", "message_start" },
+                { "message", new JObject
                 {
-                    ["id"] = _id,
-                    ["type"] = "message",
-                    ["role"] = "assistant",
-                    ["model"] = _model,
-                    ["content"] = new JArray(),
-                    ["stop_reason"] = null,
-                    ["stop_sequence"] = null,
-                    ["usage"] = new JObject { ["input_tokens"] = 0, ["output_tokens"] = 0 },
-                },
+                    { "id", _id },
+                    { "type", "message" },
+                    { "role", "assistant" },
+                    { "model", _model },
+                    { "content", new JArray() },
+                    { "stop_reason", null },
+                    { "stop_sequence", null },
+                    { "usage", new JObject { { "input_tokens", 0 }, { "output_tokens", 0 } } },
+                } },
             }));
         }
 
         private void CloseBlock(List<string> output)
         {
             if (_openBlock == null) return;
-            output.Add(SseWriter.Named("content_block_stop", new JObject { ["type"] = "content_block_stop", ["index"] = _blockIndex }));
+            output.Add(SseWriter.Named("content_block_stop", new JObject { { "type", "content_block_stop" }, { "index", _blockIndex } }));
             _openBlock = null;
         }
     }
@@ -630,38 +635,40 @@ namespace Fairlead.Core.Protocol
 
         public AnthropicToOpenAiStream(string model, bool includeUsage)
         {
+            Usage = new TokenUsage();
+            Text = new StringBuilder();
             _model = model;
             _includeUsage = includeUsage;
         }
 
-        public TokenUsage Usage { get; } = new TokenUsage();
-        public StringBuilder Text { get; } = new StringBuilder();
-        public string? Error { get; private set; }
+        public TokenUsage Usage { get; private set; }
+        public StringBuilder Text { get; private set; }
+        public string Error { get; private set; }
 
-        public IEnumerable<string> Feed(string? name, JObject data)
+        public IEnumerable<string> Feed(string name, JObject data)
         {
             var output = new List<string>();
-            var type = (string?)data["type"] ?? name;
+            var type = (string)data["type"] ?? name;
             switch (type)
             {
                 case "message_start":
-                    Usage.Merge(TokenUsage.FromAnthropic(data["message"]?["usage"]));
-                    output.Add(Chunk(new JObject { ["role"] = "assistant", ["content"] = string.Empty }, null));
+                    Usage.Merge(TokenUsage.FromAnthropic(data["message"].At("usage")));
+                    output.Add(Chunk(new JObject { { "role", "assistant" }, { "content", string.Empty } }, null));
                     break;
                 case "content_block_start":
                     {
                         var block = data["content_block"];
-                        if ((string?)block?["type"] == "tool_use")
+                        if ((string)block.At("type") == "tool_use")
                         {
                             var blockIndex = (int?)data["index"] ?? 0;
                             var toolIndex = _toolIndexByBlock.Count;
                             _toolIndexByBlock[blockIndex] = toolIndex;
                             output.Add(Chunk(new JObject
                             {
-                                ["tool_calls"] = new JArray
+                                { "tool_calls", new JArray
                                 {
-                                    new JObject { ["index"] = toolIndex, ["id"] = (string?)block?["id"], ["type"] = "function", ["function"] = new JObject { ["name"] = (string?)block?["name"], ["arguments"] = string.Empty } },
-                                },
+                                    new JObject { { "index", toolIndex }, { "id", (string)block.At("id") }, { "type", "function" }, { "function", new JObject { { "name", (string)block.At("name") }, { "arguments", string.Empty } } } },
+                                } },
                             }, null));
                         }
                         break;
@@ -669,12 +676,12 @@ namespace Fairlead.Core.Protocol
                 case "content_block_delta":
                     {
                         var delta = data["delta"];
-                        var dtype = (string?)delta?["type"];
+                        var dtype = (string)delta.At("type");
                         if (dtype == "text_delta")
                         {
-                            var text = (string?)delta?["text"] ?? string.Empty;
+                            var text = (string)delta.At("text") ?? string.Empty;
                             Text.Append(text);
-                            output.Add(Chunk(new JObject { ["content"] = text }, null));
+                            output.Add(Chunk(new JObject { { "content", text } }, null));
                         }
                         else if (dtype == "input_json_delta")
                         {
@@ -683,7 +690,7 @@ namespace Fairlead.Core.Protocol
                             {
                                 output.Add(Chunk(new JObject
                                 {
-                                    ["tool_calls"] = new JArray { new JObject { ["index"] = toolIndex, ["function"] = new JObject { ["arguments"] = (string?)delta?["partial_json"] ?? string.Empty } } },
+                                    { "tool_calls", new JArray { new JObject { { "index", toolIndex }, { "function", new JObject { { "arguments", (string)delta.At("partial_json") ?? string.Empty } } } } } },
                                 }, null));
                             }
                         }
@@ -692,7 +699,7 @@ namespace Fairlead.Core.Protocol
                 case "message_delta":
                     {
                         Usage.Merge(TokenUsage.FromAnthropic(data["usage"]));
-                        var stop = (string?)data["delta"]?["stop_reason"];
+                        var stop = (string)data["delta"].At("stop_reason");
                         if (stop != null) output.Add(Chunk(new JObject(), Translate.StopReasonToOpenAi(stop)));
                         break;
                     }
@@ -700,7 +707,7 @@ namespace Fairlead.Core.Protocol
                     output.AddRange(Finish());
                     break;
                 case "error":
-                    Error = (string?)data["error"]?["message"] ?? "Upstream error";
+                    Error = (string)data["error"].At("message") ?? "Upstream error";
                     output.Add(SseWriter.Data(Translate.Error(Dialect.OpenAi, 502, Error)));
                     output.AddRange(Finish());
                     break;
@@ -717,27 +724,27 @@ namespace Fairlead.Core.Protocol
             {
                 output.Add(SseWriter.Data(new JObject
                 {
-                    ["id"] = _id,
-                    ["object"] = "chat.completion.chunk",
-                    ["created"] = _created,
-                    ["model"] = _model,
-                    ["choices"] = new JArray(),
-                    ["usage"] = new JObject { ["prompt_tokens"] = Usage.Input ?? 0, ["completion_tokens"] = Usage.Output ?? 0, ["total_tokens"] = (Usage.Input ?? 0) + (Usage.Output ?? 0) },
+                    { "id", _id },
+                    { "object", "chat.completion.chunk" },
+                    { "created", _created },
+                    { "model", _model },
+                    { "choices", new JArray() },
+                    { "usage", new JObject { { "prompt_tokens", Usage.Input ?? 0 }, { "completion_tokens", Usage.Output ?? 0 }, { "total_tokens", (Usage.Input ?? 0) + (Usage.Output ?? 0) } } },
                 }));
             }
             output.Add(SseWriter.Done);
             return output;
         }
 
-        private string Chunk(JObject delta, string? finish)
+        private string Chunk(JObject delta, string finish)
         {
             return SseWriter.Data(new JObject
             {
-                ["id"] = _id,
-                ["object"] = "chat.completion.chunk",
-                ["created"] = _created,
-                ["model"] = _model,
-                ["choices"] = new JArray { new JObject { ["index"] = 0, ["delta"] = delta, ["finish_reason"] = finish } },
+                { "id", _id },
+                { "object", "chat.completion.chunk" },
+                { "created", _created },
+                { "model", _model },
+                { "choices", new JArray { new JObject { { "index", 0 }, { "delta", delta }, { "finish_reason", finish } } } },
             });
         }
     }

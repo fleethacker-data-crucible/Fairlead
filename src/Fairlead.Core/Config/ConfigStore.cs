@@ -2,9 +2,7 @@ using System;
 using System.IO;
 using System.Security.Cryptography;
 using System.Text;
-using Newtonsoft.Json;
-using Newtonsoft.Json.Converters;
-using Newtonsoft.Json.Serialization;
+using Fairlead.Core.Serialization;
 
 namespace Fairlead.Core.Config
 {
@@ -14,22 +12,15 @@ namespace Fairlead.Core.Config
     /// </summary>
     public sealed class ConfigStore
     {
-        private static readonly JsonSerializerSettings FileJson = new JsonSerializerSettings
-        {
-            ContractResolver = new DefaultContractResolver { NamingStrategy = new CamelCaseNamingStrategy { ProcessDictionaryKeys = false } },
-            Converters = { new StringEnumConverter { NamingStrategy = new CamelCaseNamingStrategy() } },
-            NullValueHandling = NullValueHandling.Ignore,
-            Formatting = Formatting.Indented,
-            ObjectCreationHandling = ObjectCreationHandling.Replace,
-        };
+        private static readonly JsonSettings FileJson = JsonSettings.File;
 
         private readonly object _lock = new object();
-        private readonly string? _path;
+        private readonly string _path;
         private FairleadConfig _current;
         private long _revision;
 
         /// <summary>A store backed by <paramref name="path"/>; null keeps the config in memory only (tests).</summary>
-        public ConfigStore(string? path)
+        public ConfigStore(string path)
         {
             _path = path;
             _current = Load(path) ?? FairleadConfig.CreateDefault();
@@ -43,11 +34,11 @@ namespace Fairlead.Core.Config
             Validate(_current);
         }
 
-        public string? FilePath { get { return _path; } }
+        public string FilePath { get { return _path; } }
         public long Revision { get { lock (_lock) return _revision; } }
 
         /// <summary>Raised after a change is saved, with the new snapshot.</summary>
-        public event Action<FairleadConfig>? Changed;
+        public event Action<FairleadConfig> Changed;
 
         /// <summary>A private copy; changing it does nothing.</summary>
         public FairleadConfig Snapshot()
@@ -82,9 +73,9 @@ namespace Fairlead.Core.Config
         {
             if (_path == null) return;
             var dir = Path.GetDirectoryName(_path);
-            if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir!);
+            if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
             var tmp = _path + ".tmp";
-            File.WriteAllText(tmp, JsonConvert.SerializeObject(config, FileJson), new UTF8Encoding(false));
+            File.WriteAllText(tmp, JsonConvert.SerializeObject(config, Formatting.Indented, FileJson), new UTF8Encoding(false));
             if (File.Exists(_path))
             {
                 File.Replace(tmp, _path, _path + ".bak", true);
@@ -95,7 +86,7 @@ namespace Fairlead.Core.Config
             }
         }
 
-        private static FairleadConfig? Load(string? path)
+        private static FairleadConfig Load(string path)
         {
             if (path == null || !File.Exists(path)) return null;
             var text = File.ReadAllText(path);
@@ -112,12 +103,12 @@ namespace Fairlead.Core.Config
 
         public static FairleadConfig Clone(FairleadConfig config)
         {
-            return JsonConvert.DeserializeObject<FairleadConfig>(JsonConvert.SerializeObject(config, FileJson), FileJson)!;
+            return JsonConvert.DeserializeObject<FairleadConfig>(JsonConvert.SerializeObject(config, Formatting.Indented, FileJson), FileJson);
         }
 
         public static string Serialize(FairleadConfig config)
         {
-            return JsonConvert.SerializeObject(config, FileJson);
+            return JsonConvert.SerializeObject(config, Formatting.Indented, FileJson);
         }
 
         /// <summary>Throws ArgumentException with a message the browser can show.</summary>
@@ -128,7 +119,7 @@ namespace Fairlead.Core.Config
             {
                 if (string.IsNullOrWhiteSpace(p.Id) || !IsSlug(p.Id)) throw new ArgumentException("Provider id '" + p.Id + "' must be letters, digits, dot, dash or underscore.");
                 if (!ids.Add(p.Id)) throw new ArgumentException("Two providers are called '" + p.Id + "'.");
-                Uri? uri;
+                Uri uri;
                 if (!Uri.TryCreate(p.BaseUrl, UriKind.Absolute, out uri) || (uri.Scheme != "http" && uri.Scheme != "https"))
                     throw new ArgumentException("Provider '" + p.Id + "' needs an http or https base URL.");
                 if (p.TimeoutSeconds < 5 || p.TimeoutSeconds > 3600) throw new ArgumentException("Provider '" + p.Id + "': timeout must be 5 to 3600 seconds.");
@@ -170,7 +161,7 @@ namespace Fairlead.Core.Config
             }
             foreach (var o in c.CorsOrigins)
             {
-                Uri? u;
+                Uri u;
                 if (!Uri.TryCreate(o, UriKind.Absolute, out u) || u.AbsolutePath != "/" || (u.Scheme != "http" && u.Scheme != "https"))
                     throw new ArgumentException("CORS origin '" + o + "' must look like http://localhost:5173 (scheme, host, optional port; no path).");
             }
@@ -199,10 +190,10 @@ namespace Fairlead.Core.Config
         }
 
         /// <summary>Null when the value cannot be read (another user's file, a corrupted value).</summary>
-        public static string? Unprotect(string? stored)
+        public static string Unprotect(string stored)
         {
             if (string.IsNullOrEmpty(stored)) return null;
-            if (!stored!.StartsWith(Prefix, StringComparison.Ordinal)) return null;
+            if (!stored.StartsWith(Prefix, StringComparison.Ordinal)) return null;
             try
             {
                 var data = ProtectedData.Unprotect(Convert.FromBase64String(stored.Substring(Prefix.Length)), Entropy, DataProtectionScope.CurrentUser);
@@ -214,14 +205,14 @@ namespace Fairlead.Core.Config
         }
 
         /// <summary>The key to use for a provider: the stored one, else its environment variable.</summary>
-        public static string? ApiKeyFor(ProviderConfig p)
+        public static string ApiKeyFor(ProviderConfig p)
         {
             var stored = Unprotect(p.ApiKeyProtected);
             if (!string.IsNullOrEmpty(stored)) return stored;
             if (!string.IsNullOrEmpty(p.ApiKeyEnv))
             {
-                var env = Environment.GetEnvironmentVariable(p.ApiKeyEnv!);
-                if (!string.IsNullOrWhiteSpace(env)) return env!.Trim();
+                var env = Environment.GetEnvironmentVariable(p.ApiKeyEnv);
+                if (!string.IsNullOrWhiteSpace(env)) return env.Trim();
             }
             return null;
         }
@@ -230,15 +221,15 @@ namespace Fairlead.Core.Config
         public static string KeySource(ProviderConfig p)
         {
             if (!string.IsNullOrEmpty(Unprotect(p.ApiKeyProtected))) return "stored";
-            if (!string.IsNullOrEmpty(p.ApiKeyEnv) && !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(p.ApiKeyEnv!))) return "env";
+            if (!string.IsNullOrEmpty(p.ApiKeyEnv) && !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(p.ApiKeyEnv))) return "env";
             return "none";
         }
 
-        public static string? KeyHint(ProviderConfig p)
+        public static string KeyHint(ProviderConfig p)
         {
             var k = ApiKeyFor(p);
-            if (string.IsNullOrEmpty(k) || k!.Length < 8) return null;
-            return "…" + k.Substring(k.Length - 4);
+            if (string.IsNullOrEmpty(k) || k.Length < 8) return null;
+            return "\u2026" + k.Substring(k.Length - 4);
         }
     }
 }

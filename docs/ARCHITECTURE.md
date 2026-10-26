@@ -13,16 +13,17 @@ directly. It runs on the operator's workstation, serves an OpenAI- and Anthropic
 | Tools hard-code base URLs | The registry port 8776 should never move. If it is taken, Fairlead binds a free port and says so loudly in the console, the tray and the UI. |
 | Cloud access comes and goes (trains, conference Wi-Fi, outages) | Connectivity is watched continuously; local models take over without the tool noticing. |
 | Keys are valuable | Stored with DPAPI for the Windows user; never returned to the browser; never logged. |
-| Build happens off the workstation | Compiled DLLs and the built UI ship in a bundle; nothing is fetched at runtime. |
+| Build happens off the workstation | The core as C# source and the built UI ship in a bundle; nothing is fetched at runtime. |
+| Application control blocks custom DLLs | No DLL is shipped or loaded: Windows PowerShell 5.1 compiles the core's C# 5 source in memory at launch (`Add-Type`), against framework assemblies only. |
 
 ## Stack
 
 | Layer | Choice | Why |
 |---|---|---|
 | Launcher | `Launch-Fairlead.bat` → `powershell.exe -STA -File scripts\Start-Fairlead.ps1` | The only entry point the workstation allows; STA for the WinForms tray icon. |
-| Shell | PowerShell module `module/Fairlead` | Reads `config\fairlead.env`, loads the DLL, shows the tray icon, opens the browser on first run. Nothing else. |
-| Core | C# library `Fairlead.Core` (`net48` + `netstandard2.0`) | Real concurrency for many simultaneous streams, testable logic. `net48` loads in PowerShell 5.1. |
-| JSON | Newtonsoft.Json 13 (bundled) | Identical on .NET Framework and .NET; `JObject` keeps unknown fields so same-dialect relays lose nothing. |
+| Shell | PowerShell module `module/Fairlead` | Reads `config\fairlead.env`, compiles the core, shows the tray icon, opens the browser on first run. Nothing else. |
+| Core | C# 5 source `src/Fairlead.Core`, compiled in memory by `Add-Type` at launch | Real concurrency for many simultaneous streams, testable logic. References `System`, `System.Core`, `System.Net.Http` and `System.Security` only; `Fairlead.Core.csproj` is the C# 5 check build, its DLL is never shipped. |
+| JSON | Own `JObject`/`JArray` model (`Serialization/`, shared with Halyard) | No third-party assembly. Same API subset and byte-for-byte output as Newtonsoft.Json in 0.1 (parity tests); `JObject` keeps unknown fields so same-dialect relays lose nothing. |
 | Server | `TcpListener` with chunked responses | `HttpListener` needs URL reservations a standard user lacks. Chunked transfer streams tokens as they arrive. |
 | Upstream | One shared `HttpClient`, system proxy, no redirects | Connection pooling; TLS 1.2 and 64 connections per host forced on .NET Framework. |
 | UI | React 19 + TypeScript, Tailwind 4 on the Fleet tokens, zod | Built to static files by esbuild + Tailwind's compiler; every response validated. |
@@ -34,8 +35,8 @@ directly. It runs on the operator's workstation, serves an OpenAI- and Anthropic
 ```
 Launch-Fairlead.bat
   └─ scripts/Start-Fairlead.ps1 (single-instance guard)
-       └─ module/Fairlead (PowerShell: env file, DLL load, tray icon)
-            └─ Fairlead.Core.dll
+       └─ module/Fairlead (PowerShell: env file, in-memory compile of src/Fairlead.Core, tray icon)
+            └─ Fairlead.Core (in-memory assembly)
                  ├─ Host        loopback server (chunked streaming), admin API, gateway routes, static UI, session token
                  ├─ Gateway     GatewayEngine: authenticate client → profile → plan → attempts (+hedge) → relay/translate → record
                  ├─ Routing     RequestProfile (tokens, tools, images, secrets), RoutePlanner (routes, rules, aliases, filters, order)
@@ -43,7 +44,8 @@ Launch-Fairlead.bat
                  ├─ Providers   UpstreamClient (the only outbound HTTP), failure classification, model discovery
                  ├─ Resilience  CircuitBreaker per provider and provider/model; HealthMonitor (network events, probes, Kedge mode)
                  ├─ Telemetry   request log, per-target EWMA latency, tokens, cost
-                 └─ Config      fairlead.json store (validate → save → publish), presets, DPAPI secrets, env settings
+                 ├─ Config      fairlead.json store (validate → save → publish), presets, DPAPI secrets, env settings
+                 └─ Serialization  JSON document model, reader/writer and object mapping (replaces Newtonsoft.Json)
 ```
 
 ## The request path
@@ -80,5 +82,7 @@ with an error event in the caller's dialect; replaying a half-delivered answer f
 
 ## Risk to watch
 
-`Fairlead.Core.dll` is unsigned. If the workstation's application-control policy blocks unsigned DLLs,
-`Import-FairleadCore` stops with a clear message; have IT sign or allow it.
+In-memory compilation with `Add-Type` must stay allowed for standard users. If PowerShell runs in Constrained
+Language mode, or a policy blocks the compile, `Import-FairleadCore` stops with a clear message and asks the operator
+to involve IT; it never works around the policy. The compile takes a few seconds per launch
+(`Get-FairleadCoreLoadInfo`; CI reports it from `build\Test-FairleadAddType.ps1`).

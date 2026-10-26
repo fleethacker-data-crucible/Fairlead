@@ -1,6 +1,6 @@
 using System.Linq;
 using Fairlead.Core.Protocol;
-using Newtonsoft.Json.Linq;
+using Fairlead.Core.Serialization;
 using Xunit;
 
 namespace Fairlead.Core.Tests
