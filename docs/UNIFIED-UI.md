@@ -26,7 +26,7 @@ Requirement words: **MUST** is required to call an app aligned. **SHOULD** is ex
 | Capstan | Capstan | — | Screen recorder and video editor | React | 8772 |
 | Bowerbird | bowerbird | — | File intelligence and renaming | Plain HTML/JS | 8767 |
 | Fairlead | Fairlead | (new) | Model router: one local gateway to cloud and local LLMs | React + Tailwind, .NET engine | 8776 |
-| Windlass | Windlass | (new) | Layer-by-layer server for very large local models | No UI (Python, GPU box) | 8777 |
+| Windlass | Windlass | (new) | Layer-by-layer server for very large local models | No UI (C# on PS 5.1, CPU) | 8777-8779 |
 
 Display names use the spelling in the first column (two words for Eight Bells and Halyard Ballast, one word everywhere else).
 

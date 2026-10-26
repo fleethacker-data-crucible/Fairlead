@@ -1,10 +1,11 @@
 # Windlass (very large local models)
 
-**Status:** Hackathon. Windlass is a separate program and repository (Python, GPU), built to this contract.
+**Status:** Hackathon. Windlass is a separate program and repository, built to this contract: v0.2 is C# on Windows
+PowerShell 5.1 (no installs), runs on the same PC as Fairlead and computes on the CPU for now.
 
 ## What Windlass is
 
-A layer-by-layer inference server (the AirLLM approach) that runs 70B+ models on a small GPU by loading one
+A layer-by-layer inference server (the AirLLM approach) that runs 70B+ GGUF models on an ordinary PC by streaming one
 transformer layer at a time from disk. It is slow (seconds to minutes per token) but can run models nothing else on
 the machine can. Fairlead treats it as one more local, OpenAI-compatible provider. Fairlead needs no code for it.
 
@@ -17,11 +18,12 @@ the machine can. Fairlead treats it as one more local, OpenAI-compatible provide
   (Fairlead fails over on 5xx, 429 and timeouts; it does not retry 400).
 - When streaming, send headers as soon as the request is accepted, and an SSE comment (`: keepalive`) at least every
   60 s while a layer pass runs: Fairlead cuts a stream that stays silent longer than the provider timeout.
-- Default bind `127.0.0.1:8777` (Fleet registry port, next after Fairlead's 8776); a LAN option for a GPU box.
+- Binds loopback only, on the first free port of its block `127.0.0.1:8777-8779` (edge-ops PORTS.md, next after
+  Fairlead's 8776). Fairlead runs on the same PC; there is no LAN option.
 
 ## Registering it in Fairlead
 
-1. Providers → Add → **Custom (OpenAI-compatible)**. Base URL `http://127.0.0.1:8777/v1` (or the GPU box),
+1. Providers → Add → **Custom (OpenAI-compatible)**. Base URL `http://127.0.0.1:8777/v1` (the port Windlass logs at start),
    **Local** ticked, timeout up to 3600 s, then **Fetch model list**.
 2. Routes → New route `deep-local`, strategy Failover, target `windlass/<model>`, local fallback off.
 3. Never put it in `auto`, `fast` or `local`: interactive tools would wait minutes. Reach it by name
