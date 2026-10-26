@@ -208,6 +208,7 @@ namespace Fairlead.Core.Config
             if (!routes.Contains(c.AutoFallbackRoute)) throw new ArgumentException("Auto fallback route '" + c.AutoFallbackRoute + "' does not exist.");
             var fb = c.FindRoute(c.AutoFallbackRoute);
             if (fb != null && fb.Strategy == RouteStrategy.Auto) throw new ArgumentException("The auto fallback route cannot itself be an auto route.");
+            if (double.IsNaN(c.LazaretteHoldHours) || c.LazaretteHoldHours < 0 || c.LazaretteHoldHours > 24) throw new ArgumentException("Hours to keep keys from Lazarette must be 0 to 24.");
             if (c.Network.ProbeIntervalSeconds < 3 || c.Network.ProbeIntervalSeconds > 600) throw new ArgumentException("Probe interval must be 3 to 600 seconds.");
             if (c.Network.ProbeTimeoutMs < 200 || c.Network.ProbeTimeoutMs > 30000) throw new ArgumentException("Probe timeout must be 200 to 30000 ms.");
             foreach (var h in c.Network.ProbeHosts)
@@ -264,10 +265,18 @@ namespace Fairlead.Core.Config
         /// <summary>The key to use for a provider: the stored one, else its environment variable.</summary>
         public static string ApiKeyFor(ProviderConfig p)
         {
+            return ApiKeyFor(p, null);
+        }
+
+        /// <summary>The key to use: the one stored in Fairlead, else Lazarette's (by the variable name), else the environment variable.</summary>
+        public static string ApiKeyFor(ProviderConfig p, Func<string, string> vault)
+        {
             var stored = Unprotect(p.ApiKeyProtected);
             if (!string.IsNullOrEmpty(stored)) return stored;
             if (!string.IsNullOrEmpty(p.ApiKeyEnv))
             {
+                var fromVault = vault == null ? null : vault(p.ApiKeyEnv);
+                if (!string.IsNullOrEmpty(fromVault)) return fromVault;
                 var env = Environment.GetEnvironmentVariable(p.ApiKeyEnv);
                 if (!string.IsNullOrWhiteSpace(env)) return env.Trim();
             }
@@ -277,7 +286,14 @@ namespace Fairlead.Core.Config
         /// <summary>"stored", "env" or "none": where the key comes from, for the UI.</summary>
         public static string KeySource(ProviderConfig p)
         {
+            return KeySource(p, null);
+        }
+
+        /// <summary>"stored", "lazarette", "env" or "none": where the key comes from, for the UI.</summary>
+        public static string KeySource(ProviderConfig p, Func<string, string> vault)
+        {
             if (!string.IsNullOrEmpty(Unprotect(p.ApiKeyProtected))) return "stored";
+            if (!string.IsNullOrEmpty(p.ApiKeyEnv) && vault != null && !string.IsNullOrEmpty(vault(p.ApiKeyEnv))) return "lazarette";
             if (!string.IsNullOrEmpty(p.ApiKeyEnv) && !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(p.ApiKeyEnv))) return "env";
             return "none";
         }

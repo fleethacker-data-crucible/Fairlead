@@ -115,8 +115,8 @@ function TokenState({ v }: { v: GatewayVariable }) {
   return (
     <div className="flex flex-col gap-1">
       <span className="text-ink-2">Token ({v.name})</span>
-      {v.source === 'env' ? <span>From the environment variable.</span> : (
-        <span className="text-warn">Not available. Tokens are never typed into Fairlead: stow {v.name} in Lazarette, or set the environment variable for now.</span>
+      {v.source === 'lazarette' ? <span className="text-ok">From Lazarette.</span> : v.source === 'env' ? <span>From the environment variable.</span> : (
+        <span className="text-warn">Not available. Tokens are never typed into Fairlead: share {v.name} with Fairlead in Lazarette (see below), or set the environment variable.</span>
       )}
       <span className="text-[12px] text-ink-3">Fairlead keeps tokens out of its own files on purpose.</span>
     </div>

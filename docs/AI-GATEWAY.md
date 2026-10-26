@@ -11,7 +11,7 @@ your own routes) and never see a gateway host, token or provider model id.
 |---|---|---|
 | Gateway model file (endpoints, paths, model ids) | Imported under **Providers → AI gateway**; kept DPAPI-encrypted for your Windows account in Fairlead's data folder (`%LOCALAPPDATA%\Fairlead\ai-gateway-models.dpapi`). Also read from `FAIRLEAD_GATEWAY_CONFIG` (a path) or `config\ai_gateway_models.yaml` for scripted setups. | No |
 | Gateway base URL (the variable in `base_url_env`, usually `AI_GATEWAY_BASE_URL`) | Entered once under **Providers → AI gateway**; kept DPAPI-encrypted in `ai-gateway-values.json` in the data folder. The environment variable of that name still works and is used when nothing is entered. | No |
-| Bearer token (the variable in `headers.Authorization.token_env`, usually `DATABRICKS_TOKEN`) | **Never stored by Fairlead.** It comes from Lazarette (the suite's encrypted vault; connection in progress) or, until then, the environment variable of that name. | No |
+| Bearer token (the variable in `headers.Authorization.token_env`, usually `DATABRICKS_TOKEN`) | **Never stored by Fairlead.** It comes from Lazarette (the suite's encrypted vault; see below) or the environment variable of that name. | No |
 | Timeout | `AI_GATEWAY_TIMEOUT_SECONDS` (5 to 3600, default 120) | No |
 | Routes such as `fast`, `balanced`, `reasoning` | Fairlead → Routes, targets like `mlflow_responses/<model id>` | No (`fairlead.json`) |
 
@@ -23,7 +23,7 @@ The page never shows the address, the token or a model id back; it shows where e
 1. Open **Providers**. Under **AI gateway**, press **Import model file** and choose the gateway's YAML. A file with a
    wrong structure is refused with the reasons, and nothing is saved.
 2. Enter the **gateway address** (`https://...`) and press **Save**.
-3. Make the token available: stow it in Lazarette, or for now set the environment variable the file names (for
+3. Make the token available: share it from Lazarette (see [Lazarette](#lazarette) below), or set the environment variable the file names (for
    example `DATABRICKS_TOKEN`) in your Windows user environment and restart Fairlead.
 4. The gateway endpoints appear as read-only providers at once, with no restart. **Import a new version** replaces the
    file; **Remove** deletes the file and the saved address.
@@ -81,6 +81,25 @@ Sections other than `environment`, `endpoints` and `models` are reported once an
 
 ## Lazarette
 
-Tokens belong in Lazarette, the suite's encrypted vault. Fairlead asks Lazarette for the token by its variable name
-once you have connected the two and granted Fairlead access in Lazarette; Fairlead holds it in memory only. Until that
-connection ships, use the environment variable.
+Tokens and API keys belong in Lazarette, the suite's encrypted vault. Fairlead never stores them.
+
+1. In Lazarette: **Settings, Fairlead, Pair**. Copy the pairing code it shows once.
+2. In Fairlead: **Providers, Lazarette**, paste the code, press **Pair**. The code is kept DPAPI-encrypted in
+   Fairlead's data folder (`lazarette-pairing.dpapi`) and never shown again.
+3. In Lazarette, share each secret with Fairlead under the name Fairlead asks for. The Lazarette card lists the
+   names: every variable the gateway model file names that is not saved in Fairlead (the token), and the key variable
+   of every provider without a key saved in Fairlead (for example `OPENAI_API_KEY`).
+
+How it behaves:
+
+- Fairlead asks only while Lazarette is open and unlocked, every 30 seconds (60 while it is locked or closed), and
+  proves who it is with an HMAC over a fresh nonce; the pairing secret never crosses the wire. Lazarette's answer is
+  sealed (AES-256-CBC + HMAC-SHA256) under a key only the pairing can derive; an answer that does not open is ignored.
+  Contract: Lazarette `docs/FAIRLEAD.md`.
+- Values are held in memory only. When Lazarette locks or closes, they are kept for the hold time under **Settings**
+  (8 hours by default; "only while Lazarette is open" forgets them at once), counted from Lazarette's last
+  confirmation. They are dropped at once when you remove the pairing in either app or stop sharing in Lazarette, and
+  when Fairlead exits.
+- Lazarette answers only the process that serves `/__fleethacker/id` on **port 8776** as `fairlead`. If Fairlead had to
+  start on another port, the card says so; free 8776 and restart Fairlead.
+- Key order for a provider: a key saved in Fairlead, then Lazarette, then the environment variable.
