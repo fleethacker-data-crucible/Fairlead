@@ -1,0 +1,553 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using Fairlead.Core.Config;
+using Fairlead.Core.Gateway;
+using Fairlead.Core.Protocol;
+using Fairlead.Core.Providers;
+using Fairlead.Core.Resilience;
+using Newtonsoft.Json.Linq;
+
+namespace Fairlead.Core.Host
+{
+    public sealed partial class FairleadHost
+    {
+        // ---------- gateway (/v1, client keys) ----------
+
+        private void RegisterGatewayRoutes()
+        {
+            Gateway.Post("/v1/chat/completions", r => Engine.HandleChatAsync(r, Dialect.OpenAi));
+            Gateway.Post("/v1/messages", r => Engine.HandleChatAsync(r, Dialect.Anthropic));
+            Gateway.Post("/v1/embeddings", r => Engine.HandleEmbeddingsAsync(r));
+            Gateway.Post("/v1/messages/count_tokens", CountTokens);
+            Gateway.Get("/v1/models", ListModels);
+            Gateway.Get("/v1/models/{id}", GetModel);
+            Gateway.Get("/v1/health", r => Task.FromResult(Json.Ok(new { ok = true, kedge = Health.KedgeActive, internet = Health.Connectivity.Internet.ToString().ToLowerInvariant() })));
+        }
+
+        /// <summary>Anthropic's token counter, which Claude Code calls before long prompts. Estimated: no provider is asked.</summary>
+        private Task<HttpResponse> CountTokens(HttpRequest r)
+        {
+            ClientKey? client;
+            string? error;
+            if (!Engine.Authenticate(r, out client, out error)) return Task.FromResult(HttpResponse.Json(401, Translate.Error(Dialect.Anthropic, 401, error!).ToString(Newtonsoft.Json.Formatting.None)));
+            var body = Json.Body(r);
+            var profile = Routing.RequestProfile.From(body, Dialect.Anthropic, false);
+            return Task.FromResult(Json.Ok(new Dictionary<string, object> { { "input_tokens", profile.EstimatedTokens } }));
+        }
+
+        private Task<HttpResponse> ListModels(HttpRequest r)
+        {
+            ClientKey? client;
+            string? error;
+            if (!Engine.Authenticate(r, out client, out error)) return Task.FromResult(HttpResponse.Json(401, Translate.Error(Dialect.OpenAi, 401, error!).ToString(Newtonsoft.Json.Formatting.None)));
+            var created = StartedAt.ToUnixTimeSeconds();
+            var data = new JArray();
+            foreach (var m in ModelIds(client)) data.Add(new JObject { ["id"] = m.Key, ["object"] = "model", ["created"] = created, ["owned_by"] = m.Value, ["type"] = "model", ["display_name"] = m.Key });
+            // Both shapes in one: OpenAI clients read data[].id; Anthropic clients read data[].id plus has_more.
+            return Task.FromResult(Json.Ok(new JObject { ["object"] = "list", ["data"] = data, ["has_more"] = false }));
+        }
+
+        private Task<HttpResponse> GetModel(HttpRequest r)
+        {
+            ClientKey? client;
+            string? error;
+            if (!Engine.Authenticate(r, out client, out error)) return Task.FromResult(HttpResponse.Json(401, Translate.Error(Dialect.OpenAi, 401, error!).ToString(Newtonsoft.Json.Formatting.None)));
+            var id = r.RouteValues["id"];
+            var hit = ModelIds(client).FirstOrDefault(m => string.Equals(m.Key, id, StringComparison.OrdinalIgnoreCase));
+            if (hit.Key == null) return Task.FromResult(HttpResponse.Json(404, Translate.Error(Dialect.OpenAi, 404, "Unknown model '" + id + "'.").ToString(Newtonsoft.Json.Formatting.None)));
+            return Task.FromResult(Json.Ok(new JObject { ["id"] = hit.Key, ["object"] = "model", ["created"] = StartedAt.ToUnixTimeSeconds(), ["owned_by"] = hit.Value }));
+        }
+
+        /// <summary>Routes first (what tools should use), then every provider/model target.</summary>
+        private List<KeyValuePair<string, string>> ModelIds(ClientKey? client)
+        {
+            var cfg = Config.Current;
+            var list = new List<KeyValuePair<string, string>>();
+            foreach (var route in cfg.Routes)
+            {
+                if (client != null && client.Routes.Count > 0 && !client.Routes.Contains(route.Id, StringComparer.OrdinalIgnoreCase)) continue;
+                list.Add(new KeyValuePair<string, string>(route.Id, "fairlead"));
+            }
+            if (client != null && client.Routes.Count > 0) return list;
+            foreach (var p in cfg.Providers.Where(x => x.Enabled))
+            {
+                var models = p.Models.Select(m => m.Id).Concat((Health.Provider(p.Id)?.Models ?? new List<ModelInfo>()).Select(m => m.Id)).Distinct(StringComparer.OrdinalIgnoreCase);
+                foreach (var m in models) list.Add(new KeyValuePair<string, string>(p.Id + "/" + m, p.Id));
+            }
+            return list;
+        }
+
+        // ---------- admin (/api, session token) ----------
+
+        private void RegisterAdminRoutes()
+        {
+            Admin.Get("/api/health", r => Task.FromResult(Json.Ok(new { ok = true, version = Version })));
+            Admin.Get("/api/status", r => Task.FromResult(Json.Ok(Status())));
+            Admin.Post("/api/heartbeat", r =>
+            {
+                var body = Json.Body(r);
+                RecordPresence(Json.Read<bool?>(body, "leaving") == true);
+                return Task.FromResult(Json.Ok(new { ok = true }));
+            });
+            Admin.Post("/api/session/stop", r =>
+            {
+                if (!string.Equals(r.Header(IntentHeader), "end-session", StringComparison.Ordinal))
+                    throw new BadRequestException("Stopping Fairlead needs the X-Fairlead-Intent: end-session header.");
+                Log.Info("SESSION_END", "Stop requested from the browser.");
+                Task.Run(async () => { await Task.Delay(300).ConfigureAwait(false); Stop(); });
+                return Task.FromResult(Json.Ok(new { stopping = true }));
+            });
+
+            Admin.Get("/api/config", r => Task.FromResult(Json.Ok(ConfigView(Config.Snapshot()))));
+            Admin.Get("/api/presets", r => Task.FromResult(Json.Ok(ProviderPresets.All)));
+            Admin.Get("/api/detect", DetectLocal);
+
+            Admin.Post("/api/providers", SaveProvider);
+            Admin.Delete("/api/providers/{id}", DeleteProvider);
+            Admin.Post("/api/providers/{id}/test", TestProvider);
+            Admin.Post("/api/providers/{id}/discover", DiscoverProvider);
+
+            Admin.Post("/api/routes", SaveRoute);
+            Admin.Delete("/api/routes/{id}", DeleteRoute);
+            Admin.Post("/api/routing", SaveRouting);
+            Admin.Post("/api/routing/reset", r =>
+            {
+                Config.Update(c => { c.Rules = FairleadConfig.DefaultRules(); c.Aliases = FairleadConfig.DefaultAliases(); });
+                return Task.FromResult(Json.Ok(ConfigView(Config.Snapshot())));
+            });
+            Admin.Post("/api/settings", SaveSettings);
+            Admin.Post("/api/kedge", r =>
+            {
+                var mode = ParseKedge(Json.Read<string>(Json.Body(r), "mode"));
+                Config.Update(c => c.Kedge = mode);
+                return Task.FromResult(Json.Ok(new { mode = mode.ToString().ToLowerInvariant(), connectivity = Health.Connectivity }));
+            });
+
+            Admin.Post("/api/clients", CreateClient);
+            Admin.Delete("/api/clients/{id}", r =>
+            {
+                var id = r.RouteValues["id"];
+                var removed = false;
+                Config.Update(c => removed = c.Clients.RemoveAll(k => k.Id == id) > 0);
+                if (!removed) throw new NotFoundException("No client key " + id + ".");
+                return Task.FromResult(Json.Ok(new { removed = id }));
+            });
+
+            Admin.Get("/api/health/providers", r => Task.FromResult(Json.Ok(new
+            {
+                connectivity = Health.Connectivity,
+                providers = Health.Providers(),
+                breakers = Breakers.All.Select(b => b.Describe(DateTimeOffset.UtcNow)),
+            })));
+            Admin.Post("/api/probe", async r =>
+            {
+                await Health.ProbeOnceAsync(CancellationToken.None).ConfigureAwait(false);
+                return Json.Ok(new { connectivity = Health.Connectivity, providers = Health.Providers() });
+            });
+            Admin.Post("/api/breakers/reset", r =>
+            {
+                var key = Json.Read<string>(Json.Body(r), "provider");
+                if (string.IsNullOrEmpty(key)) foreach (var b in Breakers.All) b.Reset();
+                else Breakers.ResetProvider(key!);
+                return Task.FromResult(Json.Ok(new { reset = key ?? "all" }));
+            });
+
+            Admin.Get("/api/requests", r =>
+            {
+                int limit;
+                if (!int.TryParse(r.QueryValues.ContainsKey("limit") ? r.QueryValues["limit"] : "200", out limit)) limit = 200;
+                return Task.FromResult(Json.Ok(Metrics.Recent(Math.Max(1, Math.Min(1000, limit)))));
+            });
+            Admin.Get("/api/requests/{id}", r =>
+            {
+                var rec = Metrics.Find(r.RouteValues["id"]);
+                if (rec == null) throw new NotFoundException("That request is no longer in the activity log.");
+                return Task.FromResult(Json.Ok(rec));
+            });
+            Admin.Get("/api/metrics", r => Task.FromResult(Json.Ok(Metrics.Summary())));
+            Admin.Get("/api/logs", r =>
+            {
+                string? level;
+                r.QueryValues.TryGetValue("level", out level);
+                return Task.FromResult(Json.Ok(Log.Recent(300, string.IsNullOrEmpty(level) ? null : level)));
+            });
+
+            Admin.Post("/api/explain", r =>
+            {
+                var body = Json.Body(r);
+                var request = PlaygroundBody(body, false);
+                return Task.FromResult(Json.Ok(Engine.Explain(request, Dialect.OpenAi, Json.Read<string>(body, "route"), Json.Read<bool?>(body, "private") == true, Json.Read<string>(body, "client"))));
+            });
+            Admin.Post("/api/playground", Playground);
+        }
+
+        public object Status()
+        {
+            var cfg = Config.Current;
+            return new
+            {
+                version = Version,
+                port = Port,
+                registryPort = FairleadSettings.RegistryPort,
+                preferredPort = Options.PreferredPort > 0 ? Options.PreferredPort : Settings.PreferredPort,
+                gatewayUrl = BaseUrl + "/v1",
+                lan = BoundToLan,
+                startedAt = StartedAt,
+                autoStop = Options.AutoStop,
+                setupComplete = cfg.SetupComplete,
+                requireClientKey = cfg.RequireClientKey,
+                clients = cfg.Clients.Count,
+                configFile = Config.FilePath,
+                logFile = Log.FilePath,
+                connectivity = Health.Connectivity,
+                providers = cfg.Providers.Select(p =>
+                {
+                    var h = Health.Provider(p.Id);
+                    var b = Breakers.Find(p.Id);
+                    return new
+                    {
+                        id = p.Id,
+                        name = p.Name,
+                        local = p.Local,
+                        enabled = p.Enabled,
+                        reachable = h?.Reachable,
+                        authOk = h?.AuthOk,
+                        probeMs = h?.ProbeMs,
+                        lastError = h?.LastError,
+                        models = p.Models.Select(m => m.Id).Concat((h?.Models ?? new List<ModelInfo>()).Select(m => m.Id)).Distinct(StringComparer.OrdinalIgnoreCase).Count(),
+                        breaker = b == null ? "closed" : b.State(DateTimeOffset.UtcNow).ToString().ToLowerInvariant(),
+                        keySource = SecretProtector.KeySource(p),
+                    };
+                }),
+                routes = cfg.Routes.Select(r => new { id = r.Id, strategy = r.Strategy, targets = r.Targets.Count }),
+                launcher = Options.LauncherState,
+                metrics = Metrics.Summary(),
+            };
+        }
+
+        /// <summary>The config as the browser sees it: keys replaced by where they come from and their last four characters.</summary>
+        private object ConfigView(FairleadConfig c)
+        {
+            return new
+            {
+                c.SetupComplete,
+                providers = c.Providers.Select(p => new
+                {
+                    p.Id,
+                    p.Name,
+                    p.Kind,
+                    p.Preset,
+                    p.BaseUrl,
+                    p.Local,
+                    p.Enabled,
+                    p.ApiKeyEnv,
+                    p.TimeoutSeconds,
+                    p.Headers,
+                    p.StreamUsage,
+                    models = p.Models,
+                    discovered = Health.Provider(p.Id)?.Models ?? new List<ModelInfo>(),
+                    keySource = SecretProtector.KeySource(p),
+                    keyHint = SecretProtector.KeyHint(p),
+                }),
+                c.Routes,
+                c.Rules,
+                c.Aliases,
+                c.DefaultRoute,
+                c.AutoFallbackRoute,
+                kedge = c.Kedge,
+                c.RequireClientKey,
+                clients = c.Clients.Select(k => new { k.Id, k.Name, k.Prefix, k.Created, k.Routes }),
+                c.Network,
+                c.Privacy,
+                c.CorsOrigins,
+                c.LogContent,
+            };
+        }
+
+        private async Task<HttpResponse> DetectLocal(HttpRequest r)
+        {
+            var cfg = Config.Current;
+            var found = await Task.WhenAll(ProviderPresets.All.Where(p => p.Local).Select(async preset =>
+            {
+                var probe = ProviderPresets.Create(preset.Id);
+                var existing = cfg.Providers.FirstOrDefault(p => string.Equals(p.BaseUrl.TrimEnd('/'), probe.BaseUrl.TrimEnd('/'), StringComparison.OrdinalIgnoreCase));
+                try
+                {
+                    var models = await Upstream.ListModelsAsync(existing ?? probe, CancellationToken.None, 2500).ConfigureAwait(false);
+                    return new { preset = preset.Id, name = preset.Name, baseUrl = probe.BaseUrl, running = true, configured = existing?.Id, models = models, error = (string?)null };
+                }
+                catch (UpstreamException ex)
+                {
+                    return new { preset = preset.Id, name = preset.Name, baseUrl = probe.BaseUrl, running = ex.Kind != FailureKind.Network && ex.Kind != FailureKind.Timeout, configured = existing?.Id, models = new List<ModelInfo>(), error = (string?)ex.Message };
+                }
+            })).ConfigureAwait(false);
+            return Json.Ok(found);
+        }
+
+        private Task<HttpResponse> SaveProvider(HttpRequest r)
+        {
+            var body = Json.Body(r);
+            var incoming = body["provider"] as JObject ?? throw new BadRequestException("Send { provider: {...}, apiKey?: string, clearKey?: bool }.");
+            var id = (string?)incoming["id"];
+            var preset = (string?)incoming["preset"];
+            var apiKey = Json.Read<string>(body, "apiKey");
+            var clearKey = Json.Read<bool?>(body, "clearKey") == true;
+            ProviderConfig? saved = null;
+            Config.Update(c =>
+            {
+                if (string.IsNullOrWhiteSpace(id))
+                {
+                    if (string.IsNullOrWhiteSpace(preset)) throw new BadRequestException("A new provider needs a preset or an id.");
+                    id = UniqueId(c, preset!);
+                }
+                var p = c.FindProvider(id!);
+                if (p == null)
+                {
+                    p = ProviderPresets.Find(preset) != null ? ProviderPresets.Create(preset!, id) : new ProviderConfig { Id = id! };
+                    c.Providers.Add(p);
+                }
+                var oldBase = p.BaseUrl;
+                if (incoming["name"] != null) p.Name = (string?)incoming["name"] ?? p.Name;
+                if (incoming["kind"] != null) p.Kind = ParseKind((string?)incoming["kind"]);
+                if (incoming["baseUrl"] != null) p.BaseUrl = ((string?)incoming["baseUrl"] ?? p.BaseUrl).Trim();
+                if (incoming["local"] != null) p.Local = (bool)incoming["local"]!;
+                if (incoming["enabled"] != null) p.Enabled = (bool)incoming["enabled"]!;
+                if (incoming["apiKeyEnv"] != null) p.ApiKeyEnv = string.IsNullOrWhiteSpace((string?)incoming["apiKeyEnv"]) ? null : ((string?)incoming["apiKeyEnv"])!.Trim();
+                if (incoming["timeoutSeconds"] != null) p.TimeoutSeconds = (int)incoming["timeoutSeconds"]!;
+                if (incoming["streamUsage"] != null) p.StreamUsage = (bool)incoming["streamUsage"]!;
+                if (incoming["headers"] is JObject headers) p.Headers = headers.ToObject<Dictionary<string, string>>() ?? new Dictionary<string, string>();
+                if (incoming["models"] is JArray models) p.Models = models.ToObject<List<ModelInfo>>() ?? new List<ModelInfo>();
+                // A key typed in the browser may only go where the provider already pointed, or to a URL saved in this same call.
+                if (clearKey) p.ApiKeyProtected = null;
+                if (!string.IsNullOrWhiteSpace(apiKey)) p.ApiKeyProtected = SecretProtector.Protect(apiKey!.Trim());
+                if (!string.Equals(oldBase, p.BaseUrl, StringComparison.OrdinalIgnoreCase) && string.IsNullOrWhiteSpace(apiKey) && p.ApiKeyProtected != null && !string.IsNullOrEmpty(oldBase))
+                    p.ApiKeyProtected = null; // never send a stored key to a new address without it being re-entered
+                saved = p;
+            });
+            Breakers.ResetProvider(id!);
+            Health.Nudge();
+            return Task.FromResult(Json.Ok(ConfigView(Config.Snapshot())));
+        }
+
+        private static string UniqueId(FairleadConfig c, string baseId)
+        {
+            var id = baseId;
+            var n = 2;
+            while (c.FindProvider(id) != null) id = baseId + "-" + n++;
+            return id;
+        }
+
+        private Task<HttpResponse> DeleteProvider(HttpRequest r)
+        {
+            var id = r.RouteValues["id"];
+            Config.Update(c =>
+            {
+                if (c.Providers.RemoveAll(p => string.Equals(p.Id, id, StringComparison.OrdinalIgnoreCase)) == 0) throw new NotFoundException("No provider " + id + ".");
+                foreach (var route in c.Routes) route.Targets.RemoveAll(t => t.StartsWith(id + "/", StringComparison.OrdinalIgnoreCase));
+            });
+            return Task.FromResult(Json.Ok(ConfigView(Config.Snapshot())));
+        }
+
+        private async Task<HttpResponse> TestProvider(HttpRequest r)
+        {
+            var p = Config.Current.FindProvider(r.RouteValues["id"]) ?? throw new NotFoundException("No provider " + r.RouteValues["id"] + ".");
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            try
+            {
+                var models = await Upstream.ListModelsAsync(p, CancellationToken.None, 10000).ConfigureAwait(false);
+                Breakers.ResetProvider(p.Id);
+                Health.Nudge();
+                return Json.Ok(new { ok = true, ms = sw.ElapsedMilliseconds, models = models, keySource = SecretProtector.KeySource(p) });
+            }
+            catch (UpstreamException ex)
+            {
+                return Json.Ok(new { ok = false, ms = sw.ElapsedMilliseconds, error = ex.Message, kind = ex.Kind.ToString().ToLowerInvariant(), keySource = SecretProtector.KeySource(p) });
+            }
+        }
+
+        /// <summary>Saves the provider's current model list into the config, keeping prices and capabilities typed in before.</summary>
+        private async Task<HttpResponse> DiscoverProvider(HttpRequest r)
+        {
+            var id = r.RouteValues["id"];
+            var p = Config.Current.FindProvider(id) ?? throw new NotFoundException("No provider " + id + ".");
+            var models = await Upstream.ListModelsAsync(p, CancellationToken.None, 10000).ConfigureAwait(false);
+            Config.Update(c =>
+            {
+                var target = c.FindProvider(id)!;
+                foreach (var m in models)
+                {
+                    var existing = target.FindModel(m.Id);
+                    if (existing == null) { target.Models.Add(m); continue; }
+                    if (existing.ContextWindow == null) existing.ContextWindow = m.ContextWindow;
+                    if (existing.Tools == null) existing.Tools = m.Tools;
+                    if (existing.Vision == null) existing.Vision = m.Vision;
+                    existing.Embedding = existing.Embedding || m.Embedding;
+                }
+            });
+            return Json.Ok(ConfigView(Config.Snapshot()));
+        }
+
+        private Task<HttpResponse> SaveRoute(HttpRequest r)
+        {
+            var body = Json.Body(r);
+            var route = (body["route"] as JObject)?.ToObject<RouteConfig>(Newtonsoft.Json.JsonSerializer.Create(Json.Settings)) ?? throw new BadRequestException("Send { route: {...}, previousId?: string }.");
+            var previous = Json.Read<string>(body, "previousId");
+            Config.Update(c =>
+            {
+                var oldId = string.IsNullOrEmpty(previous) ? route.Id : previous!;
+                var index = c.Routes.FindIndex(x => string.Equals(x.Id, oldId, StringComparison.OrdinalIgnoreCase));
+                if (index >= 0) c.Routes[index] = route; else c.Routes.Add(route);
+                if (!string.Equals(oldId, route.Id, StringComparison.OrdinalIgnoreCase))
+                {
+                    foreach (var rule in c.Rules) if (string.Equals(rule.Route, oldId, StringComparison.OrdinalIgnoreCase)) rule.Route = route.Id;
+                    foreach (var k in c.Aliases.Keys.ToList()) if (string.Equals(c.Aliases[k], oldId, StringComparison.OrdinalIgnoreCase)) c.Aliases[k] = route.Id;
+                    if (string.Equals(c.DefaultRoute, oldId, StringComparison.OrdinalIgnoreCase)) c.DefaultRoute = route.Id;
+                    if (string.Equals(c.AutoFallbackRoute, oldId, StringComparison.OrdinalIgnoreCase)) c.AutoFallbackRoute = route.Id;
+                }
+            });
+            return Task.FromResult(Json.Ok(ConfigView(Config.Snapshot())));
+        }
+
+        private Task<HttpResponse> DeleteRoute(HttpRequest r)
+        {
+            var id = r.RouteValues["id"];
+            if (string.Equals(id, "local", StringComparison.OrdinalIgnoreCase)) throw new BadRequestException("The local route is where Kedge mode and private requests land; it cannot be deleted.");
+            Config.Update(c =>
+            {
+                if (c.Routes.RemoveAll(x => string.Equals(x.Id, id, StringComparison.OrdinalIgnoreCase)) == 0) throw new NotFoundException("No route " + id + ".");
+            });
+            return Task.FromResult(Json.Ok(ConfigView(Config.Snapshot())));
+        }
+
+        private Task<HttpResponse> SaveRouting(HttpRequest r)
+        {
+            var body = Json.Body(r);
+            var serializer = Newtonsoft.Json.JsonSerializer.Create(Json.Settings);
+            Config.Update(c =>
+            {
+                if (body["rules"] is JArray rules) c.Rules = rules.ToObject<List<RoutingRule>>(serializer) ?? new List<RoutingRule>();
+                if (body["aliases"] is JObject aliases) c.Aliases = aliases.ToObject<Dictionary<string, string>>() ?? new Dictionary<string, string>();
+                var d = Json.Read<string>(body, "defaultRoute");
+                if (!string.IsNullOrEmpty(d)) c.DefaultRoute = d!;
+                var f = Json.Read<string>(body, "autoFallbackRoute");
+                if (!string.IsNullOrEmpty(f)) c.AutoFallbackRoute = f!;
+            });
+            return Task.FromResult(Json.Ok(ConfigView(Config.Snapshot())));
+        }
+
+        private Task<HttpResponse> SaveSettings(HttpRequest r)
+        {
+            var body = Json.Body(r);
+            var serializer = Newtonsoft.Json.JsonSerializer.Create(Json.Settings);
+            Config.Update(c =>
+            {
+                if (body["kedge"] != null) c.Kedge = ParseKedge((string?)body["kedge"]);
+                if (body["requireClientKey"] != null) c.RequireClientKey = (bool)body["requireClientKey"]!;
+                if (body["setupComplete"] != null) c.SetupComplete = (bool)body["setupComplete"]!;
+                if (body["logContent"] != null) c.LogContent = (bool)body["logContent"]!;
+                if (body["corsOrigins"] is JArray cors) c.CorsOrigins = cors.Select(x => ((string?)x ?? string.Empty).Trim().TrimEnd('/')).Where(x => x.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+                if (body["privacy"] is JObject privacy) c.Privacy = privacy.ToObject<PrivacyConfig>(serializer) ?? c.Privacy;
+                if (body["network"] is JObject network) c.Network = network.ToObject<NetworkConfig>(serializer) ?? c.Network;
+            });
+            return Task.FromResult(Json.Ok(ConfigView(Config.Snapshot())));
+        }
+
+        private Task<HttpResponse> CreateClient(HttpRequest r)
+        {
+            var body = Json.Body(r);
+            var name = (Json.Read<string>(body, "name") ?? string.Empty).Trim();
+            if (name.Length == 0 || name.Length > 60) throw new BadRequestException("Give the key a name of 1 to 60 characters (the tool that will use it).");
+            var routes = Json.Read<List<string>>(body, "routes") ?? new List<string>();
+            var key = GatewayEngine.NewClientKey();
+            var client = new ClientKey
+            {
+                Id = Guid.NewGuid().ToString("N").Substring(0, 12),
+                Name = name,
+                Prefix = key.Substring(0, 7),
+                Hash = GatewayEngine.HashKey(key),
+                Routes = routes.Where(x => !string.IsNullOrWhiteSpace(x)).ToList(),
+            };
+            Config.Update(c =>
+            {
+                if (c.Clients.Any(k => string.Equals(k.Name, name, StringComparison.OrdinalIgnoreCase))) throw new BadRequestException("A key called '" + name + "' already exists.");
+                foreach (var route in client.Routes) if (c.FindRoute(route) == null) throw new BadRequestException("Unknown route '" + route + "'.");
+                c.Clients.Add(client);
+            });
+            // The only time the key leaves Fairlead.
+            return Task.FromResult(Json.Ok(new { client = new { client.Id, client.Name, client.Prefix, client.Created, client.Routes }, key = key }));
+        }
+
+        private async Task<HttpResponse> Playground(HttpRequest r)
+        {
+            var body = Json.Body(r);
+            var request = PlaygroundBody(body, true);
+            var synthetic = new HttpRequest
+            {
+                Method = "POST",
+                Path = "/v1/chat/completions",
+                Body = System.Text.Encoding.UTF8.GetBytes(request.ToString(Newtonsoft.Json.Formatting.None)),
+                RequestId = r.RequestId,
+                Internal = true,
+                Aborted = r.Aborted,
+            };
+            var route = Json.Read<string>(body, "route");
+            if (!string.IsNullOrEmpty(route)) synthetic.Headers[GatewayEngine.RouteHeader] = route!;
+            if (Json.Read<bool?>(body, "private") == true) synthetic.Headers[GatewayEngine.PrivacyHeader] = "local";
+            var response = await Engine.HandleChatAsync(synthetic, Dialect.OpenAi).ConfigureAwait(false);
+            var answer = JObject.Parse(System.Text.Encoding.UTF8.GetString(response.Body));
+            var rec = Metrics.Find(r.RequestId);
+            return Json.Ok(new
+            {
+                status = response.Status,
+                text = response.Status < 300 ? Translate.ContentText(answer["choices"]?[0]?["message"]?["content"]) : null,
+                error = response.Status >= 300 ? (string?)answer["error"]?["message"] : null,
+                route = response.Headers.ContainsKey("X-Fairlead-Route") ? response.Headers["X-Fairlead-Route"] : null,
+                target = response.Headers.ContainsKey("X-Fairlead-Target") ? response.Headers["X-Fairlead-Target"] : null,
+                record = rec,
+            });
+        }
+
+        private static JObject PlaygroundBody(JObject body, bool forSend)
+        {
+            var raw = body["body"] as JObject;
+            if (raw != null) { var copy = (JObject)raw.DeepClone(); if (forSend) copy["stream"] = false; return copy; }
+            var messages = new JArray();
+            var system = Json.Read<string>(body, "system");
+            if (!string.IsNullOrWhiteSpace(system)) messages.Add(new JObject { ["role"] = "system", ["content"] = system });
+            messages.Add(new JObject { ["role"] = "user", ["content"] = Json.Read<string>(body, "prompt") ?? string.Empty });
+            var req = new JObject { ["model"] = Json.Read<string>(body, "model") ?? "auto", ["messages"] = messages, ["stream"] = false };
+            var max = Json.Read<int?>(body, "maxTokens");
+            if (max.HasValue) req["max_tokens"] = max.Value;
+            if (Json.Read<bool?>(body, "withTools") == true)
+            {
+                req["tools"] = new JArray { new JObject { ["type"] = "function", ["function"] = new JObject { ["name"] = "get_time", ["description"] = "Current time", ["parameters"] = new JObject { ["type"] = "object", ["properties"] = new JObject() } } } };
+            }
+            return req;
+        }
+
+        private static KedgeMode ParseKedge(string? mode)
+        {
+            switch ((mode ?? string.Empty).Trim().ToLowerInvariant())
+            {
+                case "auto": return KedgeMode.Auto;
+                case "on": return KedgeMode.On;
+                case "off": return KedgeMode.Off;
+                default: throw new BadRequestException("Kedge mode must be auto, on or off.");
+            }
+        }
+
+        private static ProviderKind ParseKind(string? kind)
+        {
+            switch ((kind ?? string.Empty).Trim().ToLowerInvariant())
+            {
+                case "openai": return ProviderKind.OpenAi;
+                case "anthropic": return ProviderKind.Anthropic;
+                case "ollama": return ProviderKind.Ollama;
+                default: throw new BadRequestException("Provider kind must be openai, anthropic or ollama.");
+            }
+        }
+    }
+}

@@ -1,0 +1,148 @@
+@import "tailwindcss";
+@import "../vendor/fleet/fleet.css";
+
+/*
+  Fairlead design tokens, built on the shared Fleet tokens (vendor/fleet/fleet.css, docs/UNIFIED-UI.md):
+  Night watch / Chart room follow the system unless <html data-theme> overrides it, and
+  <html data-app="fairlead"> sets the starboard-green signature accent. The roles below only map
+  Fairlead's names onto --fl-* values; Fairlead adds no colours of its own.
+*/
+:root {
+  --paper: var(--fl-background);
+  --sidebar: var(--fl-sidebar);
+  --surface: var(--fl-surface);
+  --surface-2: var(--fl-muted);
+  --ink: var(--fl-foreground);
+  --ink-2: var(--fl-muted-foreground);
+  --ink-3: var(--fl-muted-foreground);
+  --line: var(--fl-control-border);
+  --line-2: var(--fl-border);
+  --focus: var(--fl-brass);
+  --brass: var(--fl-brass);
+
+  --ok: var(--fl-success);
+  --warn: var(--fl-warning);
+  --err: var(--fl-danger);
+  --info: var(--fl-info);
+  --ok-bg: color-mix(in srgb, var(--fl-success) 14%, var(--fl-surface));
+  --warn-bg: color-mix(in srgb, var(--fl-warning) 14%, var(--fl-surface));
+  --err-bg: color-mix(in srgb, var(--fl-danger) 14%, var(--fl-surface));
+  --info-bg: color-mix(in srgb, var(--fl-info) 14%, var(--fl-surface));
+  --accent: var(--fl-accent);
+  --accent-ink: var(--fl-accent-ink);
+}
+
+@theme inline {
+  --color-paper: var(--paper);
+  --color-sidebar: var(--sidebar);
+  --color-brass: var(--brass);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-line: var(--line);
+  --color-line-2: var(--line-2);
+  --color-focus: var(--focus);
+  --color-ok: var(--ok);
+  --color-ok-bg: var(--ok-bg);
+  --color-warn: var(--warn);
+  --color-warn-bg: var(--warn-bg);
+  --color-err: var(--err);
+  --color-err-bg: var(--err-bg);
+  --color-info: var(--info);
+  --color-info-bg: var(--info-bg);
+  --color-accent: var(--accent);
+  --color-accent-ink: var(--accent-ink);
+
+  --font-sans: var(--fl-font-body);
+  --font-mono: var(--fl-font-mono);
+  --font-display: var(--fl-font-display);
+
+  --radius-ctl: 6px;
+  --radius-panel: 10px;
+  --radius-dialog: 14px;
+}
+
+@layer base {
+  html {
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 1.5;
+    color: var(--ink);
+    background: var(--paper);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background: var(--paper);
+    color: var(--ink);
+  }
+  * {
+    border-color: var(--line);
+  }
+  h1, h2, h3 {
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    margin: 0;
+  }
+  h1 { font-family: var(--fl-font-display); font-size: 20px; font-weight: 600; line-height: 1.25; letter-spacing: 0; }
+  h2 { font-size: 16px; line-height: 1.25; }
+  h3 { font-size: 14px; line-height: 1.25; }
+  code, kbd, .mono { font-family: var(--font-mono); font-size: 0.93em; }
+  a { color: var(--info); text-underline-offset: 2px; }
+  :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+  ::selection { background: color-mix(in srgb, var(--accent) 25%, transparent); }
+  table { border-collapse: collapse; }
+  th { font-weight: 600; text-align: left; }
+  button { font: inherit; color: inherit; }
+  input, select, textarea { font: inherit; color: inherit; background: var(--surface); }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+  }
+}
+
+@layer components {
+  .panel {
+    background: var(--fl-card);
+    border: 1px solid var(--line-2);
+    border-radius: var(--radius-panel);
+  }
+  .hairline { border-top: 1px solid var(--line-2); }
+
+  .only-dark { display: none; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .only-dark { display: revert; }
+    :root:not([data-theme="light"]) .only-light { display: none; }
+  }
+  :root[data-theme="dark"] .only-dark { display: revert; }
+  :root[data-theme="dark"] .only-light { display: none; }
+
+  /* Fleet sidebar navigation (UNIFIED-UI 6): accent text and a 3 px accent bar on the active item. */
+  .fl-nav a { border-left: 3px solid transparent; }
+  .fl-nav a[aria-current="page"] { color: var(--accent); border-left-color: var(--accent); }
+
+  .table-dense th, .table-dense td {
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--line-2);
+    vertical-align: top;
+  }
+  .table-dense th {
+    color: var(--ink-2);
+    font-weight: 600;
+    position: sticky;
+    top: 0;
+    background: var(--surface);
+    z-index: 1;
+  }
+  .table-dense tbody tr:hover td { background: var(--surface-2); }
+  .table-dense td.num, .table-dense th.num { text-align: right; font-family: var(--font-mono); }
+  .scroll-y { overflow-y: auto; scrollbar-width: thin; }
+  .num { font-variant-numeric: tabular-nums; }
+  .snippet { white-space: pre; overflow-x: auto; font-family: var(--font-mono); font-size: 12.5px; line-height: 1.55; }
+  /* The line through the fairlead: drawn on the overview when traffic flows. */
+  .lead-line { stroke-dasharray: 6 6; animation: lead 1.2s linear infinite; }
+  @keyframes lead { to { stroke-dashoffset: -12; } }
+}

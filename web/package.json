@@ -1,0 +1,31 @@
+{
+  "name": "fairlead-web",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Fairlead admin UI: one-time setup and live status. Built to static files; served by the Fairlead host on 127.0.0.1. No runtime network access.",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "dev": "node build.mjs --watch",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "node --import tsx --test test/*.test.ts"
+  },
+  "dependencies": {
+    "class-variance-authority": "0.7.1",
+    "clsx": "2.1.1",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "react-icons": "5.7.0",
+    "tailwind-merge": "3.6.0",
+    "zod": "3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "22.10.2",
+    "@types/react": "19.2.0",
+    "@types/react-dom": "19.2.0",
+    "esbuild": "0.28.2",
+    "tailwindcss": "4.3.3",
+    "tsx": "4.23.12",
+    "typescript": "5.9.3"
+  }
+}

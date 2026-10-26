@@ -1,0 +1,51 @@
+name: Prune safely merged branches
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: write
+  pull-requests: read
+jobs:
+  prune:
+    # Runs on the self-hosted Windows runner under Windows PowerShell 5.1 (no PowerShell 7 or Python).
+    runs-on: [self-hosted, Windows, X64]
+    steps:
+      - name: Remove only fully merged, unchanged, same-repository branches
+        env:
+          GH_REPOSITORY: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+          $repo = $env:GH_REPOSITORY
+          $root = "https://api.github.com/repos/$repo"
+          $headers = @{ Authorization = "Bearer $env:GH_TOKEN"; Accept = 'application/vnd.github+json'; 'X-GitHub-Api-Version' = '2022-11-28' }
+          function Invoke-Api([string]$Path, [string]$Method = 'GET') {
+            Invoke-RestMethod -Uri ($root + $Path) -Method $Method -Headers $headers -TimeoutSec 30
+          }
+          function Get-Pages([string]$Path) {
+            $result = @()
+            for ($page = 1; $page -le 20; $page++) {
+              $sep = if ($Path.Contains('?')) { '&' } else { '?' }
+              $values = @(Invoke-Api ($Path + $sep + "per_page=100&page=$page"))
+              $result += $values
+              if ($values.Count -lt 100) { break }
+            }
+            return $result
+          }
+          $default = (Invoke-Api '').default_branch
+          $merged = Get-Pages '/pulls?state=closed'
+          $openPrs = Get-Pages '/pulls?state=open'
+          $branches = Get-Pages '/branches'
+          foreach ($branch in $branches) {
+            $name = $branch.name
+            if ($name -in @($default, 'main', 'master') -or $branch.protected) { continue }
+            $sha = $branch.commit.sha
+            if ($openPrs | Where-Object { $_.head.ref -eq $name -and $_.head.repo.full_name -eq $repo }) { Write-Host "KEEP open PR: $name"; continue }
+            $matches = $merged | Where-Object { $_.merged_at -and $_.base.ref -eq $default -and $_.head.ref -eq $name -and $_.head.repo.full_name -eq $repo -and $_.head.sha -eq $sha }
+            if (-not $matches) { Write-Host "KEEP unverified or changed branch: $name"; continue }
+            Invoke-Api ('/git/refs/heads/' + [uri]::EscapeDataString($name).Replace('%2F', '/')) 'DELETE' | Out-Null
+            Write-Host "DELETED safely merged branch: $name"
+          }

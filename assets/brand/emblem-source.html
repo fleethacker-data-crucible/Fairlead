@@ -1,0 +1,53 @@
+<!doctype html>
+<!-- Source for the placeholder emblem PNGs: build/New-FairleadBrand.ps1 renders it with headless Edge.
+     ?theme=light or ?theme=dark picks the wordmark colour; the field is navy in both (UNIFIED-UI 8). -->
+<html><head><meta charset="utf-8"><style>
+  html, body { margin: 0; background: transparent; }
+  svg { display: block; }
+</style></head><body>
+<svg id="e" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <radialGradient id="field" cx="50%" cy="42%" r="60%">
+      <stop offset="0" stop-color="#14334a"/><stop offset="1" stop-color="#071a26"/>
+    </radialGradient>
+    <linearGradient id="brass" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#e2c48d"/><stop offset="1" stop-color="#a8844f"/>
+    </linearGradient>
+    <linearGradient id="roller" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#c9bfa6"/><stop offset=".45" stop-color="#f4ead6"/><stop offset="1" stop-color="#b9ad92"/>
+    </linearGradient>
+  </defs>
+  <!-- compass-point rays at 3 and 9 o'clock -->
+  <g fill="url(#brass)">
+    <polygon points="40,190 92,182 92,198"/><polygon points="472,190 420,182 420,198"/>
+  </g>
+  <!-- the field and its thin brass ring -->
+  <circle cx="256" cy="190" r="160" fill="url(#field)" stroke="url(#brass)" stroke-width="6"/>
+  <circle cx="256" cy="190" r="148" fill="none" stroke="#c9a66b" stroke-opacity=".35" stroke-width="1.5"/>
+  <!-- the line, breaking out of the circle on both sides: led fair between the rollers -->
+  <path d="M60 128 C150 128 190 182 256 182 C322 182 362 236 452 236" fill="none" stroke="#7a5a2e" stroke-width="18" stroke-linecap="round"/>
+  <path d="M60 128 C150 128 190 182 256 182 C322 182 362 236 452 236" fill="none" stroke="#d9b77a" stroke-width="12" stroke-linecap="round"/>
+  <path d="M60 128 C150 128 190 182 256 182 C322 182 362 236 452 236" fill="none" stroke="#7a5a2e" stroke-width="2" stroke-dasharray="7 9" stroke-linecap="round"/>
+  <!-- engraved subject: a roller fairlead on its deck plate -->
+  <g>
+    <rect x="148" y="250" width="216" height="26" rx="8" fill="url(#brass)"/>
+    <g fill="#071a26" opacity=".55"><circle cx="168" cy="263" r="5"/><circle cx="344" cy="263" r="5"/><circle cx="256" cy="263" r="5"/></g>
+    <rect x="182" y="120" width="40" height="132" rx="20" fill="url(#roller)" stroke="#8a6b45" stroke-width="2"/>
+    <rect x="290" y="120" width="40" height="132" rx="20" fill="url(#roller)" stroke="#8a6b45" stroke-width="2"/>
+    <g stroke="#8a6b45" stroke-width="1.5" opacity=".6"><line x1="186" y1="150" x2="218" y2="150"/><line x1="186" y1="222" x2="218" y2="222"/><line x1="294" y1="150" x2="326" y2="150"/><line x1="294" y1="222" x2="326" y2="222"/></g>
+    <rect x="196" y="104" width="12" height="20" rx="3" fill="url(#brass)"/><rect x="304" y="104" width="12" height="20" rx="3" fill="url(#brass)"/>
+  </g>
+  <!-- starboard light, the signature accent -->
+  <circle cx="256" cy="74" r="9" fill="#a3d65c"/>
+  <!-- wordmark with the compass-star divider between brass rules -->
+  <text id="word" x="256" y="420" text-anchor="middle" font-family="Cambria, Georgia, 'Times New Roman', serif" font-size="62" font-weight="700" letter-spacing="10">FAIRLEAD</text>
+  <g fill="url(#brass)">
+    <rect x="120" y="451" width="110" height="3"/><rect x="282" y="451" width="110" height="3"/>
+    <polygon points="256,436 262,452 278,452.5 262,454 256,470 250,454 234,452.5 250,452"/>
+  </g>
+</svg>
+<script>
+  var t = new URLSearchParams(location.search).get('theme');
+  document.getElementById('word').setAttribute('fill', t === 'dark' ? '#f4ead6' : '#132633');
+</script>
+</body></html>

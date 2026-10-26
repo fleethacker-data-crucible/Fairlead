@@ -1,0 +1,83 @@
+name: CI
+on:
+  push:
+    branches: [main, dev, "feature/**"]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    # Self-hosted Windows workstation runner: exercises the exact Windows PowerShell 5.1 / .NET Framework 4.8
+    # runtime the bundle targets. Needs Git; the setup actions below install the .NET SDK and Node without admin rights.
+    runs-on: [self-hosted, Windows, X64]
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.426
+        env:
+          DOTNET_INSTALL_DIR: ${{ runner.tool_cache }}\dotnet
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Core build and tests (net8.0 + net48)
+        shell: powershell
+        run: |
+          dotnet build Fairlead.sln -c Release --nologo
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          dotnet test Fairlead.sln -c Release --no-build --nologo --logger "trx;LogFileName=core.trx" --results-directory TestResults
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+
+      - name: UI typecheck, tests, build
+        shell: powershell
+        working-directory: web
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (Test-Path package-lock.json) { npm ci --no-audit --no-fund } else { npm install --no-audit --no-fund }
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          npm run typecheck; if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          npm test; if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          npm run build; if ($LASTEXITCODE) { exit $LASTEXITCODE }
+
+      - name: Pester on Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+          if (-not (Get-Module -ListAvailable Pester | Where-Object Version -ge '5.0')) {
+            Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Scope CurrentUser -Force | Out-Null
+            Install-Module Pester -MinimumVersion 5.5 -Scope CurrentUser -Force -SkipPublisherCheck -AllowClobber
+          }
+          Import-Module Pester -MinimumVersion 5.0
+          $c = New-PesterConfiguration
+          $c.Run.Path = 'tests/pester'
+          $c.Run.PassThru = $true
+          $c.Output.Verbosity = 'Detailed'
+          $r = Invoke-Pester -Configuration $c
+          foreach ($t in $r.Failed) {
+            $msg = ($t.ErrorRecord | Select-Object -First 1).Exception.Message -replace '\r?\n', ' '
+            Write-Host ('::error title=Pester ' + ($t.ExpandedPath -replace '::', ' ') + '::' + $msg)
+          }
+          Write-Host "::notice title=Pester on PowerShell $($PSVersionTable.PSVersion)::$($r.PassedCount) passed, $($r.FailedCount) failed"
+          if ($r.FailedCount -gt 0 -or $r.Result -ne 'Passed') { exit 1 }
+
+      - name: Assemble bundle
+        shell: powershell
+        run: .\build\Build-Fairlead.ps1 -SkipTests -SkipWeb
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fairlead-${{ github.sha }}
+          path: |
+            dist/*.zip
+            TestResults/
+          if-no-files-found: warn

@@ -1,0 +1,49 @@
+# Runtime outputs and logs (request logs never hold prompts, but they are still per-machine)
+logs/
+data/
+*.log
+*.tmp
+*.bak
+*.swp
+*~
+
+# Local secrets and environment (NEVER commit real values)
+config/fairlead.env
+.env
+.env.*
+!**/*.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+id_rsa*
+id_ed25519*
+*.keystore
+
+# .NET build output
+bin/
+obj/
+*.user
+*.suo
+TestResults/
+.vs/
+
+# Web build output and dependencies
+web/node_modules
+web/dist/
+node_modules/
+
+# Assembled release bundle (produced by build/Build-Fairlead.ps1)
+dist/
+
+# Tooling caches
+.cache/
+__pycache__/
+coverage/
+.DS_Store
+Thumbs.db
+
+# Editor / IDE
+.vscode/
+.idea/

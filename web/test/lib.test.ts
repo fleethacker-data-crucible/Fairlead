@@ -1,0 +1,34 @@
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import { ago, count, ms, usd } from '../src/lib/format';
+import { portOf, snippets } from '../src/lib/snippets';
+
+test('snippets carry the real address and key, and Anthropic clients get the root without /v1', () => {
+  const list = snippets('http://127.0.0.1:8776/v1', 'fl-abc');
+  const claude = list.find((s) => s.id === 'claude-code')!;
+  assert.match(claude.code, /ANTHROPIC_BASE_URL = "http:\/\/127\.0\.0\.1:8776"/);
+  assert.match(claude.code, /fl-abc/);
+  const py = list.find((s) => s.id === 'openai-python')!;
+  assert.match(py.code, /base_url="http:\/\/127\.0\.0\.1:8776\/v1"/);
+  assert.ok(list.every((s) => !s.code.includes('undefined')));
+});
+
+test('snippets fall back to a placeholder key', () => {
+  assert.ok(snippets('http://127.0.0.1:8776/v1', '').every((s) => !s.code.includes('fl-abc')));
+  assert.match(snippets('http://127.0.0.1:8776/v1', '')[0]!.code, /fl-YOUR-KEY/);
+});
+
+test('portOf reads the port, defaulting to the registry port', () => {
+  assert.equal(portOf('http://127.0.0.1:9123/v1'), '9123');
+  assert.equal(portOf('http://localhost/v1'), '8776');
+});
+
+test('missing values are a dash, never a zero', () => {
+  assert.equal(ms(null), '—');
+  assert.equal(count(undefined), '—');
+  assert.equal(usd(null), '—');
+  assert.equal(ago(null), '—');
+  assert.equal(ms(250), '250 ms');
+  assert.equal(ms(2500), '2.50 s');
+  assert.equal(usd(0.004), '$0.0040');
+});
