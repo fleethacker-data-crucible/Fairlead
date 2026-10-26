@@ -31,11 +31,14 @@ TestResults/
 
 # Web build output and dependencies
 web/node_modules
-web/dist/
+# web/dist is committed: a plain checkout launches with its admin UI (the workstation has no Node).
+# Rebuild it after a UI change (cd web; npm run build) and commit it; CI fails when it is out of date.
+web/dist/build.json
 node_modules/
 
 # Assembled release bundle (produced by build/Build-Fairlead.ps1)
 dist/
+!web/dist/
 
 # Tooling caches
 .cache/

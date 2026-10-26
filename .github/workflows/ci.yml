@@ -55,6 +55,9 @@ jobs:
           npm run typecheck; if ($LASTEXITCODE) { exit $LASTEXITCODE }
           npm test; if ($LASTEXITCODE) { exit $LASTEXITCODE }
           npm run build; if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          # web/dist is committed so a plain checkout launches with its UI; it must match the source.
+          $stale = @(git status --porcelain -- dist)
+          if ($stale.Count -gt 0) { $stale; throw 'web/dist is out of date: run npm run build in web and commit web/dist.' }
 
       - name: Pester on Windows PowerShell 5.1
         shell: powershell
