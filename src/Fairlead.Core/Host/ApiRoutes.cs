@@ -115,7 +115,15 @@ namespace Fairlead.Core.Host
             Admin.Delete("/api/gateway", r =>
             {
                 GatewayValues.Clear();
-                Log.Info("GATEWAY_IMPORT_REMOVED", "The imported AI gateway model file and its stored values were deleted.");
+                Log.Info("GATEWAY_IMPORT_REMOVED", "Every imported AI gateway model file and the stored values were deleted.");
+                LoadGatewayModels();
+                return Task.FromResult(Json.Ok(GatewayView()));
+            });
+            Admin.Delete("/api/gateway/{name}", r =>
+            {
+                var name = r.RouteValues["name"];
+                if (!GatewayValues.RemoveFile(name)) throw new NotFoundException("No imported model file called " + name + ".");
+                Log.Info("GATEWAY_IMPORT_REMOVED", "Imported AI gateway model file " + name + " was deleted.");
                 LoadGatewayModels();
                 return Task.FromResult(Json.Ok(GatewayView()));
             });
@@ -633,6 +641,17 @@ namespace Fairlead.Core.Host
                 }),
                 errors = f.Errors,
                 warnings = f.Warnings,
+                files = (GatewayFiles ?? new List<GatewayModelFile>()).Select(x => new
+                {
+                    name = x.Name,
+                    ok = x.Ok,
+                    endpoints = x.EndpointKeys,
+                    models = x.ModelKeys.Count,
+                    enabledModels = x.EnabledModels,
+                    providers = x.Providers.Select(p => p.Id),
+                    errors = x.Errors,
+                    warnings = x.Warnings,
+                }),
             };
         }
 
@@ -648,12 +667,19 @@ namespace Fairlead.Core.Host
             var yaml = Json.Read<string>(body, "yaml");
             if (string.IsNullOrWhiteSpace(yaml)) throw new BadRequestException("Choose the model file (YAML) to import.");
             if (yaml.Length > GatewayStore.MaxFileChars) throw new BadRequestException("The model file is too large; a gateway model file is a few KB.");
+            var name = GatewayStore.NameFrom(Json.Read<string>(body, "fileName"));
+            if (name == null) throw new BadRequestException("Name the model file with letters or digits (for example gemini-chat.yaml).");
             var check = GatewayModelFile.Inspect(yaml, "the chosen file");
+            // Each endpoint key becomes a provider id, so it must not repeat one from another imported file.
+            foreach (var other in (GatewayFiles ?? new List<GatewayModelFile>()).Where(x => !string.Equals(x.Name, name, StringComparison.OrdinalIgnoreCase)))
+                foreach (var ep in check.EndpointKeys.Where(k => other.EndpointKeys.Contains(k, StringComparer.OrdinalIgnoreCase)))
+                    check.Errors.Add("Endpoint '" + ep + "' is already in the imported file " + other.Name + "; rename it in this file, or import this one under the same file name to replace that file.");
             if (!check.Ok) return Task.FromResult(Json.Ok(new { saved = false, errors = check.Errors, warnings = check.Warnings }));
             var values = ReadGatewayValues(body, check);
-            GatewayValues.SaveFile(yaml);
+            var replaced = GatewayValues.Names.Contains(name, StringComparer.OrdinalIgnoreCase);
+            GatewayValues.SaveFile(name, yaml);
             if (values.Count > 0) GatewayValues.SetValues(values);
-            Log.Info("GATEWAY_IMPORTED", "AI gateway model file imported (" + check.EndpointKeys.Count + " endpoints, " + check.ModelKeys.Count + " models); kept encrypted at " + GatewayValues.Location + ".");
+            Log.Info("GATEWAY_IMPORTED", "AI gateway model file " + name + (replaced ? " replaced" : " imported") + " (" + check.EndpointKeys.Count + " endpoints, " + check.ModelKeys.Count + " models); kept encrypted at " + GatewayValues.Location(name) + ".");
             LoadGatewayModels();
             return Task.FromResult(Json.Ok(new { saved = true, gateway = GatewayView() }));
         }

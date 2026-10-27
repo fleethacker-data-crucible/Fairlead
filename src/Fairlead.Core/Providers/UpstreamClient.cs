@@ -343,9 +343,9 @@ namespace Fairlead.Core.Providers
         /// <summary>The model list. Ollama: /api/tags with capabilities and context; others: /models.</summary>
         public async Task<List<ModelInfo>> ListModelsAsync(ProviderConfig p, CancellationToken token, int timeoutMs = 8000)
         {
-            if (p.Kind == ProviderKind.Responses)
+            if (p.Kind == ProviderKind.Responses || p.Managed == true)
             {
-                // A Responses gateway publishes no model list: its models come from the gateway model file. Check that
+                // A gateway from the model file (Responses or chat) need not publish a model list: its models come from the gateway model file. Check that
                 // something answers on its host and port; the key is only proven by a real request.
                 Uri u;
                 if (!Uri.TryCreate(p.BaseUrl, UriKind.Absolute, out u)) throw new UpstreamException(FailureKind.BadRequest, p.Id + " has no valid base URL.");

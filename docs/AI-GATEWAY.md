@@ -29,6 +29,20 @@ endpoint named. Fairlead then sends exactly what the curls send: `POST`, `Conten
 `Authorization: Bearer <token>`, and `model`, `input` (user turns as `input_text`, assistant turns as `output_text`)
 and `max_output_tokens` when the caller sets a limit.
 
+## Several gateways: one model file each
+
+Import one model file per gateway; Fairlead keeps them all (up to 16), each encrypted on its own under the name of
+the file you picked. Importing a file with the same name replaces it; **Remove** on a file's row deletes only that
+file. A file with problems adds nothing, and the others still load. Endpoint keys become provider ids, so a key may
+appear in only one file.
+
+`config/ai_gateway_chat_models.template.yaml` is the second gateway (`other-gemini-model.yaml`): an
+OpenAI-compatible Chat Completions endpoint. Its endpoint says `request_format: "openai_chat_completions_v1"` and its
+`url` is the endpoint's base address (or the full `.../chat/completions` address; both work). Fairlead sends the
+OpenAI request as is, tool calls and streaming included, with `Authorization: Bearer <key>`. The key is
+`AI_ENDPOINT_TOKEN`, from Lazarette or the environment. A chat file's `request_body.required_fields` lists `model`
+and `messages`.
+
 ## Set it up
 
 1. Open **Providers**. Under **AI gateway**, press **Import model file** and choose the gateway's YAML. A file with a

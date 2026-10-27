@@ -129,6 +129,8 @@ namespace Fairlead.Core.Host
         public ConfigStore Config { get; private set; }
         /// <summary>The AI gateway model file as last loaded; null when there is none.</summary>
         public GatewayModelFile GatewayModels { get; private set; }
+        /// <summary>Each model file as loaded (one per imported file), with its own problems; the combined view is <see cref="GatewayModels"/>.</summary>
+        public List<GatewayModelFile> GatewayFiles { get; private set; }
         /// <summary>Where it came from: "imported" (the browser), "environment" (FAIRLEAD_GATEWAY_CONFIG) or "file" (config\ folder).</summary>
         public string GatewaySource { get; private set; }
         /// <summary>The model file and values imported in the browser, encrypted in the data folder.</summary>
@@ -177,30 +179,43 @@ namespace Fairlead.Core.Host
             {
                 // Saved in Fairlead (the address), then Lazarette (tokens), then the process environment.
                 var env = GatewayValues.Environment(name => Lazarette.Value(name) ?? Environment.GetEnvironmentVariable(name));
-                GatewayModelFile file = null;
+                var files = new List<GatewayModelFile>();
                 var source = "file";
                 var path = Options.GatewayModelPath;
                 if (path == null && string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(GatewayModelFile.PathVariable)) && GatewayValues.HasFile)
                 {
                     source = "imported";
-                    var text = GatewayValues.ReadFile();
-                    if (text == null)
+                    foreach (var name in GatewayValues.Names)
                     {
-                        file = new GatewayModelFile { Path = GatewayValues.Location };
-                        file.Errors.Add("The imported model file cannot be decrypted by this Windows account. Import it again.");
+                        var text = GatewayValues.ReadFile(name);
+                        GatewayModelFile one;
+                        if (text == null)
+                        {
+                            one = new GatewayModelFile { Path = GatewayValues.Location(name) };
+                            one.Errors.Add("The imported model file cannot be decrypted by this Windows account. Import it again.");
+                        }
+                        else one = GatewayModelFile.Parse(text, GatewayValues.Location(name), env);
+                        one.Name = name;
+                        files.Add(one);
                     }
-                    else file = GatewayModelFile.Parse(text, GatewayValues.Location, env);
                 }
                 else
                 {
                     if (path == null && !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(GatewayModelFile.PathVariable))) source = "environment";
                     if (path == null) path = GatewayModelFile.ResolvePath(Settings.RootDirectory, null);
-                    if (path != null) file = GatewayModelFile.Load(path, env);
+                    if (path != null)
+                    {
+                        var one = GatewayModelFile.Load(path, env);
+                        one.Name = System.IO.Path.GetFileNameWithoutExtension(path);
+                        files.Add(one);
+                    }
                 }
+                var file = files.Count == 0 ? null : GatewayModelFile.Combine(files);
 
                 var providers = new List<ProviderConfig>();
-                if (file != null && file.Ok)
+                if (file != null)
                 {
+                    // Only files without problems contribute providers (Parse and Combine leave the others empty).
                     // Tokens are not copied into the providers: UpstreamClient asks Lazarette or the environment per request.
                     providers.AddRange(file.Providers);
                 }
@@ -211,6 +226,7 @@ namespace Fairlead.Core.Host
                     Config.SetManaged(new ProviderConfig[0]);
                 }
                 GatewayModels = file;
+                GatewayFiles = files;
                 GatewaySource = file == null ? null : source;
                 if (file == null) return;
                 foreach (var line in file.Summary()) Log.Info(file.Ok ? "GATEWAY_MODELS" : "GATEWAY_MODELS_INVALID", line.Trim());
