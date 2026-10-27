@@ -92,7 +92,29 @@ namespace Fairlead.Core.Tests
             Assert.Equal(new[] { "message_start", "content_block_start", "content_block_delta", "content_block_stop", "content_block_start", "content_block_delta", "content_block_delta", "content_block_stop", "message_delta", "message_stop" }, names);
             Assert.Contains("\"stop_reason\":\"tool_use\"", events[8]);
             Assert.Contains("\"output_tokens\":7", events[8]);
+            Assert.Contains("\"input_tokens\":4", events[8]); // message_start went out before the usage chunk
             Assert.Equal("Hi", s.Text.ToString());
+        }
+
+        [Fact]
+        public void SystemMessagesInsideTheConversationBecomeUserTurnsAfterToolResults()
+        {
+            // The shape Claude Code sends: system notes between turns, one of them between a tool call and its result.
+            var a = JObject.Parse(@"{
+              ""model"": ""claude-x"", ""max_tokens"": 64, ""system"": ""Be brief."",
+              ""messages"": [
+                {""role"":""user"",""content"":[{""type"":""text"",""text"":""Read notes.txt""}]},
+                {""role"":""system"",""content"":""Plan mode is off.""},
+                {""role"":""system"",""content"":""""},
+                {""role"":""assistant"",""content"":[{""type"":""tool_use"",""id"":""t1"",""name"":""Read"",""input"":{}}]},
+                {""role"":""system"",""content"":[{""type"":""text"",""text"":""<total_tokens>99 left</total_tokens>""}]},
+                {""role"":""user"",""content"":[{""type"":""tool_result"",""tool_use_id"":""t1"",""content"":""line one""}]}
+              ]}");
+            var msgs = (JArray)Translate.AnthropicToOpenAiRequest(a, "qwen", false, true)["messages"]!;
+            Assert.Equal(new[] { "system", "user", "user", "assistant", "tool", "user" }, msgs.Select(m => (string?)m["role"]).ToArray());
+            Assert.Equal("Plan mode is off.", (string?)msgs[2]["content"]);
+            Assert.Equal("t1", (string?)msgs[4]["tool_call_id"]);
+            Assert.Equal("<total_tokens>99 left</total_tokens>", (string?)msgs[5]["content"]);
         }
 
         [Fact]
