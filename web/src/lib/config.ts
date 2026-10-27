@@ -80,3 +80,19 @@ async function lazarette(promise: Promise<unknown>): Promise<LazaretteView> {
 export const pairLazarette = (code: string) => lazarette(post('/api/lazarette/pair', { code }));
 export const unpairLazarette = () => lazarette(del('/api/lazarette/pair'));
 export const refreshLazarette = () => lazarette(post('/api/lazarette/refresh'));
+
+export type CurlImportResult = ImportResult & { fileName?: string; target?: string; format?: string; tokenVariable?: string };
+
+/** Builds a gateway from a pasted curl command (URL, format and model from it; the key only by its variable name). */
+export async function importGatewayCurl(curl: string, tokenVariable?: string): Promise<CurlImportResult> {
+  const r = await post<CurlImportResult>('/api/gateway/curl', { curl, tokenVariable: tokenVariable || null });
+  invalidate('/api/config');
+  invalidate('/api/status');
+  invalidate('/api/lazarette');
+  return r;
+}
+
+export type GatewayTest = { ok: boolean; verdict: string; message: string; status?: number | null; detail?: string | null; text?: string | null; ms?: number | null };
+
+/** Sends one short prompt straight to provider/model and explains what failed. */
+export const testGatewayModel = (target: string) => post<GatewayTest>('/api/gateway/test', { target });

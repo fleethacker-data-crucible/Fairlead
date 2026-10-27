@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { LuCloud, LuHardDrive, LuPlus, LuRefreshCw, LuTrash2 } from 'react-icons/lu';
 import { GatewayCard } from '../components/gateway';
+import { GatewayTestButton } from '../components/gateway-test';
 import { LazaretteCard } from '../components/lazarette';
 import { describeModel } from '../components/targets';
 import { Button, Checkbox, ConfirmDialog, Empty, Field, Input, Notice, Page, Pill, Section, Select, useToast } from '../components/ui';
@@ -78,6 +79,7 @@ function ManagedProvider({ provider, probeMs }: { provider: Provider; probeMs: n
   const toast = useToast();
   const [test, setTest] = useState<TestResult | null>(null);
   const [busy, setBusy] = useState(false);
+  const [testModel, setTestModel] = useState(provider.models[0]?.id ?? '');
   const check = async () => {
     setBusy(true);
     try { setTest(await testProvider(provider.id)); } catch (e) { toast.push('err', describeError(e)); } finally { setBusy(false); }
@@ -85,7 +87,7 @@ function ManagedProvider({ provider, probeMs }: { provider: Provider; probeMs: n
   return (
     <Section title={<span className="flex items-center gap-2">{provider.name}<span className="mono text-ink-3">{provider.id}</span></span>}
       aside={<Button size="sm" busy={busy} onClick={() => void check()}>Check reachability</Button>}>
-      <Notice tone="info" className="mx-4 mt-4">From the AI gateway model file. To change endpoints or models, import a new version above; it takes effect at once. The address is set above; the token comes from Lazarette or the environment, never from this page.</Notice>
+      <Notice tone="info" className="mx-4 mt-4">From an AI gateway model file. To change endpoints or models, import a new version above; it takes effect at once. The address is set above; the token comes from Lazarette or the environment, never from this page.</Notice>
       <dl className="grid gap-x-6 gap-y-2 px-4 py-4 text-[13px] md:grid-cols-2">
         <div><dt className="text-ink-3">API style</dt><dd>OpenAI Responses (called without streaming)</dd></div>
         <div><dt className="text-ink-3">Endpoint path</dt><dd className="mono">{provider.path ?? ''}</dd></div>
@@ -95,7 +97,17 @@ function ManagedProvider({ provider, probeMs }: { provider: Provider; probeMs: n
         <div><dt className="text-ink-3">Last probe</dt><dd>{ms(probeMs)}</dd></div>
         <div className="md:col-span-2"><dt className="text-ink-3">Models ({provider.models.length})</dt><dd className="mono">{provider.models.map((m) => m.id).join(', ')}</dd></div>
       </dl>
-      {test ? <Notice tone={test.ok ? 'ok' : 'err'} className="mx-4 mb-3">{test.ok ? `Reachable in ${ms(test.ms)}. The token is checked by the first real request.` : `${test.error} (${test.kind})`}</Notice> : null}
+      {test ? <Notice tone={test.ok ? 'ok' : 'err'} className="mx-4 mb-3">{test.ok ? `Reachable in ${ms(test.ms)}. Send a test prompt to check the key.` : `${test.error} (${test.kind})`}</Notice> : null}
+      <div className="hairline flex flex-col gap-2 px-4 py-3">
+        {provider.models.length > 1 ? (
+          <label className="flex items-center gap-2 text-[13px]"><span className="text-ink-2">Model to test</span>
+            <select className="h-7 rounded-ctl border border-line px-1 mono text-[12.5px]" value={testModel} onChange={(e) => setTestModel(e.target.value)}>
+              {provider.models.map((m) => <option key={m.id} value={m.id}>{m.id}</option>)}
+            </select>
+          </label>
+        ) : null}
+        {testModel ? <GatewayTestButton key={testModel} target={`${provider.id}/${testModel}`} /> : null}
+      </div>
     </Section>
   );
 }
