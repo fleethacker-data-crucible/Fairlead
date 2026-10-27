@@ -1,6 +1,6 @@
 Yes. Your AI needs the endpoint construction contract: base URL source, HTTP method, path, headers, and request-body shape.
 
-Use this YAML section in the configuration file. It contains no hardcoded .mil domain.
+Use this YAML section in the configuration file. It contains no hardcoded host.
 
 # The application must obtain this value from its runtime environment.
 # Example runtime value format: https://approved-gateway.example
