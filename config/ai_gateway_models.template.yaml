@@ -1,6 +1,6 @@
 # Fairlead AI gateway model file, made from model-curls.md (same models, same order).
 #
-# TO FILL IN (GenAI.mil): replace the two <...> placeholders below with the full https address of each endpoint,
+# TO FILL IN (your gateway operator): replace the two <...> placeholders below with the full https address of each endpoint,
 # exactly as in the original curl commands. Change nothing else. Do NOT put the token here: Fairlead gets
 # DATABRICKS_TOKEN from Lazarette (or the environment variable of that name).
 #
