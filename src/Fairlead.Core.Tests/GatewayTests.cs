@@ -211,6 +211,33 @@ namespace Fairlead.Core.Tests
         }
 
         [Fact]
+        public async Task CliReachesTheAdminApiThroughItsDpapiTokenFile()
+        {
+            var host = Start(new FakeUpstream(), null, out _);
+            var file = Path.Combine(_dir, CliAccess.FileName);
+            Assert.True(File.Exists(file));
+            var text = File.ReadAllText(file);
+            Assert.DoesNotContain(host.CliToken, text);
+            Assert.DoesNotContain(host.SessionToken, text);
+            var info = JObject.Parse(text);
+            Assert.Equal(host.Port, (int)info["port"]!);
+            var token = CliAccess.Unprotect((string?)info["token"]);
+            Assert.Equal(host.CliToken, token);
+
+            var req = new HttpRequestMessage(HttpMethod.Get, host.BaseUrl + "/api");
+            req.Headers.TryAddWithoutValidation(FairleadHost.SessionHeader, token);
+            var r = await _http.SendAsync(req);
+            Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+            var routes = JObject.Parse(await r.Content.ReadAsStringAsync())["routes"]!.Select(x => (string?)x).ToList();
+            Assert.Contains("GET /api/status", routes);
+            Assert.Contains("POST /api/providers/{id}/test", routes);
+            Assert.Equal(HttpStatusCode.Unauthorized, (await _http.GetAsync(host.BaseUrl + "/api")).StatusCode);
+
+            host.Stop();
+            Assert.False(File.Exists(file));
+        }
+
+        [Fact]
         public async Task ClientKeyIsShownOnceAndThenWorks()
         {
             var fake = new FakeUpstream().On("groq.test", (r, b) => FakeUpstream.Json(HttpStatusCode.OK, FakeUpstream.OpenAiAnswer("ok")));

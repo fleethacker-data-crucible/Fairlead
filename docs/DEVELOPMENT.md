@@ -11,6 +11,7 @@
 
 ```
 Launch-Fairlead.bat          the only launcher
+fairlead.cmd                 the command line (scripts/fairlead.ps1) over the admin API; docs/CLI.md
 module/Fairlead/             PowerShell module (launcher, tray)
 scripts/                     Start-, Stop-Fairlead, process helpers, Register-FairleadStartup
 src/Fairlead.Core/           C# 5 core, shipped as source (the .csproj is only the C# 5 check build)
@@ -47,6 +48,7 @@ UI work: `cd web; npm run dev` rebuilds on save; reload the browser.
 |---|---|
 | An OpenAI-compatible provider | Add a preset in `Config/ProviderPresets.cs`. Nothing else. |
 | A new wire dialect (Gemini native, Bedrock, Ollama `/api/chat`) | Add a `ProviderKind`, endpoint mapping in `UpstreamClient.EndpointUri`, and translators next to `Protocol/Translate.cs`. Keep `UpstreamClient` the only outbound HTTP (a Pester rule checks it). |
+| An admin capability | A route in `Host/ApiRoutes.cs` (it shows up in `GET /api`), a command in `scripts/fairlead.ps1`, a row in `docs/API.md` and `docs/CLI.md`. The UI, the CLI and scripts all go through the API. |
 | An inbound API (Ollama-compatible, Responses API) | A route in `Host/ApiRoutes.cs` → a handler in `GatewayEngine`, translating into one of the two dialects. |
 | A routing signal | A field on `RequestProfile`, a condition on `RuleCondition`, a check in `RoutePlanner.Matches`, a field in the Rules editor. |
 | A smarter classifier (embedding or LLM judge) | Compute it in `RequestProfile.From`, expose it as a condition; keep it optional and fast (it runs on every request). |
