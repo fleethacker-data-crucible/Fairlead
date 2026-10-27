@@ -1,14 +1,27 @@
-// The live routing map's model: which leads exist (from config and status), where they sit, and what each
-// request in flight has done so far (from /api/live events). Pure functions only, so they run under node:test.
+// The live routing map's model: one lead per provider (from config and status), where everything sits, and what
+// each request in flight has done so far (from /api/live events). Pure functions only, so they run under node:test.
 import type { Config, Status } from './schemas';
 
 export const NO_KEY = '(no key)';
 export const MORE = '(more)';
 
-export type TargetState = 'ready' | 'kedge' | 'down' | 'paused' | 'disabled' | 'missing' | 'nokey' | 'unknown';
+/** How a provider's lead looks at rest. 'broken' is red and frayed; it is never drawn as merely idle. */
+export type ProviderHealth = 'ok' | 'broken' | 'kedge' | 'disabled' | 'unknown';
 
 export type ClientNode = { id: string; label: string };
-export type RouteNode = {
+export type ProviderNode = {
+  id: string;
+  name: string;
+  local: boolean;
+  health: ProviderHealth;
+  /** Why it is broken, parked or disabled, in a word or two. */
+  why: string | null;
+  /** Routes that list one of its models. */
+  routes: string[];
+  /** Not configured: traffic named it (a deleted provider, or a target typed by hand). */
+  dynamic: boolean;
+};
+export type RouteInfo = {
   id: string;
   strategy: string;
   targets: string[];
@@ -16,38 +29,41 @@ export type RouteNode = {
   empty: boolean;
   auto: boolean;
   localFallback: boolean;
-  /** Not in config: a model named a provider target directly, or the route was deleted. */
   dynamic: boolean;
 };
-export type TargetNode = { id: string; provider: string; model: string; local: boolean; state: TargetState; dynamic: boolean };
-export type Problem = { tone: 'err' | 'warn'; route?: string; text: string };
+export type Problem = { tone: 'err' | 'warn'; route?: string; short: string; text: string };
 
 export type Graph = {
   clients: ClientNode[];
-  routes: RouteNode[];
-  targets: TargetNode[];
-  /** Routes an auto route can choose (rules plus the auto fallback). */
-  autoEdges: Array<{ from: string; to: string }>;
+  providers: ProviderNode[];
+  routes: RouteInfo[];
   problems: Problem[];
   kedge: boolean;
-  hiddenClients: number;
-  hiddenTargets: number;
 };
 
 export type Seen = { clients: string[]; routes: string[]; targets: Array<{ id: string; local: boolean }> };
 
 const MAX_CLIENTS = 8;
-const MAX_TARGETS = 14;
+const MAX_PROVIDERS = 10;
 
-function providerOf(ref: string) {
+export function providerOf(ref: string) {
   const i = ref.indexOf('/');
   return i < 0 ? { provider: ref, model: '' } : { provider: ref.slice(0, i), model: ref.slice(i + 1) };
 }
 
-/** Builds the leads from the real config: one per client key, per route, per route target. Nothing is fixed. */
+/** Bead colour per route: smart, fast and local are fixed so they read the same everywhere; anything else is ink. */
+export function routeTone(route: string | null | undefined): string {
+  switch ((route ?? '').toLowerCase()) {
+    case 'smart': return 'var(--info)';
+    case 'fast': return 'var(--brass)';
+    case 'local': return 'var(--accent)';
+    default: return 'var(--ink)';
+  }
+}
+
+/** Builds the leads from the real config: one per client key and one per provider. Nothing is fixed. */
 export function buildGraph(config: Config, status: Status | undefined, seen: Seen = { clients: [], routes: [], targets: [] }): Graph {
   const kedge = status?.connectivity.kedge ?? false;
-  const providers = new Map(config.providers.map((p) => [p.id, p]));
   const health = new Map((status?.providers ?? []).map((p) => [p.id, p]));
 
   const clientIds = config.clients.map((c) => c.name);
@@ -55,77 +71,62 @@ export function buildGraph(config: Config, status: Status | undefined, seen: See
   if ((!config.requireClientKey || seen.clients.includes(NO_KEY)) && !clientIds.includes(NO_KEY)) clientIds.push(NO_KEY);
   const shownClients = clientIds.length > MAX_CLIENTS ? clientIds.slice(0, MAX_CLIENTS - 1) : clientIds;
   const clients: ClientNode[] = shownClients.map((id) => ({ id, label: id === NO_KEY ? 'no client key' : id }));
-  const hiddenClients = clientIds.length - shownClients.length;
-  if (hiddenClients > 0) clients.push({ id: MORE, label: `+${hiddenClients} more` });
+  if (clientIds.length > shownClients.length) clients.push({ id: MORE, label: `+${clientIds.length - shownClients.length} more` });
 
-  // auto routes first (they hand off to the others), then config order, then routes only traffic revealed.
-  const configured = [...config.routes].sort((a, b) => Number(b.strategy === 'auto') - Number(a.strategy === 'auto'));
-  const routes: RouteNode[] = configured.map((r) => ({
-    id: r.id,
-    strategy: r.strategy,
-    targets: r.strategy === 'auto' ? [] : r.targets,
-    empty: r.strategy !== 'auto' && r.targets.length === 0,
-    auto: r.strategy === 'auto',
-    localFallback: r.localFallback,
-    dynamic: false,
+  const routes: RouteInfo[] = config.routes.map((r) => ({
+    id: r.id, strategy: r.strategy, targets: r.strategy === 'auto' ? [] : r.targets,
+    empty: r.strategy !== 'auto' && r.targets.length === 0, auto: r.strategy === 'auto', localFallback: r.localFallback, dynamic: false,
   }));
   for (const id of seen.routes) {
     if (routes.some((r) => r.id.toLowerCase() === id.toLowerCase())) continue;
     routes.push({ id, strategy: 'direct', targets: id.includes('/') ? [id] : [], empty: false, auto: false, localFallback: true, dynamic: true });
   }
+  const usedBy = (provider: string) => routes.filter((r) => !r.dynamic && r.targets.some((t) => providerOf(t).provider === provider)).map((r) => r.id);
 
-  const autoEdges: Graph['autoEdges'] = [];
-  for (const r of routes.filter((x) => x.auto)) {
-    const to = new Set<string>();
-    for (const rule of config.rules) if (rule.enabled) to.add(rule.route);
-    to.add(config.autoFallbackRoute);
-    for (const t of to) if (t !== r.id && routes.some((x) => x.id === t)) autoEdges.push({ from: r.id, to: t });
-  }
-
-  // Targets grouped by the first route that uses them, so leads cross as little as possible.
-  const targetIds: string[] = [];
-  for (const r of routes) for (const t of r.targets) if (!targetIds.includes(t)) targetIds.push(t);
-  for (const t of seen.targets) if (!targetIds.includes(t.id)) targetIds.push(t.id);
-  const stateOf = (ref: string): { local: boolean; state: TargetState } => {
-    const { provider } = providerOf(ref);
-    const p = providers.get(provider);
-    const fromSeen = seen.targets.find((t) => t.id === ref);
-    if (!p) return { local: fromSeen?.local ?? false, state: 'missing' };
-    const h = health.get(provider);
-    if (!p.enabled) return { local: p.local, state: 'disabled' };
-    if (kedge && !p.local) return { local: p.local, state: 'kedge' };
-    if (h?.breaker === 'open') return { local: p.local, state: 'paused' };
-    if (!p.local && p.keySource === 'none') return { local: p.local, state: 'nokey' };
-    if (h?.reachable === false || h?.authOk === false) return { local: p.local, state: 'down' };
-    if (h?.reachable === true) return { local: p.local, state: 'ready' };
-    return { local: p.local, state: 'unknown' };
-  };
-  const shownTargets = targetIds.length > MAX_TARGETS ? targetIds.slice(0, MAX_TARGETS - 1) : targetIds;
-  const targets: TargetNode[] = shownTargets.map((id) => {
-    const { provider, model } = providerOf(id);
-    return { id, provider, model, ...stateOf(id), dynamic: !routes.some((r) => r.targets.includes(id)) };
+  // Local first: that lead is the Kedge anchor and is always drawn. Then cloud in config order, then what traffic revealed.
+  const configured = [...config.providers].sort((a, b) => Number(b.local) - Number(a.local));
+  const providers: ProviderNode[] = configured.map((p) => {
+    const h = health.get(p.id);
+    let state: ProviderHealth = h?.reachable === true ? 'ok' : 'unknown';
+    let why: string | null = null;
+    if (!p.enabled) { state = 'disabled'; why = 'disabled'; }
+    else if (kedge && !p.local) { state = 'kedge'; why = 'Kedge mode'; }
+    else if (h?.breaker === 'open') { state = 'broken'; why = 'paused after failures'; }
+    else if (h?.authOk === false) { state = 'broken'; why = 'key rejected'; }
+    else if (!p.local && p.keySource === 'none') { state = 'broken'; why = 'no key'; }
+    else if (h?.reachable === false) { state = 'broken'; why = p.local ? 'not running' : 'unreachable'; }
+    return { id: p.id, name: p.name, local: p.local, health: state, why, routes: usedBy(p.id), dynamic: false };
   });
-  const hiddenTargets = targetIds.length - shownTargets.length;
-  if (hiddenTargets > 0) targets.push({ id: MORE, provider: '', model: `+${hiddenTargets} more`, local: false, state: 'unknown', dynamic: false });
-
-  return { clients, routes, targets, autoEdges, problems: problems(config, routes, targets), kedge, hiddenClients, hiddenTargets };
+  for (const t of seen.targets) {
+    const { provider } = providerOf(t.id);
+    if (!providers.some((p) => p.id === provider)) providers.push({ id: provider, name: provider, local: t.local, health: 'broken', why: 'not configured', routes: usedBy(provider), dynamic: true });
+  }
+  if (providers.length > MAX_PROVIDERS) {
+    const extra = providers.length - (MAX_PROVIDERS - 1);
+    providers.splice(MAX_PROVIDERS - 1, providers.length, { id: MORE, name: `+${extra} more`, local: false, health: 'unknown', why: null, routes: [], dynamic: false });
+  }
+  return { clients, providers, routes, problems: problems(config, routes), kedge };
 }
 
-function problems(config: Config, routes: RouteNode[], targets: TargetNode[]): Problem[] {
+function problems(config: Config, routes: RouteInfo[]): Problem[] {
   const out: Problem[] = [];
   const local = routes.find((r) => r.id === 'local');
   const localEmpty = !local || local.empty;
-  const empty = routes.filter((r) => r.empty && !r.dynamic);
-  for (const r of empty) {
-    let where: string;
-    if (r.id === 'local') where = 'Fairlead picks whatever model it finds on a running local server, or answers 503 when there is none.';
-    else if (!r.localFallback) where = 'Requests to it fail with 503.';
-    else if (localEmpty) where = "Requests to it fall back to 'local', which is empty too, so they go to whatever model Fairlead finds on a local server.";
-    else where = `Requests to it fall back to 'local' (${local!.targets.slice(0, 2).join(', ')}${local!.targets.length > 2 ? '…' : ''}).`;
-    out.push({ tone: r.id === config.defaultRoute || r.id === config.autoFallbackRoute || r.id === 'local' ? 'err' : 'warn', route: r.id, text: `Route '${r.id}' has no targets. ${where}` });
-  }
-  for (const t of targets.filter((x) => x.state === 'missing' && !x.dynamic)) {
-    out.push({ tone: 'warn', text: `Target ${t.id} names provider '${t.provider}', which is not configured; it is skipped.` });
+  for (const r of routes.filter((x) => x.empty && !x.dynamic)) {
+    let short: string, text: string;
+    if (r.id === 'local') {
+      short = 'local → no targets, using any local model';
+      text = "Route 'local' has no targets. Fairlead picks whatever model it finds on a running local server, or answers 503 when there is none.";
+    } else if (!r.localFallback) {
+      short = `${r.id} → no targets, requests fail`;
+      text = `Route '${r.id}' has no targets and no local fallback. Requests to it fail with 503.`;
+    } else {
+      short = `${r.id} → no targets, falling back to local`;
+      text = localEmpty
+        ? `Route '${r.id}' has no targets. Requests to it fall back to 'local', which is empty too, so they go to whatever model Fairlead finds on a local server.`
+        : `Route '${r.id}' has no targets. Requests to it fall back to 'local' (${local!.targets.slice(0, 2).join(', ')}${local!.targets.length > 2 ? '…' : ''}).`;
+    }
+    out.push({ tone: r.id === config.defaultRoute || r.id === config.autoFallbackRoute || r.id === 'local' || !r.localFallback ? 'err' : 'warn', route: r.id, short, text });
   }
   return out;
 }
@@ -133,55 +134,57 @@ function problems(config: Config, routes: RouteNode[], targets: TargetNode[]): P
 // ---------- layout ----------
 
 export const W = 1000;
-export const ROW = 40;
-export const NODE_H = 30;
+export const ROW = 44;
+export const NODE_H = 32;
 export const COL = {
-  client: { x: 8, w: 168 },
-  fitting: { cx: 268, r: 18 },
-  route: { x: 372, w: 168 },
-  target: { x: 704, w: 288 },
+  client: { x: 8, w: 176 },
+  fitting: { cx: 380, r: 22 },
+  provider: { x: 700, w: 292 },
 } as const;
 const PAD = 24;
+export const WARN_LINE = 18;
 
 export type Layout = {
   height: number;
   fitting: { x: number; y: number };
   client: Map<string, number>;
-  route: Map<string, number>;
-  target: Map<string, number>;
+  provider: Map<string, number>;
 };
 
 export function layout(g: Graph): Layout {
-  const rows = Math.max(g.clients.length, g.routes.length, g.targets.length, 3);
-  const height = rows * ROW + PAD * 2;
+  const rows = Math.max(g.clients.length, g.providers.length, 2);
+  // Room under the fairlead for its label and one line per empty-route warning.
+  const below = COL.fitting.r + 24 + g.problems.length * WARN_LINE;
+  // The nodes fill the top band; the warnings hang below the fairlead and only add height under it.
+  const band = rows * ROW + PAD * 2;
+  const fy = band / 2;
+  const height = Math.max(band, fy + below + PAD);
   const place = (ids: string[]) => {
-    const top = (height - ids.length * ROW) / 2 + ROW / 2;
+    const top = (band - ids.length * ROW) / 2 + ROW / 2;
     return new Map(ids.map((id, i) => [id, top + i * ROW]));
   };
-  return { height, fitting: { x: COL.fitting.cx, y: height / 2 }, client: place(g.clients.map((c) => c.id)), route: place(g.routes.map((r) => r.id)), target: place(g.targets.map((t) => t.id)) };
+  return { height, fitting: { x: COL.fitting.cx, y: fy }, client: place(g.clients.map((c) => c.id)), provider: place(g.providers.map((p) => p.id)) };
 }
 
-const curve = (x1: number, y1: number, x2: number, y2: number) => {
+const curve = (x1: number, y1: number, x2: number, y2: number, sag = 0) => {
   const mx = (x1 + x2) / 2;
-  return `M${x1} ${y1} C${mx} ${y1} ${mx} ${y2} ${x2} ${y2}`;
+  return `M${x1} ${y1} C${mx} ${y1 + sag} ${mx} ${y2 + sag} ${x2} ${y2}`;
 };
+
+export const FRAY = 44;
 
 export const paths = {
   clientToFitting: (l: Layout, client: string) => curve(COL.client.x + COL.client.w, l.client.get(client) ?? l.fitting.y, l.fitting.x - COL.fitting.r, l.fitting.y),
-  fittingToRoute: (l: Layout, route: string) => curve(l.fitting.x + COL.fitting.r, l.fitting.y, COL.route.x, l.route.get(route) ?? l.fitting.y),
-  routeToTarget: (l: Layout, route: string, target: string) => curve(COL.route.x + COL.route.w, l.route.get(route) ?? 0, COL.target.x, l.target.get(target) ?? 0),
-  /** auto hands off to the route its rules chose: an arc on the left of the route column. */
-  autoArc: (l: Layout, from: string, to: string) => {
-    const y1 = l.route.get(from) ?? 0, y2 = l.route.get(to) ?? 0;
-    const bulge = COL.route.x - 22 - Math.min(40, Math.abs(y2 - y1) / 6);
-    return `M${COL.route.x} ${y1} C${bulge} ${y1} ${bulge} ${y2} ${COL.route.x} ${y2}`;
+  /** The fairlead to a provider. Slack (Kedge) sags; a broken lead stops short of the provider. */
+  lead: (l: Layout, provider: string, mode: 'taut' | 'slack' | 'short' = 'taut') => {
+    const y = l.provider.get(provider) ?? l.fitting.y;
+    const end = mode === 'short' ? COL.provider.x - FRAY : COL.provider.x;
+    return curve(l.fitting.x + COL.fitting.r, l.fitting.y, end, y, mode === 'slack' ? 34 : 0);
   },
-  /** An empty or dead route falls back to 'local': an arc on the right of the route column. */
-  fallbackArc: (l: Layout, from: string, to: string) => {
-    const y1 = l.route.get(from) ?? 0, y2 = l.route.get(to) ?? 0;
-    const right = COL.route.x + COL.route.w;
-    const bulge = right + 26 + Math.min(40, Math.abs(y2 - y1) / 6);
-    return `M${right} ${y1} C${bulge} ${y1} ${bulge} ${y2} ${right} ${y2}`;
+  /** Loose strands at the end of a broken lead. */
+  fray: (l: Layout, provider: string) => {
+    const x = COL.provider.x - FRAY, y = l.provider.get(provider) ?? 0;
+    return `M${x} ${y} l13 -7 M${x} ${y} l16 1 M${x} ${y} l12 8`;
   },
 };
 
@@ -221,9 +224,9 @@ function outcomeState(outcome: string): AttemptState {
   return 'failed';
 }
 
-/** Where a target's lead hangs from: the route itself, or 'local' after a fallback (inferred from config for replays). */
+/** Which route a leg belongs to: the request's route, or 'local' after a fallback (inferred from config for replays). */
 export function viaOf(g: Graph, f: Flight, a: FlightAttempt): string | null {
-  if (a.via === 'discovered') return f.route;
+  if (a.via === 'discovered') return 'local';
   if (a.via) return a.via;
   const route = g.routes.find((r) => r.id === f.route);
   if (route && !route.targets.includes(a.target) && g.routes.find((r) => r.id === 'local')?.targets.includes(a.target)) return 'local';

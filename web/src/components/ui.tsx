@@ -31,7 +31,7 @@ const button = cva(
   },
 );
 
-type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & VariantProps<typeof button> & { busy?: boolean };
+type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & VariantProps<typeof button> & { busy?: boolean; ref?: React.Ref<HTMLButtonElement> };
 
 export function Button({ className, variant, size, busy, children, disabled, ...rest }: ButtonProps) {
   return (
