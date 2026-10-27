@@ -578,7 +578,7 @@ Endpoint("gw_mlflow", "/ai-gateway/mlflow/v1/responses") +
             Assert.Null(sent["messages"]);
         }
 
-        /// <summary>config/ai_gateway_models.template.yaml with its placeholders filled in, as GenAI.mil will.</summary>
+        /// <summary>config/ai_gateway_models.template.yaml with its placeholders filled in, as your gateway operator will.</summary>
         private string FilledTemplate()
         {
             var text = File.ReadAllText(Path.Combine(CoreSourceTests.RepoRoot(), "config", "ai_gateway_models.template.yaml"));
