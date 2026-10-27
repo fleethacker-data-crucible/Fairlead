@@ -1,9 +1,10 @@
 import { useRef, useState } from 'react';
-import { LuFileUp, LuTrash2 } from 'react-icons/lu';
+import { LuFileUp, LuTerminal, LuTrash2 } from 'react-icons/lu';
 import { describeError } from '../lib/api';
-import { importGatewayFile, removeGatewayFile, saveGatewayValues } from '../lib/config';
+import { importGatewayCurl, importGatewayFile, removeGatewayFile, saveGatewayValues } from '../lib/config';
 import type { GatewayVariable, GatewayView } from '../lib/schemas';
-import { Button, ConfirmDialog, Field, Input, Notice, Pill, Section, useToast } from './ui';
+import { Button, ConfirmDialog, Field, Input, Notice, Pill, Section, Textarea, useToast } from './ui';
+import { GatewayTestButton } from './gateway-test';
 
 const sourceText: Record<string, string> = {
   imported: 'Imported here; kept encrypted for your Windows account in Fairlead\'s data folder, never in the app folder.',
@@ -22,6 +23,11 @@ export function GatewayCard({ gateway }: { gateway: GatewayView | null | undefin
   const [refused, setRefused] = useState<string[] | null>(null);
   const [values, setValues] = useState<Record<string, string>>({});
   const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
+  const [curlOpen, setCurlOpen] = useState(false);
+  const [curl, setCurl] = useState('');
+  const [tokenVar, setTokenVar] = useState('');
+  const [curlNotes, setCurlNotes] = useState<string[]>([]);
+  const [curlTarget, setCurlTarget] = useState<string | null>(null);
   const g = gateway ?? null;
   const canImport = g?.canImport ?? true;
 
@@ -42,6 +48,16 @@ export function GatewayCard({ gateway }: { gateway: GatewayView | null | undefin
     if (fileInput.current) fileInput.current.value = '';
   };
 
+  const fromCurl = () => run('curl', async () => {
+    const r = await importGatewayCurl(curl, tokenVar.trim());
+    if (!r.saved) { setRefused(r.errors ?? ['The command was not accepted.']); setCurlNotes([]); setCurlTarget(null); return; }
+    setRefused(null);
+    setCurlNotes(r.warnings ?? []);
+    setCurlTarget(r.target ?? null);
+    setCurl('');
+    toast.push('ok', `Added ${r.target ?? 'the gateway'} from the curl command.`);
+  });
+
   const editable = (g?.variables ?? []).filter((v) => v.kind !== 'token');
   const dirty = Object.values(values).some((v) => v.trim() !== '');
   const save = () => run('save', async () => {
@@ -57,6 +73,7 @@ export function GatewayCard({ gateway }: { gateway: GatewayView | null | undefin
       aside={canImport ? <>
         <input ref={fileInput} type="file" accept=".yaml,.yml,.txt" className="sr-only" id="gateway-file" aria-label="AI gateway model file" onChange={(e) => onFile(e.target.files?.[0])} />
         <Button size="sm" variant={g?.present ? 'default' : 'primary'} busy={busy === 'import'} onClick={() => fileInput.current?.click()}><LuFileUp size={14} />Import model file</Button>
+        <Button size="sm" aria-expanded={curlOpen} onClick={() => setCurlOpen(!curlOpen)}><LuTerminal size={14} />Add from curl</Button>
         {g?.imported ? <Button size="sm" variant="danger" onClick={() => setConfirmRemove('*')}><LuTrash2 size={14} />Remove all</Button> : null}
       </> : undefined}>
       <div className="flex flex-col gap-3 px-4 py-4 text-[13px]">
@@ -83,6 +100,21 @@ export function GatewayCard({ gateway }: { gateway: GatewayView | null | undefin
             ) : null}
           </>
         )}
+        {curlOpen && canImport ? (
+          <div className="flex flex-col gap-2 rounded-ctl border border-line p-3">
+            <Field label="Curl command" hint="Paste the gateway's own example. Fairlead takes the URL, the model and the format (Responses or Chat Completions) from it; a key in the text is ignored and never stored.">
+              <Textarea rows={6} className="mono text-[12px]" spellCheck={false} value={curl} onChange={(e) => setCurl(e.target.value)} placeholder={'curl https://gateway.example/.../responses -H "Authorization: Bearer $DATABRICKS_TOKEN" -d \'{"model": "...", "input": [...]}\''} />
+            </Field>
+            <div className="flex flex-wrap items-end gap-2">
+              <Field label="Key variable (if the command does not name one)" className="w-72">
+                <Input className="mono" value={tokenVar} placeholder="AI_ENDPOINT_TOKEN" onChange={(e) => setTokenVar(e.target.value)} />
+              </Field>
+              <Button variant="primary" disabled={!curl.trim()} busy={busy === 'curl'} onClick={() => void fromCurl()}>Add gateway</Button>
+            </div>
+            {curlNotes.length ? <Notice tone="warn"><ul className="list-disc pl-5">{curlNotes.map((n) => <li key={n}>{n}</li>)}</ul></Notice> : null}
+            {curlTarget ? <GatewayTestButton target={curlTarget} /> : null}
+          </div>
+        ) : null}
         {!canImport ? <Notice tone="info">FAIRLEAD_GATEWAY_CONFIG is set, so the file comes from that path and cannot be imported here.</Notice> : null}
         {refused ? (
           <Notice tone="err">That file was not imported, and nothing was saved:

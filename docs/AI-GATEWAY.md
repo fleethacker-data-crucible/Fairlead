@@ -43,6 +43,19 @@ OpenAI request as is, tool calls and streaming included, with `Authorization: Be
 `AI_ENDPOINT_TOKEN`, from Lazarette or the environment. A chat file's `request_body.required_fields` lists `model`
 and `messages`.
 
+## From a curl command, and testing the key
+
+For debugging, **Providers → AI gateway → Add from curl** takes the gateway's own curl example: Fairlead reads the URL,
+the model and the format (`input` = Responses API, `messages` = Chat Completions) and adds a one-endpoint model file
+named `curl-<model>`. The key is never taken from the text: `Authorization: Bearer $NAME` (or `${NAME:-...}`) only
+names the variable to read it from (Lazarette or the environment); a literal key is ignored, with a warning. A URL
+that is still a placeholder is refused.
+
+**Send a test prompt** (on that panel, and on every gateway provider) sends one short prompt straight to the model,
+with no route or fallback, and says which part is wrong: no key available (nothing is sent), key rejected (401/403),
+wrong address (404), model or request refused (400), unreachable, too slow, the gateway's own error, rate-limited,
+or all fine. The key is never shown.
+
 ## Set it up
 
 1. Open **Providers**. Under **AI gateway**, press **Import model file** and choose the gateway's YAML. A file with a
