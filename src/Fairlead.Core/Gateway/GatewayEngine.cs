@@ -140,6 +140,7 @@ namespace Fairlead.Core.Gateway
             record.Route = plan.Route;
             record.Decision = plan.Decision;
             record.Kedge = plan.Kedge;
+            PublishStart(record, plan, client);
             if (plan.Error != null) return Fail(record, sw, dialect, plan.ErrorStatus, plan.Error);
 
             var outcome = await TryCandidatesAsync(plan, body, dialect, profile, record, sw, request.Aborted).ConfigureAwait(false);
@@ -153,6 +154,7 @@ namespace Fairlead.Core.Gateway
             record.Local = winner.Local;
             record.Failover = record.Attempts.Count(a => a.Outcome != "skipped" && a.Outcome != "lost-race") > 1;
             record.FirstByteMs = (int)response.HeadersAfter.TotalMilliseconds;
+            if (!profile.Stream) PublishFirstByte(record, winner.Ref, (int)sw.ElapsedMilliseconds);
             if (!winner.Local && _health != null) _health.ReportCloudSuccess();
 
             if (profile.Stream) return StreamResponse(response, winner, dialect, profile, record, sw);
@@ -178,6 +180,7 @@ namespace Fairlead.Core.Gateway
             record.Route = plan.Route;
             record.Decision = plan.Decision;
             record.Kedge = plan.Kedge;
+            PublishStart(record, plan, client);
             if (plan.Error != null) return Fail(record, sw, Dialect.OpenAi, plan.ErrorStatus, plan.Error);
             var outcome = await TryCandidatesAsync(plan, body, Dialect.OpenAi, profile, record, sw, request.Aborted, "embeddings").ConfigureAwait(false);
             if (outcome.Error != null) return Fail(record, sw, Dialect.OpenAi, outcome.ErrorStatus, outcome.Error);
@@ -240,6 +243,7 @@ namespace Fairlead.Core.Gateway
                 var retries = new Dictionary<Task<UpstreamResponse>, RetryCount>();
                 var primaryCts = CancellationTokenSource.CreateLinkedTokenSource(aborted);
                 var primaryRetries = new RetryCount();
+                PublishAttemptBegin(record, first, false);
                 Task<UpstreamResponse> primary = SendAsync(first, body, dialect, operation, primaryCts.Token, primaryRetries);
                 cancels[primary] = primaryCts;
                 retries[primary] = primaryRetries;
@@ -263,6 +267,7 @@ namespace Fairlead.Core.Gateway
                             record.Decision.Add("Hedge: " + first.Ref + " slow after " + plan.HedgeAfterMs + " ms; racing " + second.Ref + ".");
                             var backupCts = CancellationTokenSource.CreateLinkedTokenSource(aborted);
                             var backupRetries = new RetryCount();
+                            PublishAttemptBegin(record, second, true);
                             backup = SendAsync(second, body, dialect, operation, backupCts.Token, backupRetries);
                             cancels[backup] = backupCts;
                             retries[backup] = backupRetries;
@@ -283,10 +288,10 @@ namespace Fairlead.Core.Gateway
                         var response = await finished.ConfigureAwait(false);
                         Breaker(entry.Key).Success();
                         _breakers.For(entry.Key.Provider.Id).Success();
-                        record.Attempts.Add(new AttemptRecord { Target = entry.Key.Ref, Outcome = "ok", Status = response.Status, Ms = (int)(sw.ElapsedMilliseconds - started), Retries = retries[finished].Value });
+                        AddAttempt(record, new AttemptRecord { Target = entry.Key.Ref, Outcome = "ok", Status = response.Status, Ms = (int)(sw.ElapsedMilliseconds - started), Retries = retries[finished].Value });
                         foreach (var loser in racing)
                         {
-                            record.Attempts.Add(new AttemptRecord { Target = loser.Key.Ref, Outcome = "lost-race", Ms = (int)(sw.ElapsedMilliseconds - (loser.Key == first ? primaryStarted : backupStarted)) });
+                            AddAttempt(record, new AttemptRecord { Target = loser.Key.Ref, Outcome = "lost-race", Ms = (int)(sw.ElapsedMilliseconds - (loser.Key == first ? primaryStarted : backupStarted)) });
                             DisposeWhenDone(loser.Value, cancels[loser.Value]);
                         }
                         return new Outcome { Winner = entry.Key, Response = response };
@@ -294,7 +299,7 @@ namespace Fairlead.Core.Gateway
                     catch (UpstreamException ex)
                     {
                         last = ex;
-                        record.Attempts.Add(new AttemptRecord { Target = entry.Key.Ref, Outcome = ex.Kind.ToString().ToLowerInvariant(), Status = ex.Status, Ms = (int)(sw.ElapsedMilliseconds - started), Error = ex.Message, Retries = retries[finished].Value });
+                        AddAttempt(record, new AttemptRecord { Target = entry.Key.Ref, Outcome = ex.Kind.ToString().ToLowerInvariant(), Status = ex.Status, Ms = (int)(sw.ElapsedMilliseconds - started), Error = ex.Message, Retries = retries[finished].Value });
                         OnFailure(entry.Key, ex);
                         if (ex.Kind == FailureKind.BadRequest)
                         {
@@ -304,7 +309,7 @@ namespace Fairlead.Core.Gateway
                     }
                     catch (OperationCanceledException)
                     {
-                        record.Attempts.Add(new AttemptRecord { Target = entry.Key.Ref, Outcome = "cancelled", Ms = (int)(sw.ElapsedMilliseconds - started) });
+                        AddAttempt(record, new AttemptRecord { Target = entry.Key.Ref, Outcome = "cancelled", Ms = (int)(sw.ElapsedMilliseconds - started) });
                         foreach (var loser in racing) DisposeWhenDone(loser.Value, cancels[loser.Value]);
                         return new Outcome { Error = "The request was cancelled.", ErrorStatus = 499 };
                     }
@@ -316,6 +321,46 @@ namespace Fairlead.Core.Gateway
             return new Outcome { Error = (tried > 1 ? "All " + tried + " targets failed. Last: " : string.Empty) + last.Message, ErrorStatus = status };
         }
 
+        // ---------- live view (/api/live) ----------
+
+        private void PublishStart(RequestRecord record, RoutePlan plan, ClientKey client)
+        {
+            _metrics.Live.Publish("start", () => Json.Serialize(new
+            {
+                id = record.Id,
+                time = record.Time,
+                client = record.Client,
+                clientId = client == null ? null : client.Id,
+                endpoint = record.Endpoint,
+                requestedModel = record.RequestedModel,
+                requestedRoute = plan.RequestedRoute,
+                route = string.IsNullOrEmpty(plan.Route) ? null : plan.Route,
+                kedge = plan.Kedge,
+                localOnly = plan.LocalOnly,
+                sensitive = record.Sensitive,
+                stream = record.Stream,
+                decision = plan.Decision.ToList(),
+                candidates = plan.Candidates.Select(c => new { target = c.Ref, local = c.Local, parked = c.Parked, via = c.Via }).ToList(),
+                error = plan.Error,
+            }));
+        }
+
+        private void PublishAttemptBegin(RequestRecord record, Candidate c, bool hedge)
+        {
+            _metrics.Live.Publish("attempt", () => Json.Serialize(new { id = record.Id, target = c.Ref, local = c.Local, via = c.Via, phase = "begin", hedge = hedge }));
+        }
+
+        private void PublishFirstByte(RequestRecord record, string target, int ms)
+        {
+            _metrics.Live.Publish("firstByte", () => Json.Serialize(new { id = record.Id, target = target, ms = ms }));
+        }
+
+        private void AddAttempt(RequestRecord record, AttemptRecord a)
+        {
+            record.Attempts.Add(a);
+            _metrics.Live.Publish("attempt", () => Json.Serialize(new { id = record.Id, target = a.Target, phase = "end", outcome = a.Outcome, status = a.Status, ms = a.Ms, error = a.Error, retries = a.Retries }));
+        }
+
         private bool Acquire(Candidate c, RequestRecord record)
         {
             var now = DateTimeOffset.UtcNow;
@@ -324,7 +369,7 @@ namespace Fairlead.Core.Gateway
             // Parked candidates are last resorts: try them even with an open breaker rather than fail outright.
             if (!c.Parked && (!pb.TryAcquire(now) || !mb.TryAcquire(now)))
             {
-                record.Attempts.Add(new AttemptRecord { Target = c.Ref, Outcome = "skipped", Error = "circuit open" });
+                AddAttempt(record, new AttemptRecord { Target = c.Ref, Outcome = "skipped", Error = "circuit open" });
                 return false;
             }
             return true;
@@ -508,7 +553,7 @@ namespace Fairlead.Core.Gateway
                                 break;
                             }
                             var json = ev.Json();
-                            if (!firstEvent) { firstEvent = true; record.FirstByteMs = (int)sw.ElapsedMilliseconds; }
+                            if (!firstEvent) { firstEvent = true; record.FirstByteMs = (int)sw.ElapsedMilliseconds; PublishFirstByte(record, winner.Ref, record.FirstByteMs.Value); }
                             if (o2a != null)
                             {
                                 if (json == null) continue;
