@@ -105,6 +105,7 @@ namespace Fairlead.Core.Tests
               ""messages"": [
                 {""role"":""user"",""content"":[{""type"":""text"",""text"":""Read notes.txt""}]},
                 {""role"":""system"",""content"":""Plan mode is off.""},
+                {""role"":""system"",""content"":""""},
                 {""role"":""assistant"",""content"":[{""type"":""tool_use"",""id"":""t1"",""name"":""Read"",""input"":{}}]},
                 {""role"":""system"",""content"":[{""type"":""text"",""text"":""<total_tokens>99 left</total_tokens>""}]},
                 {""role"":""user"",""content"":[{""type"":""tool_result"",""tool_use_id"":""t1"",""content"":""line one""}]}

@@ -73,7 +73,9 @@ namespace Fairlead.Core.Protocol
                 var content = m["content"];
                 if (role == "system")
                 {
-                    var note = new JObject { { "role", "user" }, { "content", content == null ? string.Empty : content.Type == JTokenType.String ? (string)content : BlocksText(content) } };
+                    var noteText = content == null ? null : content.Type == JTokenType.String ? (string)content : BlocksText(content);
+                    if (string.IsNullOrEmpty(noteText)) continue;
+                    var note = new JObject { { "role", "user" }, { "content", noteText } };
                     var last = messages.Count > 0 ? messages[messages.Count - 1] : null;
                     if (last != null && last["tool_calls"] != null) deferred.Add(note);
                     else messages.Add(note);
