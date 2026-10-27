@@ -972,3 +972,149 @@ Endpoint("gw_mlflow", "/ai-gateway/mlflow/v1/responses") +
         }
     }
 }
+
+namespace Fairlead.Core.Tests
+{
+    public class CurlImportTests
+    {
+        private const string ResponsesCurl = "curl https://gateway.test/ai-gateway/openai/v1/responses \\\n  -H \"Content-Type: application/json\" \\\n  -H \"Authorization: Bearer $DATABRICKS_TOKEN\" \\\n  -d '{\n    \"model\": \"system.ai.grok-4-6\",\n    \"max_output_tokens\": 256,\n    \"input\": [{\"role\": \"user\", \"content\": [{\"type\": \"input_text\", \"text\": \"Hello!\"}]}]\n  }'";
+
+        [Fact]
+        public void ReadsAResponsesCurlIntoAModelFile()
+        {
+            var c = CurlImport.Parse(ResponsesCurl, null);
+            Assert.True(c.Ok, string.Join("; ", c.Errors));
+            Assert.Equal("responses", c.Format);
+            Assert.Equal("system.ai.grok-4-6", c.Model);
+            Assert.Equal("DATABRICKS_TOKEN", c.TokenVariable);
+            Assert.Equal("curl_system_ai_grok_4_6", c.EndpointKey);
+            var f = GatewayModelFile.Parse(c.Yaml, "x", n => n == "DATABRICKS_TOKEN" ? "t" : null);
+            Assert.True(f.Ok, string.Join("; ", f.Errors));
+            var p = f.Providers.Single();
+            Assert.Equal(ProviderKind.Responses, p.Kind);
+            Assert.Equal("https://gateway.test", p.BaseUrl);
+            Assert.Equal("/ai-gateway/openai/v1/responses", p.Path);
+        }
+
+        [Fact]
+        public void ReadsAChatCurlWithDefaultsAndWindowsLineEndings()
+        {
+            var curl = "curl -X POST https://chat.test/v1/chat/completions ^\r\n  -H \"Authorization: Bearer ${AI_ENDPOINT_TOKEN:-YOUR_API_KEY}\" ^\r\n  -H \"Content-Type: application/json\" ^\r\n  -d \"{\\\"model\\\": \\\"gemini-3.5-flash-lite-withtools\\\", \\\"messages\\\": [{\\\"role\\\": \\\"user\\\", \\\"content\\\": \\\"Hi\\\"}]}\"";
+            var c = CurlImport.Parse(curl, null);
+            Assert.True(c.Ok, string.Join("; ", c.Errors));
+            Assert.Equal("chat", c.Format);
+            Assert.Equal("AI_ENDPOINT_TOKEN", c.TokenVariable);
+            var f = GatewayModelFile.Parse(c.Yaml, "x", n => n == GatewayModelFile.TimeoutVariable ? null : "t");
+            Assert.True(f.Ok, string.Join("; ", f.Errors));
+            Assert.Equal("https://chat.test/v1", f.Providers.Single().BaseUrl);
+        }
+
+        [Fact]
+        public void NeverKeepsALiteralKeyAndRefusesPlaceholders()
+        {
+            var withKey = ResponsesCurl.Replace("$DATABRICKS_TOKEN", "dapi-made-up-secret-123");
+            var c = CurlImport.Parse(withKey, "MY_TOKEN");
+            Assert.True(c.Ok);
+            Assert.Equal("MY_TOKEN", c.TokenVariable);
+            Assert.DoesNotContain("dapi-made-up", c.Yaml);
+            Assert.Contains(c.Warnings, w => w.Contains("ignored"));
+            Assert.DoesNotContain(c.Warnings, w => w.Contains("dapi-made-up"));
+
+            var placeholder = CurlImport.Parse(ResponsesCurl.Replace("https://gateway.test/ai-gateway/openai/v1/responses", "<OPENAI_RESPONSES_URL>"), null);
+            Assert.False(placeholder.Ok);
+            Assert.Contains(placeholder.Errors, e => e.Contains("placeholder"));
+            Assert.False(CurlImport.Parse("curl https://gateway.test/x", null).Ok);   // no body
+            Assert.False(CurlImport.Parse("curl https://gateway.test/x -d 'not json'", null).Ok);
+            Assert.False(CurlImport.Parse("curl https://gateway.test/x -d '{\"model\": \"m\", \"input\": []", null).Ok);
+        }
+    }
+
+    public sealed class GatewayCurlHostTests : IDisposable
+    {
+        private readonly string _dir = Path.Combine(Path.GetTempPath(), "fairlead-curl-" + Guid.NewGuid().ToString("N"));
+        private readonly HttpClient _http = new HttpClient();
+        private readonly List<FairleadHost> _hosts = new List<FairleadHost>();
+        private readonly string _tokenVar = "FL_CURL_TOKEN_" + Guid.NewGuid().ToString("N").Substring(0, 8).ToUpperInvariant();
+
+        public GatewayCurlHostTests() { Directory.CreateDirectory(_dir); }
+
+        public void Dispose()
+        {
+            foreach (var h in _hosts) h.Dispose();
+            _http.Dispose();
+            Environment.SetEnvironmentVariable(_tokenVar, null);
+            try { Directory.Delete(_dir, true); } catch (IOException) { }
+        }
+
+        private static string Wrap(string s) { return "t:" + Convert.ToBase64String(Encoding.UTF8.GetBytes(s)); }
+        private static string Unwrap(string s) { return s != null && s.StartsWith("t:") ? Encoding.UTF8.GetString(Convert.FromBase64String(s.Substring(2))) : null; }
+
+        private FairleadHost Start(FakeUpstream fake)
+        {
+            var host = new FairleadHost(new HostOptions
+            {
+                Settings = new FairleadSettings { RootDirectory = _dir, DataDirectory = _dir, LogDirectory = Path.Combine(_dir, "logs") },
+                Config = RoutingTests.Config(),
+                GatewayStore = new GatewayStore(_dir, Wrap, Unwrap),
+                UpstreamHandler = fake,
+                Monitor = false,
+                PreferredPort = 0,
+            });
+            host.Start();
+            _hosts.Add(host);
+            return host;
+        }
+
+        private async Task<JObject> Admin(FairleadHost host, string path, JObject body)
+        {
+            var req = new HttpRequestMessage(HttpMethod.Post, host.BaseUrl + path) { Content = new StringContent(body.ToString(), Encoding.UTF8, "application/json") };
+            req.Headers.Add("X-Fairlead-Session", host.SessionToken);
+            var r = await _http.SendAsync(req);
+            var text = await r.Content.ReadAsStringAsync();
+            Assert.True(r.IsSuccessStatusCode, text);
+            return JObject.Parse(text);
+        }
+
+        private string Curl()
+        {
+            return "curl https://gateway.test/ai-gateway/mlflow/v1/responses -H \"Authorization: Bearer $" + _tokenVar + "\" -d '{\"model\": \"system.ai.gpt-5-4\", \"input\": [{\"role\": \"user\", \"content\": [{\"type\": \"input_text\", \"text\": \"Hello!\"}]}]}'";
+        }
+
+        [Fact]
+        public async Task ACurlBecomesAGatewayAndTheTestSaysWhichPartFails()
+        {
+            var status = HttpStatusCode.Unauthorized;
+            var fake = new FakeUpstream().On("gateway.test", (r, b) => status == HttpStatusCode.OK
+                ? FakeUpstream.Json(HttpStatusCode.OK, GatewayFixture.ResponsesAnswer("ok"))
+                : FakeUpstream.Json(status, new JObject { ["error"] = new JObject { ["message"] = "nope" } }));
+            var host = Start(fake);
+
+            var imported = await Admin(host, "/api/gateway/curl", new JObject { ["curl"] = Curl() });
+            Assert.True((bool)imported["saved"]!, imported.ToString());
+            Assert.Equal("curl_system_ai_gpt_5_4/system.ai.gpt-5-4", (string?)imported["target"]);
+            var target = (string)imported["target"]!;
+
+            // No key anywhere yet: nothing is sent.
+            var noKey = await Admin(host, "/api/gateway/test", new JObject { ["target"] = target });
+            Assert.Equal("no-key", (string?)noKey["verdict"]);
+            Assert.Empty(fake.Seen);
+
+            Environment.SetEnvironmentVariable(_tokenVar, "made-up-token-value");
+            host.LoadGatewayModels();
+            var rejected = await Admin(host, "/api/gateway/test", new JObject { ["target"] = target });
+            Assert.Equal("key-rejected", (string?)rejected["verdict"]);
+            Assert.DoesNotContain("made-up-token-value", rejected.ToString());
+
+            status = HttpStatusCode.NotFound;
+            host.Breakers.Find("curl_system_ai_gpt_5_4")?.Reset();
+            var notFound = await Admin(host, "/api/gateway/test", new JObject { ["target"] = target });
+            Assert.Equal("not-found", (string?)notFound["verdict"]);
+
+            status = HttpStatusCode.OK;
+            host.Breakers.Find("curl_system_ai_gpt_5_4")?.Reset();
+            var ok = await Admin(host, "/api/gateway/test", new JObject { ["target"] = target });
+            Assert.True((bool)ok["ok"]!, ok.ToString());
+            Assert.Equal("ok", (string?)ok["text"]);
+        }
+    }
+}
