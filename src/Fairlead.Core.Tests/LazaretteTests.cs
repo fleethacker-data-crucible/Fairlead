@@ -188,7 +188,7 @@ namespace Fairlead.Core.Tests
             lazarette = new FakeLazarette(lzData, LazaretteProtocolTests.Code);
             _owned.Add(lazarette);
             var store = new GatewayStore(Path.Combine(_dir, "fairlead"), Wrap, Unwrap);
-            store.SaveFile(_fx.Yaml());
+            store.SaveFile("models", _fx.Yaml());
             store.SetValues(new Dictionary<string, string> { { _fx.BaseVar, GatewayFixture.BaseUrl } });
             var host = new FairleadHost(new HostOptions
             {

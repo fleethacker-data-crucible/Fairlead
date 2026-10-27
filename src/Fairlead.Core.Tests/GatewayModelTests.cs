@@ -771,14 +771,16 @@ Endpoint("gw_mlflow", "/ai-gateway/mlflow/v1/responses") +
         private static string Wrap(string s) { return "t:" + Convert.ToBase64String(Encoding.UTF8.GetBytes(s)); }
         private static string Unwrap(string s) { return s != null && s.StartsWith("t:") ? Encoding.UTF8.GetString(Convert.FromBase64String(s.Substring(2))) : null; }
 
-        private FairleadHost Start(GatewayStore store)
+        private FairleadHost Start(GatewayStore store, FakeUpstream? fake = null, string? clientKey = null)
         {
+            var cfg = RoutingTests.Config();
+            if (clientKey != null) cfg.Clients.Add(new ClientKey { Id = "k1", Name = "tests", Prefix = clientKey.Substring(0, 7), Hash = GatewayEngine.HashKey(clientKey) });
             var host = new FairleadHost(new HostOptions
             {
                 Settings = new FairleadSettings { RootDirectory = _dir, DataDirectory = _dir, LogDirectory = Path.Combine(_dir, "logs") },
-                Config = RoutingTests.Config(),
+                Config = cfg,
                 GatewayStore = store,
-                UpstreamHandler = new FakeUpstream(),
+                UpstreamHandler = fake ?? new FakeUpstream(),
                 Monitor = false,
                 PreferredPort = 0,
             });
@@ -822,7 +824,7 @@ Endpoint("gw_mlflow", "/ai-gateway/mlflow/v1/responses") +
             Assert.Equal("baseUrl/missing", vars[_fx.BaseVar]);
             Assert.Equal("token/missing", vars[_fx.TokenVar]);
 
-            var onDisk = File.ReadAllText(Path.Combine(_dir, GatewayStore.FileName));
+            var onDisk = File.ReadAllText(Path.Combine(_dir, GatewayStore.FilesFolder, "models.dpapi"));
             Assert.DoesNotContain("fake.model", onDisk);
             Assert.DoesNotContain("gw_openai", onDisk);
         }
@@ -858,7 +860,7 @@ Endpoint("gw_mlflow", "/ai-gateway/mlflow/v1/responses") +
             var (removed, _) = await Admin(host, HttpMethod.Delete, "/api/gateway");
             Assert.Equal(HttpStatusCode.OK, removed);
             Assert.Null(host.Config.Snapshot().FindProvider("gw_openai"));
-            Assert.False(File.Exists(Path.Combine(_dir, GatewayStore.FileName)));
+            Assert.False(File.Exists(Path.Combine(_dir, GatewayStore.FilesFolder, "models.dpapi")));
         }
 
         [Fact]
@@ -869,7 +871,104 @@ Endpoint("gw_mlflow", "/ai-gateway/mlflow/v1/responses") +
             Assert.Equal(HttpStatusCode.OK, code);
             Assert.False((bool)body["saved"]!);
             Assert.NotEmpty((JArray)body["errors"]!);
+            Assert.False(File.Exists(Path.Combine(_dir, GatewayStore.FilesFolder, "models.dpapi")));
+        }
+    
+        /// <summary>config/ai_gateway_chat_models.template.yaml filled in, with the test token variable.</summary>
+        private string FilledChatTemplate(string url)
+        {
+            var text = File.ReadAllText(Path.Combine(CoreSourceTests.RepoRoot(), "config", "ai_gateway_chat_models.template.yaml"));
+            return text.Replace("<CHAT_COMPLETIONS_URL>", url).Replace("AI_ENDPOINT_TOKEN", _fx.TokenVar);
+        }
+
+        [Fact]
+        public async Task TwoModelFilesLoadSideBySideAndTheChatEndpointGetsTheRequestAsIs()
+        {
+            _fx.Export();
+            var fake = new FakeUpstream().On("chat.test", (r, b) => FakeUpstream.Json(HttpStatusCode.OK, new JObject
+            {
+                ["id"] = "x", ["object"] = "chat.completion", ["model"] = (string)b["model"]!,
+                ["choices"] = new JArray { new JObject { ["index"] = 0, ["message"] = new JObject { ["role"] = "assistant", ["content"] = "Fine, thanks." }, ["finish_reason"] = "stop" } },
+            }));
+            var key = GatewayEngine.NewClientKey();
+            var host = Start(new GatewayStore(_dir, Wrap, Unwrap), fake, key);
+
+            var (c1, b1) = await Admin(host, HttpMethod.Post, "/api/gateway/import", new JObject { ["yaml"] = _fx.Yaml(), ["fileName"] = "responses models.yaml" });
+            Assert.True((bool)b1["saved"]!, b1.ToString());
+            var (c2, b2) = await Admin(host, HttpMethod.Post, "/api/gateway/import", new JObject { ["yaml"] = FilledChatTemplate("https://chat.test/v1/chat/completions"), ["fileName"] = "gemini-chat.yaml" });
+            Assert.True((bool)b2["saved"]!, b2.ToString());
+
+            var view = (JObject)b2["gateway"]!;
+            Assert.True((bool)view["ok"]!, view.ToString());
+            Assert.Equal(new[] { "gemini-chat", "responses-models" }, ((JArray)view["files"]!).Select(f => (string)f["name"]!).ToArray());
+            var chat = host.Config.Snapshot().FindProvider("gemini_chat")!;
+            Assert.Equal(ProviderKind.OpenAi, chat.Kind);
+            Assert.Equal("https://chat.test/v1", chat.BaseUrl);   // .../chat/completions is accepted and trimmed
+            Assert.NotNull(host.Config.Snapshot().FindProvider("gw_openai"));
+
+            // Tools pass through to the chat endpoint (unlike the Responses endpoints).
+            var body = new JObject
+            {
+                ["model"] = "gemini_chat/gemini-3.5-flash-lite-withtools",
+                ["messages"] = new JArray { new JObject { ["role"] = "user", ["content"] = "Hello, how are you?" } },
+                ["tools"] = new JArray { new JObject { ["type"] = "function", ["function"] = new JObject { ["name"] = "f", ["parameters"] = new JObject() } } },
+            };
+            var req = new HttpRequestMessage(HttpMethod.Post, host.BaseUrl + "/v1/chat/completions") { Content = new StringContent(body.ToString(), Encoding.UTF8, "application/json") };
+            req.Headers.TryAddWithoutValidation("Authorization", "Bearer " + key);
+            var res = await _http.SendAsync(req);
+            Assert.Equal(HttpStatusCode.OK, res.StatusCode);
+            var seen = fake.Seen.Single();
+            Assert.Equal("chat.test/v1/chat/completions", seen.Key);
+            Assert.Equal("gemini-3.5-flash-lite-withtools", (string)seen.Value["model"]!);
+            Assert.NotNull(seen.Value["tools"]);
+
+            // Removing one file leaves the other.
+            var (c3, b3) = await Admin(host, HttpMethod.Delete, "/api/gateway/gemini-chat");
+            Assert.Equal(HttpStatusCode.OK, c3);
+            Assert.Null(host.Config.Snapshot().FindProvider("gemini_chat"));
+            Assert.NotNull(host.Config.Snapshot().FindProvider("gw_openai"));
+            Assert.Single((JArray)b3["files"]!);
+
+            // A restart reads both encrypted files again.
+            await Admin(host, HttpMethod.Post, "/api/gateway/import", new JObject { ["yaml"] = FilledChatTemplate("https://chat.test/v1"), ["fileName"] = "gemini-chat.yaml" });
+            var again = Start(new GatewayStore(_dir, Wrap, Unwrap));
+            Assert.Equal("https://chat.test/v1", again.Config.Snapshot().FindProvider("gemini_chat")!.BaseUrl);
+            Assert.NotNull(again.Config.Snapshot().FindProvider("gw_mlflow"));
+        }
+
+        [Fact]
+        public async Task AnEndpointNameUsedInAnotherFileIsRefused()
+        {
+            var host = Start(new GatewayStore(_dir, Wrap, Unwrap));
+            await Admin(host, HttpMethod.Post, "/api/gateway/import", new JObject { ["yaml"] = _fx.Yaml(), ["fileName"] = "first.yaml" });
+            var (code, body) = await Admin(host, HttpMethod.Post, "/api/gateway/import", new JObject { ["yaml"] = _fx.Yaml(), ["fileName"] = "second.yaml" });
+            Assert.Equal(HttpStatusCode.OK, code);
+            Assert.False((bool)body["saved"]!);
+            Assert.Contains("already in the imported file first", body.ToString());
+            // The same file name replaces instead.
+            var (_, again) = await Admin(host, HttpMethod.Post, "/api/gateway/import", new JObject { ["yaml"] = _fx.Yaml(), ["fileName"] = "first.yaml" });
+            Assert.True((bool)again["saved"]!);
+        }
+
+        [Fact]
+        public void AnOlderSingleImportIsReadAsTheFileNamedModels()
+        {
+            File.WriteAllText(Path.Combine(_dir, GatewayStore.FileName), Wrap(_fx.Yaml()));
+            var store = new GatewayStore(_dir, Wrap, Unwrap);
+            Assert.Equal(new[] { "models" }, store.Names.ToArray());
+            Assert.Contains("gw_openai", store.ReadFile("models"));
+            Assert.True(store.RemoveFile("models"));
             Assert.False(File.Exists(Path.Combine(_dir, GatewayStore.FileName)));
+        }
+
+        [Fact]
+        public void TheChatTemplateIsRefusedUntilFilledAndAChatFileNeedsMessages()
+        {
+            var text = File.ReadAllText(Path.Combine(CoreSourceTests.RepoRoot(), "config", "ai_gateway_chat_models.template.yaml"));
+            var f = GatewayModelFile.Parse(text, "t", n => "x");
+            Assert.Contains(f.Errors, e => e.Contains("endpoints.gemini_chat.url still holds a placeholder"));
+            var wrong = GatewayModelFile.Inspect(FilledChatTemplate("https://chat.test/v1").Replace("- \"messages\"", "- \"input\""), "t");
+            Assert.Contains(wrong.Errors, e => e.Contains("must list model and messages"));
         }
     }
 }

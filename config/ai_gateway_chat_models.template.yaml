@@ -1,0 +1,40 @@
+# Fairlead AI gateway model file for the OpenAI-compatible chat endpoint, made from other-gemini-model.yaml.
+# Import it as a second model file next to ai_gateway_models.template.yaml; Fairlead keeps both.
+#
+# TO FILL IN (GenAI.mil): replace <CHAT_COMPLETIONS_URL> with the endpoint's https address, exactly as in the
+# original examples (the base_url of the Python and JavaScript examples, or the full .../chat/completions URL of the
+# curl example; either works). Change nothing else. Do NOT put the key here: Fairlead gets AI_ENDPOINT_TOKEN from
+# Lazarette (or the environment variable of that name).
+#
+# Then import the filled-in copy in Fairlead: Providers -> AI gateway -> Import model file. It is kept encrypted on
+# the workstation; never commit the filled-in copy to a repository.
+#
+# Fairlead sends the OpenAI Chat Completions request as the examples do: POST {base}/chat/completions,
+# Authorization: Bearer <key>, Content-Type: application/json, body { model, messages, ... }. Tool calls and
+# streaming pass through unchanged.
+
+environment:
+  required:
+    api_key:
+      env: "AI_ENDPOINT_TOKEN"
+
+endpoints:
+  gemini_chat:
+    method: "POST"
+    url: "<CHAT_COMPLETIONS_URL>"
+    headers:
+      Content-Type: "application/json"
+      Authorization:
+        scheme: "Bearer"
+        token_env: "AI_ENDPOINT_TOKEN"
+    request_format: "openai_chat_completions_v1"
+    request_body:
+      required_fields:
+        - "model"
+        - "messages"
+
+models:
+  gemini_3_5_flash_lite_withtools:
+    model_id: "gemini-3.5-flash-lite-withtools"
+    endpoint: "gemini_chat"
+    enabled: true

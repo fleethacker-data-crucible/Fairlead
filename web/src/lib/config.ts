@@ -44,8 +44,8 @@ export async function deleteClient(id: string): Promise<void> {
 export type ImportResult = { saved: boolean; errors?: string[]; warnings?: string[]; gateway?: GatewayView };
 
 /** Sends the chosen model file; refused files come back with their problems and nothing is saved. */
-export async function importGatewayFile(yaml: string, values?: Record<string, string>): Promise<ImportResult> {
-  const r = await post<ImportResult>('/api/gateway/import', { yaml, values: values ?? null });
+export async function importGatewayFile(yaml: string, fileName: string, values?: Record<string, string>): Promise<ImportResult> {
+  const r = await post<ImportResult>('/api/gateway/import', { yaml, fileName, values: values ?? null });
   invalidate('/api/config');
   invalidate('/api/status');
   return r;
@@ -58,8 +58,9 @@ export async function saveGatewayValues(values: Record<string, string>): Promise
   return GatewayView.parse(r);
 }
 
-export async function removeGatewayFile(): Promise<void> {
-  await del('/api/gateway');
+/** Removes one imported model file, or every one (and the saved address) when no name is given. */
+export async function removeGatewayFile(name?: string): Promise<void> {
+  await del(name ? `/api/gateway/${encodeURIComponent(name)}` : '/api/gateway');
   invalidate('/api/config');
   invalidate('/api/status');
 }

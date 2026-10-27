@@ -268,7 +268,7 @@ namespace Fairlead.Core.Resilience
             {
                 // A Responses gateway has no model list to read (its models come from the gateway model file), so it is
                 // only checked for reachability; whether its key works shows on the first real request.
-                if (p.Kind != ProviderKind.Responses && (p.Local || (dueDeep && internetUp)))
+                if (p.Kind != ProviderKind.Responses && p.Managed != true && (p.Local || (dueDeep && internetUp)))
                 {
                     var models = await _upstream.ListModelsAsync(p, token, p.Local ? 4000 : 8000).ConfigureAwait(false);
                     h.Models = models;
