@@ -1,0 +1,59 @@
+### cURL
+```bash
+curl -X POST <> \
+  -H "Authorization: Bearer ${STARK_API_KEY:-YOUR_API_KEY}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gemini-3.5-flash-lite-withtools",
+    "messages": [
+      {"role": "user", "content": "Hello, how are you?"}
+    ]
+  }'
+```
+
+### Python
+```python
+import os
+from openai import OpenAI
+
+# Ensure STARK_API_KEY is exported in your environment:
+# export STARK_API_KEY="your-api-key"
+client = OpenAI(
+    base_url="<>",
+    api_key=os.environ.get("STARK_API_KEY", "YOUR_API_KEY"),
+)
+
+response = client.chat.completions.create(
+    model="gemini-3.5-flash-lite-withtools",
+    messages=[
+        {"role": "user", "content": "Hello, how are you?"}
+    ],
+)
+
+print(response.choices[0].message.content)
+```
+
+### JavaScript
+```javascript
+import OpenAI from 'openai';
+
+// Ensure STARK_API_KEY is exported in your environment:
+// export STARK_API_KEY="your-api-key"
+const client = new OpenAI({
+  baseURL: '<>',
+  apiKey: process.env.STARK_API_KEY ?? 'YOUR_API_KEY',
+});
+
+async function main() {
+  const response = await client.chat.completions.create({
+    model: 'gemini-3.5-flash-lite-withtools',
+    messages: [
+      { role: 'user', content: 'Hello, how are you?' },
+    ],
+  });
+
+  console.log(response.choices[0].message.content);
+}
+
+main();
+```
