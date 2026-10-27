@@ -18,11 +18,15 @@ Claude Code side. To pin a route regardless of the model name, point `ANTHROPIC_
 
 ## Checklist
 
-- [ ] Chat answers, streaming visible
+- [x] Chat answers, streaming visible
 - [ ] File edits and bash tools work (tool_use / tool_result round trips) on Claude
 - [ ] Same on a local model in Kedge mode (expect weaker tool use from small models: prefer a tools-capable model in `local`)
 - [ ] `/cost` or the status line still works with the counted tokens (Fairlead estimates `count_tokens`)
 - [ ] Long sessions: no truncation surprises with the local model's context window
+
+Run 2026-10-27 (Claude Code 2.1.312, headless `claude -p`, translated to Ollama `qwen3.8-abliterated`, outside Kedge
+mode via local fallback): chat streams; Read, Edit and Bash round trips complete over four turns; input tokens now
+reach Claude Code. Its `/cost` dollars are priced as Claude, so they mean nothing for a local model.
 
 ## Known gaps to look at
 

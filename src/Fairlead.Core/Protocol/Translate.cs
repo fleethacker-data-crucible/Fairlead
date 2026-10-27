@@ -63,10 +63,25 @@ namespace Fairlead.Core.Protocol
             var messages = new JArray();
             var system = SystemText(a["system"]);
             if (!string.IsNullOrEmpty(system)) messages.Add(new JObject { { "role", "system" }, { "content", system } });
+            // System messages inside the conversation (Claude Code sends them) become user turns: many local chat
+            // templates reject a system message anywhere but first. One that lands between tool calls and their
+            // results waits until after the results, since role=tool messages must directly follow the calls.
+            var deferred = new List<JObject>();
             foreach (var m in Arr(a["messages"]))
             {
                 var role = (string)m["role"] ?? "user";
                 var content = m["content"];
+                if (role == "system")
+                {
+                    var note = new JObject { { "role", "user" }, { "content", content == null ? string.Empty : content.Type == JTokenType.String ? (string)content : BlocksText(content) } };
+                    var last = messages.Count > 0 ? messages[messages.Count - 1] : null;
+                    if (last != null && last["tool_calls"] != null) deferred.Add(note);
+                    else messages.Add(note);
+                    continue;
+                }
+                if (role != "assistant" && content != null && content.Type != JTokenType.String) AddToolResults(messages, content);
+                foreach (var note in deferred) messages.Add(note);
+                deferred.Clear();
                 if (content == null || content.Type == JTokenType.String)
                 {
                     messages.Add(new JObject { { "role", role }, { "content", content == null ? string.Empty : (string)content } });
@@ -96,18 +111,12 @@ namespace Fairlead.Core.Protocol
                     messages.Add(msg);
                     continue;
                 }
-                // user: tool results become role=tool messages, which must directly follow the assistant tool calls.
+                // user: tool results were added above by AddToolResults; the rest becomes one user message.
                 var parts = new JArray();
                 foreach (var b in Arr(content))
                 {
                     var type = (string)b["type"];
-                    if (type == "tool_result")
-                    {
-                        var resultText = BlocksText(b["content"]);
-                        if (b.Value<bool?>("is_error") == true) resultText = "Error: " + resultText;
-                        messages.Add(new JObject { { "role", "tool" }, { "tool_call_id", (string)b["tool_use_id"] }, { "content", resultText } });
-                    }
-                    else if (type == "text") parts.Add(new JObject { { "type", "text" }, { "text", (string)b["text"] } });
+                    if (type == "text") parts.Add(new JObject { { "type", "text" }, { "text", (string)b["text"] } });
                     else if (type == "image")
                     {
                         var src = b["source"];
@@ -125,6 +134,7 @@ namespace Fairlead.Core.Protocol
                 if (parts.Count == 1 && (string)parts[0]["type"] == "text") messages.Add(new JObject { { "role", "user" }, { "content", parts[0]["text"] } });
                 else if (parts.Count > 0) messages.Add(new JObject { { "role", "user" }, { "content", parts } });
             }
+            foreach (var note in deferred) messages.Add(note);
             o["messages"] = messages;
             var max = a["max_tokens"];
             if (max != null) o[maxCompletionTokens ? "max_completion_tokens" : "max_tokens"] = max;
@@ -478,6 +488,18 @@ namespace Fairlead.Core.Protocol
             return sb.ToString();
         }
 
+        /// <summary>Anthropic tool_result blocks as role=tool messages, which must directly follow the assistant tool calls.</summary>
+        private static void AddToolResults(JArray messages, JToken content)
+        {
+            foreach (var b in Arr(content))
+            {
+                if ((string)b["type"] != "tool_result") continue;
+                var resultText = BlocksText(b["content"]);
+                if (b.Value<bool?>("is_error") == true) resultText = "Error: " + resultText;
+                messages.Add(new JObject { { "role", "tool" }, { "tool_call_id", (string)b["tool_use_id"] }, { "content", resultText } });
+            }
+        }
+
         private static string SystemText(JToken system)
         {
             return BlocksText(system);
@@ -588,10 +610,20 @@ namespace Fairlead.Core.Protocol
             {
                 { "type", "message_delta" },
                 { "delta", new JObject { { "stop_reason", Translate.StopReasonToAnthropic(_finish, _sawTool) }, { "stop_sequence", null } } },
-                { "usage", new JObject { { "output_tokens", Usage.Output ?? 0 } } },
+                { "usage", DeltaUsage() },
             }));
             output.Add(SseWriter.Named("message_stop", new JObject { { "type", "message_stop" } }));
             return output;
+        }
+
+        // OpenAI reports prompt tokens only in the last chunk, after message_start went out with 0, so the final
+        // message_delta carries them too: Anthropic clients (Claude Code's context and cost meters) take its usage.
+        private JObject DeltaUsage()
+        {
+            var usage = new JObject();
+            if (Usage.Input.HasValue) usage["input_tokens"] = Usage.Input.Value;
+            usage["output_tokens"] = Usage.Output ?? 0;
+            return usage;
         }
 
         private void Start(List<string> output)
