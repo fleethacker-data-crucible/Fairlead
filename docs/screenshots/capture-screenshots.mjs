@@ -141,9 +141,19 @@ function readmeState() {
     record('5d7f61c0b28e', 7 * 60 * 1000, { client: 'claude-code', dialect: 'anthropic', endpoint: '/v1/messages', requestedModel: 'claude-haiku-4-5', route: 'fast', target: fast, totalMs: 860, estimatedTokens: 120, inputTokens: 131, outputTokens: 58, attempts: att(fast, 860) }),
     record('c3a8e95f0d14', 12 * 60 * 1000, { client: 'open-webui', requestedModel: 'auto', route: 'local', target: big, sensitive: true, stream: true, firstByteMs: 420, totalMs: 3980, estimatedTokens: 260, inputTokens: 274, outputTokens: 188, attempts: att(big, 3980) }),
   ];
+  // /api/live: one request caught mid-failover. Its first target answered 529, so the lead snapped and it re-led
+  // to the next target, which is answering now.
+  const live = [
+    ['start', { id: 'e7b1c2d3f405', client: 'claude-code', requestedModel: 'auto', requestedRoute: 'auto', route: 'smart', kedge: false, sensitive: false, stream: true, decision: ["Model 'auto' is a Fairlead route.", "Auto: rule 'agentic-tools' matched (tools) -> 'smart'.", `First choice ${smart}, then ${big}.`], candidates: [{ target: smart, local: false, parked: false, via: 'smart' }, { target: big, local: true, parked: false, via: 'smart' }] }],
+    ['attempt', { id: 'e7b1c2d3f405', target: smart, local: false, via: 'smart', phase: 'begin', hedge: false }],
+    ['attempt', { id: 'e7b1c2d3f405', target: smart, phase: 'end', outcome: 'server', status: 529, ms: 640, error: 'Overloaded', retries: 0 }],
+    ['attempt', { id: 'e7b1c2d3f405', target: big, local: true, via: 'smart', phase: 'begin', hedge: false }],
+    ['attempt', { id: 'e7b1c2d3f405', target: big, phase: 'end', outcome: 'ok', status: 200, ms: 410, error: null, retries: 0 }],
+    ['firstByte', { id: 'e7b1c2d3f405', target: big, ms: 1090 }],
+  ];
   return {
     startedAt: iso(45 * 60 * 1000), setupComplete: true, providers: [ollama, anthropic], probeMs: { ollama: 3, anthropic: 41 },
-    routes: routes([smart, big], [fast], [big, fast]), requests,
+    routes: routes([smart, big], [fast], [big, fast]), requests, live,
     clients: [{ id: 'c1', name: 'claude-code', prefix: 'fl-xxxx', created: iso(40 * 60 * 1000), routes: [] }, { id: 'c2', name: 'open-webui', prefix: 'fl-xxxx', created: iso(38 * 60 * 1000), routes: [] }],
     detect: [],
   };
@@ -171,6 +181,14 @@ async function attach(page, state) {
     if (p === '/api/presets') return json([]);
     if (p === '/api/requests') return json(state.requests.slice(0, Number(url.searchParams.get('limit') ?? 200)));
     if (p === '/api/heartbeat') return json({ ok: true });
+    if (p === '/api/live') {
+      // The real endpoint stays open; the mock sends its events and closes, and the UI reconnects quietly.
+      const events = [['hello', { version: '0.1.0', kedge: false }], ...(state.live ?? [])];
+      return route.fulfill({ status: 200, contentType: 'text/event-stream', body: events.map(([type, data]) => `event: ${type}
+data: ${JSON.stringify(data)}
+
+`).join('') });
+    }
     if (p === '/api/explain') {
       const r = state.explain ?? { route: 'fast', decision: QUICK, candidates: [{ target: 'ollama/llama3.2:1b', local: true, parked: false, parkedBecause: null, dialect: 'openai' }] };
       return json({ route: r.route, decision: r.decision, error: null, kedge: false, localOnly: false, profile: { estimatedTokens: 14, hasTools: !!body?.withTools, hasImages: false, sensitive: false, sensitiveReasons: [], stream: false, requestedModel: body?.model ?? 'auto' }, candidates: r.candidates });
@@ -197,7 +215,7 @@ const browser = await chromium.launch();
 try {
   if (!walkthrough) {
     for (const [scheme, theme] of [['dark', 'night-watch'], ['light', 'chart-room']]) {
-      await shoot(browser, { file: `overview-${theme}.png`, scheme, state: readmeState(), hash: 'overview', act: (pg) => pg.getByText('ollama/qwen2.5:14b').first().waitFor() });
+      await shoot(browser, { file: `overview-${theme}.png`, scheme, state: readmeState(), hash: 'overview', act: (pg) => pg.getByText(/anthropic\/claude-sonnet-4-5 failed \(server\)/).waitFor() });
     }
   } else {
     const heading = (name) => (pg) => pg.getByRole('heading', { name }).waitFor();

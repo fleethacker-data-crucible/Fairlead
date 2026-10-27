@@ -209,6 +209,7 @@ namespace Fairlead.Core.Host
                 return Task.FromResult(Json.Ok(rec));
             });
             Admin.Get("/api/metrics", r => Task.FromResult(Json.Ok(Metrics.Summary())));
+            Admin.Get("/api/live", r => Task.FromResult(LiveStream()));
             Admin.Get("/api/logs", r =>
             {
                 string level;
@@ -223,6 +224,36 @@ namespace Fairlead.Core.Host
                 return Task.FromResult(Json.Ok(Engine.Explain(request, Dialect.OpenAi, Json.Read<string>(body, "route"), Json.Read<bool?>(body, "private") == true, Json.Read<string>(body, "client"))));
             });
             Admin.Post("/api/playground", Playground);
+        }
+
+        /// <summary>
+        /// Server-sent events for the live routing view: start, attempt, firstByte and done for every gateway request,
+        /// as they happen. Same session token as the rest of /api (the UI reads it with fetch, not EventSource, so the
+        /// token stays in a header). A comment line every 15 s keeps the connection open and notices a closed tab.
+        /// </summary>
+        private HttpResponse LiveStream()
+        {
+            return HttpResponse.EventStream(async (output, token) =>
+            {
+                using (var sub = Metrics.Live.Subscribe())
+                {
+                    try
+                    {
+                        await output.WriteAsync("retry: 3000\nevent: hello\ndata: " + Json.Serialize(new { version = Version, kedge = Health.KedgeActive }) + "\n\n", token).ConfigureAwait(false);
+                        while (!token.IsCancellationRequested)
+                        {
+                            var ev = await sub.NextAsync(15000, token).ConfigureAwait(false);
+                            var dropped = sub.TakeDropped();
+                            if (dropped > 0) await output.WriteAsync("event: dropped\ndata: {\"count\":" + dropped + "}\n\n", token).ConfigureAwait(false);
+                            if (ev == null) { await output.WriteAsync(": keepalive\n\n", token).ConfigureAwait(false); continue; }
+                            await output.WriteAsync("event: " + ev.Type + "\ndata: " + ev.Json + "\n\n", token).ConfigureAwait(false);
+                        }
+                    }
+                    catch (OperationCanceledException) { }
+                    catch (System.IO.IOException) { }
+                    catch (ObjectDisposedException) { }
+                }
+            });
         }
 
         public object Status()
