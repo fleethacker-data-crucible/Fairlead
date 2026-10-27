@@ -75,6 +75,16 @@ export const GatewayView = z.object({
   variables: z.array(GatewayVariable).default([]),
   errors: z.array(z.string()).default([]),
   warnings: z.array(z.string()).default([]),
+  files: z.array(z.object({
+    name: z.string().nullable(),
+    ok: z.boolean(),
+    endpoints: z.array(z.string()).default([]),
+    models: z.number().default(0),
+    enabledModels: z.number().default(0),
+    providers: z.array(z.string()).default([]),
+    errors: z.array(z.string()).default([]),
+    warnings: z.array(z.string()).default([]),
+  }).passthrough()).default([]),
 }).passthrough();
 export type GatewayView = z.infer<typeof GatewayView>;
 

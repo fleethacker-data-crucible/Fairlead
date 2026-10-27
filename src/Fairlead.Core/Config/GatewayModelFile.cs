@@ -20,6 +20,9 @@ namespace Fairlead.Core.Config
         public const string PathVariable = "FAIRLEAD_GATEWAY_CONFIG";
         public const string TimeoutVariable = "AI_GATEWAY_TIMEOUT_SECONDS";
         public const string SupportedFormat = "openai_responses_v1";
+        /// <summary>An OpenAI-compatible Chat Completions endpoint (POST {base}/chat/completions), sent the request as is.</summary>
+        public const string ChatFormat = "openai_chat_completions_v1";
+        private static readonly string[] ChatFormatAliases = { ChatFormat, "openai_chat_completions", "openai_chat_v1" };
         public const int DefaultRetries = 2;
 
         private static readonly Regex VariableName = new Regex("^[A-Za-z_][A-Za-z0-9_]*$");
@@ -39,6 +42,8 @@ namespace Fairlead.Core.Config
         }
 
         public string Path { get; set; }
+        /// <summary>The name an imported file is kept under (from the file the user picked); null for a combined view.</summary>
+        public string Name { get; set; }
         public List<string> Errors { get; private set; }
         public List<string> Warnings { get; private set; }
         /// <summary>One Responses provider per endpoint that serves at least one enabled model; empty when there are errors.</summary>
@@ -133,20 +138,21 @@ namespace Fairlead.Core.Config
                 {
                     Id = e.Key,
                     Name = "AI gateway: " + e.Key,
-                    Kind = ProviderKind.Responses,
+                    Kind = e.Chat ? ProviderKind.OpenAi : ProviderKind.Responses,
                     BaseUrl = e.BaseUrl,
-                    Path = e.PathPart,
+                    Path = e.Chat ? null : e.PathPart,
                     ApiKeyEnv = e.TokenVariable,
                     Headers = e.Headers,
-                    RequestFields = e.OptionalFields,
+                    RequestFields = e.Chat ? new List<string>() : e.OptionalFields,
                     Local = false,
                     Enabled = true,
                     StreamUsage = false,
                     TimeoutSeconds = timeout,
                     Retries = DefaultRetries,
                     Managed = true,
-                    // Capability labels in the file are preferences, not tested facts: tools and images stay off.
-                    Models = served.Select(m => new ModelInfo { Id = m.ModelId, Tools = false, Vision = false }).ToList(),
+                    // Capability labels in the file are preferences, not tested facts. A Responses endpoint gets text only;
+                    // a chat endpoint takes the request as is, so its capabilities stay unknown (never excluded).
+                    Models = served.Select(m => new ModelInfo { Id = m.ModelId, Tools = e.Chat ? (bool?)null : false, Vision = e.Chat ? (bool?)null : false }).ToList(),
                 });
             }
             if (f.EnabledModels == 0) f.Warnings.Add("No model is enabled; Fairlead adds no gateway provider.");
@@ -156,6 +162,7 @@ namespace Fairlead.Core.Config
         private sealed class Endpoint
         {
             public string Key;
+            public bool Chat;
             public string BaseUrl;
             public string PathPart;
             public string TokenVariable;
@@ -228,7 +235,9 @@ namespace Fairlead.Core.Config
 
                 var format = e["request_format"];
                 if (format == null || format.Type != JTokenType.String) Errors.Add(where + ".request_format is missing.");
-                else if ((string)format != SupportedFormat) Errors.Add(where + ".request_format '" + (string)format + "' is not supported; Fairlead speaks " + SupportedFormat + ".");
+                else if ((string)format != SupportedFormat && Array.IndexOf(ChatFormatAliases, (string)format) < 0)
+                    Errors.Add(where + ".request_format '" + (string)format + "' is not supported; Fairlead speaks " + SupportedFormat + " and " + ChatFormat + ".");
+                var chat = format != null && format.Type == JTokenType.String && Array.IndexOf(ChatFormatAliases, (string)format) >= 0;
 
                 string path = null;
                 string baseUrl = null;
@@ -256,7 +265,7 @@ namespace Fairlead.Core.Config
                 else
                 {
                     var pathToken = e["path"];
-                    if (pathToken == null || pathToken.Type != JTokenType.String) Errors.Add(where + ".path is missing.");
+                    if (pathToken == null || pathToken.Type != JTokenType.String) { if (!chat) Errors.Add(where + ".path is missing."); }
                     else
                     {
                         path = ((string)pathToken).Trim();
@@ -280,6 +289,15 @@ namespace Fairlead.Core.Config
                             else baseUrl = value.TrimEnd('/');
                         }
                     }
+                }
+                if (chat && baseUrl != null)
+                {
+                    // A chat endpoint is called at {base}/chat/completions: accept the full address or the base.
+                    var full = baseUrl.TrimEnd('/') + (path ?? string.Empty);
+                    full = full.TrimEnd('/');
+                    if (full.EndsWith("/chat/completions", StringComparison.OrdinalIgnoreCase)) full = full.Substring(0, full.Length - "/chat/completions".Length);
+                    baseUrl = full;
+                    path = null;
                 }
 
                 string tokenVar = null;
@@ -337,12 +355,13 @@ namespace Fairlead.Core.Config
                         var required = Strings(rbo["required_fields"], where + ".request_body.required_fields");
                         if (required != null)
                         {
+                            var body = chat ? "messages" : "input";
                             foreach (var r in required)
-                                if (r != "model" && r != "input") Errors.Add(where + ".request_body.required_fields: Fairlead cannot fill '" + r + "'.");
-                            if (!required.Contains("model") || !required.Contains("input")) Errors.Add(where + ".request_body.required_fields must list model and input.");
+                                if (r != "model" && r != body) Errors.Add(where + ".request_body.required_fields: Fairlead cannot fill '" + r + "'.");
+                            if (!required.Contains("model") || !required.Contains(body)) Errors.Add(where + ".request_body.required_fields must list model and " + body + ".");
                         }
                         var opt = Strings(rbo["optional_fields"], where + ".request_body.optional_fields");
-                        if (opt != null)
+                        if (opt != null && !chat)
                         {
                             foreach (var o2 in opt)
                             {
@@ -353,7 +372,7 @@ namespace Fairlead.Core.Config
                     }
                 }
                 if (Errors.Count == errorsBefore)
-                    list.Add(new Endpoint { Key = key, BaseUrl = baseUrl, PathPart = path, TokenVariable = tokenVar, Headers = headers, OptionalFields = optional });
+                    list.Add(new Endpoint { Key = key, Chat = chat, BaseUrl = baseUrl, PathPart = path, TokenVariable = tokenVar, Headers = headers, OptionalFields = optional });
             }
             return list;
         }
@@ -394,6 +413,35 @@ namespace Fairlead.Core.Config
                 list.Add(new Model { Key = p.Name, ModelId = id, Endpoint = ep, Enabled = enabled });
             }
             return list;
+        }
+
+        /// <summary>
+        /// Several model files as one: their providers, keys and variables together. Each file stands alone: one with
+        /// problems adds nothing, and the others still load. An endpoint key used in two files is an error in the later
+        /// one (provider ids must be unique). With more than one file, problems are prefixed with the file's name.
+        /// </summary>
+        public static GatewayModelFile Combine(IList<GatewayModelFile> files)
+        {
+            if (files.Count == 1) return files[0];
+            var c = new GatewayModelFile { Path = files.Count + " model files" };
+            var endpoints = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var f in files)
+            {
+                foreach (var ep in f.EndpointKeys)
+                    if (!endpoints.Add(ep)) f.Errors.Add("Endpoint '" + ep + "' is also in another model file; rename it in one of them.");
+                if (!f.Ok) f.Providers.Clear();
+                var prefix = string.IsNullOrEmpty(f.Name) ? string.Empty : f.Name + ": ";
+                foreach (var e in f.Errors) if (!c.Errors.Contains(prefix + e)) c.Errors.Add(prefix + e);
+                foreach (var w in f.Warnings) if (!c.Warnings.Contains(prefix + w)) c.Warnings.Add(prefix + w);
+                c.Providers.AddRange(f.Providers);
+                c.EndpointKeys.AddRange(f.EndpointKeys);
+                c.ModelKeys.AddRange(f.ModelKeys);
+                c.EnabledModels += f.EnabledModels;
+                foreach (var v in f.RequiredVariables) if (!c.RequiredVariables.Contains(v)) c.RequiredVariables.Add(v);
+                foreach (var v in f.BaseUrlVariables) if (!c.BaseUrlVariables.Contains(v)) c.BaseUrlVariables.Add(v);
+                foreach (var v in f.TokenVariables) if (!c.TokenVariables.Contains(v)) c.TokenVariables.Add(v);
+            }
+            return c;
         }
 
         /// <summary>Lines for the console and the status page: counts, keys and problems; never URLs, tokens or model ids.</summary>
