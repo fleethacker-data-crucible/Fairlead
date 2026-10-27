@@ -112,6 +112,8 @@ namespace Fairlead.Core.Host
 
             Admin.Post("/api/gateway/import", ImportGatewayFile);
             Admin.Post("/api/gateway/values", SaveGatewayValues);
+            Admin.Post("/api/gateway/curl", ImportGatewayCurl);
+            Admin.Post("/api/gateway/test", TestGatewayModel);
             Admin.Delete("/api/gateway", r =>
             {
                 GatewayValues.Clear();
@@ -669,19 +671,116 @@ namespace Fairlead.Core.Host
             if (yaml.Length > GatewayStore.MaxFileChars) throw new BadRequestException("The model file is too large; a gateway model file is a few KB.");
             var name = GatewayStore.NameFrom(Json.Read<string>(body, "fileName"));
             if (name == null) throw new BadRequestException("Name the model file with letters or digits (for example gemini-chat.yaml).");
+            return Task.FromResult(ImportYaml(name, yaml, body, null));
+        }
+
+        /// <summary>
+        /// Builds a one-endpoint model file from a pasted curl command (URL, format and model from the command; the key only
+        /// by the name of its variable) and imports it like a chosen file, under curl-&lt;model&gt;.
+        /// </summary>
+        private Task<HttpResponse> ImportGatewayCurl(HttpRequest r)
+        {
+            if (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(GatewayModelFile.PathVariable)))
+                throw new BadRequestException(GatewayModelFile.PathVariable + " is set, so Fairlead reads the model file from that path and an import would be ignored. Remove the variable first.");
+            var body = Json.Body(r);
+            var curl = Json.Read<string>(body, "curl");
+            if (string.IsNullOrWhiteSpace(curl)) throw new BadRequestException("Paste the curl command.");
+            if (curl.Length > 64 * 1024) throw new BadRequestException("The command is too long.");
+            var c = CurlImport.Parse(curl, Json.Read<string>(body, "tokenVariable"));
+            if (!c.Ok) return Task.FromResult(Json.Ok(new { saved = false, errors = c.Errors, warnings = c.Warnings }));
+            return Task.FromResult(ImportYaml(c.FileName, c.Yaml, body, c));
+        }
+
+        private HttpResponse ImportYaml(string name, string yaml, JObject body, CurlImport fromCurl)
+        {
             var check = GatewayModelFile.Inspect(yaml, "the chosen file");
             // Each endpoint key becomes a provider id, so it must not repeat one from another imported file.
             foreach (var other in (GatewayFiles ?? new List<GatewayModelFile>()).Where(x => !string.Equals(x.Name, name, StringComparison.OrdinalIgnoreCase)))
                 foreach (var ep in check.EndpointKeys.Where(k => other.EndpointKeys.Contains(k, StringComparer.OrdinalIgnoreCase)))
                     check.Errors.Add("Endpoint '" + ep + "' is already in the imported file " + other.Name + "; rename it in this file, or import this one under the same file name to replace that file.");
-            if (!check.Ok) return Task.FromResult(Json.Ok(new { saved = false, errors = check.Errors, warnings = check.Warnings }));
+            if (!check.Ok) return Json.Ok(new { saved = false, errors = check.Errors, warnings = check.Warnings });
             var values = ReadGatewayValues(body, check);
             var replaced = GatewayValues.Names.Contains(name, StringComparer.OrdinalIgnoreCase);
             GatewayValues.SaveFile(name, yaml);
             if (values.Count > 0) GatewayValues.SetValues(values);
             Log.Info("GATEWAY_IMPORTED", "AI gateway model file " + name + (replaced ? " replaced" : " imported") + " (" + check.EndpointKeys.Count + " endpoints, " + check.ModelKeys.Count + " models); kept encrypted at " + GatewayValues.Location(name) + ".");
             LoadGatewayModels();
-            return Task.FromResult(Json.Ok(new { saved = true, gateway = GatewayView() }));
+            if (fromCurl == null) return Json.Ok(new { saved = true, gateway = GatewayView() });
+            return Json.Ok(new
+            {
+                saved = true,
+                gateway = GatewayView(),
+                warnings = fromCurl.Warnings,
+                fileName = name,
+                target = fromCurl.EndpointKey + "/" + fromCurl.Model,
+                format = fromCurl.Format,
+                tokenVariable = fromCurl.TokenVariable,
+            });
+        }
+
+        /// <summary>
+        /// Sends one short prompt straight to a gateway model (no route, no fallback) and says in plain words what went
+        /// wrong: no key, key rejected, wrong address, model or request refused, or unreachable. Never shows the key.
+        /// </summary>
+        private async Task<HttpResponse> TestGatewayModel(HttpRequest r)
+        {
+            var body = Json.Body(r);
+            var target = Json.Read<string>(body, "target");
+            var slash = target == null ? -1 : target.IndexOf('/');
+            if (slash <= 0) throw new BadRequestException("Name the model to test as provider/model.");
+            var providerId = target.Substring(0, slash);
+            var provider = Config.Current.FindProvider(providerId);
+            if (provider == null)
+            {
+                // An endpoint from a model file that is not in use yet: say why instead of "not found".
+                var file = (GatewayFiles ?? new List<GatewayModelFile>()).FirstOrDefault(x => x.EndpointKeys.Contains(providerId, StringComparer.OrdinalIgnoreCase));
+                if (file == null) throw new NotFoundException("No provider called " + providerId + ".");
+                var missingKey = file.TokenVariables.FirstOrDefault(v => file.Errors.Any(e => e.StartsWith(v + " ", StringComparison.Ordinal) && e.EndsWith("is not set.", StringComparison.Ordinal)));
+                if (missingKey != null)
+                    return Json.Ok(new { ok = false, verdict = "no-key", message = "No key is available for " + providerId + ": share " + missingKey + " from Lazarette, or set that environment variable and restart Fairlead. Nothing was sent." });
+                return Json.Ok(new { ok = false, verdict = "file-problem", message = "The model file " + file.Name + " has problems, so " + providerId + " is not in use: " + string.Join(" ", file.Errors) });
+            }
+            if (string.IsNullOrEmpty(SecretProtector.ApiKeyFor(provider, Lazarette.Value)))
+                return Json.Ok(new { ok = false, verdict = "no-key", message = "No key is available for " + provider.Id + ": share " + (provider.ApiKeyEnv ?? "its key") + " from Lazarette, or set that environment variable and restart Fairlead. Nothing was sent." });
+            var request = new JObject
+            {
+                { "model", target },
+                { "messages", new JArray { new JObject { { "role", "user" }, { "content", "Reply with the single word: ok" } } } },
+                { "max_tokens", 16 },
+                { "stream", false },
+            };
+            var synthetic = new HttpRequest
+            {
+                Method = "POST",
+                Path = "/v1/chat/completions",
+                Body = System.Text.Encoding.UTF8.GetBytes(request.ToString(Formatting.None)),
+                RequestId = r.RequestId,
+                Internal = true,
+                Aborted = r.Aborted,
+            };
+            var response = await Engine.HandleChatAsync(synthetic, Dialect.OpenAi).ConfigureAwait(false);
+            var rec = Metrics.Find(r.RequestId);
+            var last = rec == null ? null : rec.Attempts.LastOrDefault(a => a.Outcome != "skipped");
+            if (response.Status < 300)
+            {
+                var answer = JObject.Parse(System.Text.Encoding.UTF8.GetString(response.Body));
+                return Json.Ok(new { ok = true, verdict = "ok", message = "The gateway answered: the address, key and model all work.", status = 200, ms = rec == null ? (int?)null : rec.TotalMs, text = Translate.ContentText(answer["choices"].At(0).At("message").At("content")) });
+            }
+            var outcome = last == null ? "error" : last.Outcome;
+            var status = last == null ? (int?)null : last.Status;
+            string verdict, message;
+            switch (outcome)
+            {
+                case "auth": verdict = "key-rejected"; message = "The gateway rejected the key (HTTP " + (status ?? 401) + "): it is wrong, expired or not allowed this model. The address and the request were fine."; break;
+                case "modelnotfound": verdict = status == 404 ? "not-found" : "model"; message = status == 404 ? "HTTP 404: the URL or path is wrong, or the gateway does not serve this model there." : "The gateway does not know this model id."; break;
+                case "badrequest": verdict = "request-rejected"; message = "The gateway refused the request (HTTP " + (status ?? 400) + "): the model id or the request format does not match what it expects."; break;
+                case "network": verdict = "unreachable"; message = "The gateway could not be reached: check the address and that this PC is on the network that can see it."; break;
+                case "timeout": verdict = "timeout"; message = "The gateway did not answer in time."; break;
+                case "server": verdict = "server"; message = "The gateway had an error of its own (HTTP " + (status ?? 500) + ")."; break;
+                case "ratelimited": verdict = "rate-limited"; message = "The gateway is rate-limiting this key (HTTP 429); the key itself works."; break;
+                default: verdict = "error"; message = "The request failed."; break;
+            }
+            return Json.Ok(new { ok = false, verdict = verdict, message = message, status = status, detail = last == null ? (rec == null ? null : rec.Error) : last.Error });
         }
 
         /// <summary>Stores the gateway address (or another non-secret variable the current file names), encrypted, then reloads.</summary>
