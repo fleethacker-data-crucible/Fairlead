@@ -44,6 +44,8 @@ namespace Fairlead.Core.Telemetry
         public bool Kedge { get; set; }
         public bool Sensitive { get; set; }
         public bool Failover { get; set; }
+        /// <summary>Set when the answer came from outside the route asked for: "local" or "discovered".</summary>
+        public string FallbackVia { get; set; }
         public bool Stream { get; set; }
         public int Status { get; set; }
         public string Error { get; set; }

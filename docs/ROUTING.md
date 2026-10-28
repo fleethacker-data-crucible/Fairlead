@@ -96,3 +96,5 @@ its own; routes still fall back per request). Tray, Settings page and `POST /api
 | `X-Fairlead-Attempts` | response | Targets tried (including a lost hedge race) |
 | `X-Fairlead-Request-Id` | response | Key into the Activity log |
 | `X-Fairlead-Private` | response | `1` when the request was kept local as private |
+| `X-Fairlead-Fallback` | response | Set only when the answer came from outside the route asked for: `local` (the route's local fallback) or `discovered` (a model found on a local server). `X-Fairlead-Target` then names that model, not the one asked for, and clients should credit it |
+| `X-Fairlead-Fallback-Reason` | response | Why: the routing decision, e.g. "Every target of 'openrouter/…' is down; falling back to 'local'." |

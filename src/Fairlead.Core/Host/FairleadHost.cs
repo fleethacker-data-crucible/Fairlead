@@ -427,7 +427,7 @@ namespace Fairlead.Core.Host
             r.Headers["Vary"] = "Origin";
             r.Headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS";
             r.Headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type, x-api-key, anthropic-version, anthropic-beta, X-Fairlead-Route, X-Fairlead-Privacy";
-            r.Headers["Access-Control-Expose-Headers"] = "X-Fairlead-Route, X-Fairlead-Target, X-Fairlead-Mode, X-Fairlead-Attempts, X-Fairlead-Request-Id, X-Fairlead-Private";
+            r.Headers["Access-Control-Expose-Headers"] = "X-Fairlead-Route, X-Fairlead-Target, X-Fairlead-Mode, X-Fairlead-Attempts, X-Fairlead-Request-Id, X-Fairlead-Private, X-Fairlead-Fallback, X-Fairlead-Fallback-Reason";
             r.Headers["Access-Control-Max-Age"] = "600";
         }
 
