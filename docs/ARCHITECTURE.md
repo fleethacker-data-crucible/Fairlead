@@ -65,6 +65,12 @@ tool ──POST /v1/messages──▶ Host (origin check, CORS) ──▶ Gatewa
    6. record: decision trace, attempts, tokens, first-token time, cost → Activity, metrics, logs\fairlead-requests-*.jsonl
 ```
 
+Steps 3–6 are also published as they happen (`start`, `attempt` begin/end, `firstByte`, `done`) on `GET /api/live`,
+a server-sent-events stream behind the same loopback check and session token as the rest of `/api`. The Overview's
+routing map reads it with `fetch` (so the token stays in a header) and lights each request's real path: client →
+route (via `auto`'s rules, or the jump to `local` when a route is empty) → each target tried. Nothing is written to
+disk, a slow subscriber drops events instead of holding memory, and an engine without the endpoint is polled instead.
+
 Failover happens only before the first byte reaches the caller. After that, an upstream failure ends the stream
 with an error event in the caller's dialect; replaying a half-delivered answer from another model would corrupt it.
 

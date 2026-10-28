@@ -18,6 +18,8 @@ namespace Fairlead.Core.Routing
         /// <summary>Breaker open or probe failed: tried only after every healthy candidate.</summary>
         public bool Parked { get; set; }
         public string ParkedBecause { get; set; }
+        /// <summary>Which lead it came from: the planned route's id, "local" after a local fallback, or "discovered".</summary>
+        public string Via { get; set; }
 
         public Candidate()
         {
@@ -29,6 +31,8 @@ namespace Fairlead.Core.Routing
     public sealed class RoutePlan
     {
         public string Route { get; set; }
+        /// <summary>The route the request named or defaulted to, before 'auto' rules chose <see cref="Route"/>.</summary>
+        public string RequestedRoute { get; set; }
         public List<string> Decision { get; set; }
         public List<Candidate> Candidates { get; set; }
         public int HedgeAfterMs { get; set; }
@@ -70,6 +74,7 @@ namespace Fairlead.Core.Routing
                 if (route == null) { plan.Error = "The auto route chose '" + chosen + "', which does not exist."; return plan; }
             }
             plan.Route = route.Id;
+            plan.RequestedRoute = askedFor;
             plan.HedgeAfterMs = route.HedgeAfterMs;
 
             if (client != null && client.Routes.Count > 0 && !client.Routes.Contains(route.Id, StringComparer.OrdinalIgnoreCase) && !client.Routes.Contains(askedFor, StringComparer.OrdinalIgnoreCase))
@@ -94,6 +99,7 @@ namespace Fairlead.Core.Routing
 
             var candidates = Expand(cfg, route, profile, health, breakers, plan, operation, now);
             Order(route, candidates, metrics);
+            foreach (var c in candidates) c.Via = route.Id;
             var healthy = candidates.Where(c => !c.Parked).ToList();
 
             if (healthy.Count == 0 && route.LocalFallback && !string.Equals(route.Id, "local", StringComparison.OrdinalIgnoreCase))
@@ -104,6 +110,7 @@ namespace Fairlead.Core.Routing
                     plan.Decision.Add(candidates.Count == 0 ? "Route '" + route.Id + "' has no usable target; falling back to 'local'." : "Every target of '" + route.Id + "' is down; falling back to 'local'.");
                     var extra = Expand(cfg, local, profile, health, breakers, plan, operation, now);
                     Order(local, extra, metrics);
+                    foreach (var c in extra) c.Via = local.Id;
                     candidates.AddRange(extra);
                     healthy = candidates.Where(c => !c.Parked).ToList();
                 }
@@ -114,6 +121,7 @@ namespace Fairlead.Core.Routing
                 if (auto != null)
                 {
                     plan.Decision.Add("Using " + auto.Ref + ", a model found on a local server (no local route target is configured or reachable).");
+                    auto.Via = "discovered";
                     candidates.Add(auto);
                 }
             }
