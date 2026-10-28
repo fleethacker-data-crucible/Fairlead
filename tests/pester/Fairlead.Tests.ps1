@@ -179,7 +179,13 @@ Describe 'The fairlead CLI against a real host' {
         $script:CliInfo = $script:CliHost.Start()
         $env:FAIRLEAD_DATA_DIR = $settings.DataDirectory
         $script:Cli = Join-Path $script:Root 'fairlead.cmd'
-        function script:Invoke-Cli { $out = & $script:Cli @args 2>&1 | Out-String; return @{ Out = $out; Code = $LASTEXITCODE } }
+        function script:Invoke-Cli {
+            # Windows PowerShell wraps native stderr as ErrorRecords. Capture expected
+            # CLI failures instead of letting Pester's Stop preference terminate early.
+            $ErrorActionPreference = 'Continue'
+            $out = & $script:Cli @args 2>&1 | Out-String
+            return @{ Out = $out; Code = $LASTEXITCODE }
+        }
         function script:Invoke-CliJson { $r = Invoke-Cli @args --json; $r.Code | Should -Be 0 -Because $r.Out; return ($r.Out | ConvertFrom-Json) }
     }
     AfterAll {
@@ -249,9 +255,13 @@ Describe 'The fairlead CLI against a real host' {
         $r = Invoke-Cli providers show nope
         $r.Code | Should -Be 1
         $r.Out | Should -Match 'No provider nope'
-        $r = '' | & $script:Cli routes remove fast 2>&1 | Out-String
-        $LASTEXITCODE | Should -Be 1
-        $r | Should -Match '--yes'
+        $r = & {
+            $ErrorActionPreference = 'Continue'
+            $out = '' | & $script:Cli routes remove fast 2>&1 | Out-String
+            return @{ Out = $out; Code = $LASTEXITCODE }
+        }
+        $r.Code | Should -Be 1
+        $r.Out | Should -Match '--yes'
         (Invoke-CliJson routes show fast).id | Should -Be 'fast'
     }
 
