@@ -17,7 +17,8 @@ export function ProvidersPage({ status }: { status: Status | undefined }) {
   const presets = useResource('/api/presets', Presets);
   const toast = useToast();
   const [adding, setAdding] = useState('');
-  const [selected, setSelected] = useState<string | null>(null);
+  // #/providers?id=ollama opens that provider (the routing map's side panel links here).
+  const [selected, setSelected] = useState<string | null>(() => new URLSearchParams(window.location.hash.split('?')[1] ?? '').get('id'));
   const providers = config.data?.providers ?? [];
   const current = providers.find((p) => p.id === selected) ?? providers[0];
 

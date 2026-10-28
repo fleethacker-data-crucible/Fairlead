@@ -145,4 +145,10 @@
   /* The line through the fairlead: drawn on the overview when traffic flows. */
   .lead-line { stroke-dasharray: 6 6; animation: lead 1.2s linear infinite; }
   @keyframes lead { to { stroke-dashoffset: -12; } }
+  /* A cloud lead paying out from the fairlead when it starts carrying traffic (path has pathLength="1"). */
+  .lead-payout { stroke-dasharray: 1; stroke-dashoffset: 1; animation: payout 600ms ease-out forwards; }
+  @keyframes payout { to { stroke-dashoffset: 0; } }
+  .lead-fade { transition: opacity 200ms ease-out, stroke-width 200ms ease-out; }
+  .map-node:focus { outline: none; }
+  .map-node:focus-visible rect, .map-node:focus-visible text { outline: none; stroke: var(--focus); }
 }

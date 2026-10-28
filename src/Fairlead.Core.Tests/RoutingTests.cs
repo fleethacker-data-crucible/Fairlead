@@ -56,6 +56,21 @@ namespace Fairlead.Core.Tests
         }
 
         [Fact]
+        public void PlanSaysWhichLeadEachCandidateCameFrom()
+        {
+            var c = Config();
+            var quick = Plan(c, Profile("auto", "hi"));
+            Assert.Equal("auto", quick.RequestedRoute);
+            Assert.All(quick.Candidates, x => Assert.Equal("fast", x.Via));
+            // An empty route falls back to 'local': the live view draws that jump from the candidates' Via.
+            c.FindRoute("fast")!.Targets.Clear();
+            var fallback = Plan(c, Profile("fast", "hi"));
+            Assert.Equal("fast", fallback.Route);
+            Assert.Equal("local", fallback.Candidates[0].Via);
+            Assert.Contains(fallback.Decision, d => d.Contains("has no usable target; falling back to 'local'"));
+        }
+
+        [Fact]
         public void HardCodedModelNamesLandOnRoutesThroughAliases()
         {
             var c = Config();
