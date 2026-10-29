@@ -69,10 +69,23 @@ function Split-List([string]$Value) {
 
 # ---------- engine connection ----------
 
+function Assert-LocalEngineUrl([string]$Value) {
+    $parsed = $null
+    if (-not [Uri]::TryCreate($Value, [UriKind]::Absolute, [ref]$parsed) -or
+        $parsed.Scheme -notin @('http', 'https') -or $parsed.UserInfo -or $parsed.Query -or $parsed.Fragment -or
+        $parsed.AbsolutePath.Trim('/') -ne '') { throw 'The Fairlead admin URL must be a loopback HTTP(S) origin with no path, credentials, query or fragment.' }
+    $ip = $null
+    $local = $parsed.DnsSafeHost -ieq 'localhost'
+    if ([Net.IPAddress]::TryParse($parsed.DnsSafeHost.Trim('[', ']'), [ref]$ip)) { $local = [Net.IPAddress]::IsLoopback($ip) }
+    if (-not $local) { throw 'The Fairlead admin URL must be loopback; a session token must never be sent to a remote host.' }
+}
+
 function Get-Engine {
     if ($script:Engine) { return $script:Engine }
+    if ($script:Cli.Opts.ContainsKey('session')) { throw 'Do not pass a session token on the command line. Use the FAIRLEAD_SESSION environment variable or the local CLI access file.' }
     $url = Opt 'url' $env:FAIRLEAD_URL
-    $token = Opt 'session' $env:FAIRLEAD_SESSION
+    if ($url) { Assert-LocalEngineUrl $url }
+    $token = $env:FAIRLEAD_SESSION
     if (-not $url -or -not $token) {
         $dataDir = $env:FAIRLEAD_DATA_DIR
         if (-not $dataDir) { $dataDir = Join-Path $env:LOCALAPPDATA 'Fairlead' }
@@ -81,6 +94,7 @@ function Get-Engine {
         $info = Get-Content -LiteralPath $file -Raw | ConvertFrom-Json
         if (-not (Get-Process -Id $info.pid -ErrorAction SilentlyContinue)) { throw ('Fairlead is not running (the engine that wrote ' + $file + ' has exited). Start it with: fairlead start') }
         if (-not $url) { $url = $info.url }
+        Assert-LocalEngineUrl $url
         if (-not $token) {
             Add-Type -AssemblyName System.Security
             $stored = [string]$info.token
@@ -102,6 +116,7 @@ function Invoke-Api([string]$Method, [string]$Path, $Body = $null, [hashtable]$H
     $req.Accept = 'application/json'
     $req.Timeout = 600000
     $req.ReadWriteTimeout = 600000
+    $req.AllowAutoRedirect = $false
     $req.Headers.Add('X-Fairlead-Session', $e.Token)
     foreach ($k in $Headers.Keys) { $req.Headers.Add($k, $Headers[$k]) }
     if ($Method -ne 'GET' -and $Method -ne 'DELETE') {
@@ -115,6 +130,10 @@ function Invoke-Api([string]$Method, [string]$Path, $Body = $null, [hashtable]$H
     catch [System.Net.WebException] {
         $resp = $_.Exception.Response
         if ($null -eq $resp) { throw ('Cannot reach Fairlead at ' + $e.Url + ': ' + $_.Exception.Message) }
+    }
+    if ([int]$resp.StatusCode -ge 300 -and [int]$resp.StatusCode -lt 400) {
+        $resp.Close()
+        throw 'The local Fairlead admin API returned a redirect. Refusing to forward session credentials.'
     }
     $reader = New-Object IO.StreamReader($resp.GetResponseStream(), [Text.Encoding]::UTF8)
     $text = $reader.ReadToEnd(); $reader.Close()
@@ -251,8 +270,8 @@ Health and activity
   logs [--level info|warn|error]      GET /api/logs
   live [--count N]                    stream request events as they happen   GET /api/live
 
-Options for every command: --json (the value as JSON), --url U and --session T (or FAIRLEAD_URL /
-FAIRLEAD_SESSION) to reach an engine other than this user's.
+Options for every command: --json (the value as JSON), --url U (loopback only).
+Use FAIRLEAD_URL and FAIRLEAD_SESSION for a different local engine. Never put a session token on the command line.
 '@
 }
 

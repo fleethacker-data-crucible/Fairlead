@@ -22,8 +22,7 @@ encrypted with Windows DPAPI for the user who started Fairlead. The CLI decrypts
 - **Other Windows accounts** on the machine cannot decrypt the token.
 - **Programs running as you** can, but they can already read your config and stored keys.
 - **The browser's session token** never touches disk; the CLI token is a different value.
-- **Another engine** (another data folder, or another machine over an SSH tunnel): pass `--url` and `--session`, or set
-  `FAIRLEAD_URL` and `FAIRLEAD_SESSION`. `FAIRLEAD_DATA_DIR` points the CLI at the same data folder the engine uses.
+- **Another local engine** (another data folder, or a loopback SSH tunnel): pass `--url` or set `FAIRLEAD_URL`, and supply the session through `FAIRLEAD_SESSION`. Session tokens are refused on the command line. URLs must be loopback HTTP(S) origins, without credentials, path, query or fragment, and HTTP redirects are refused. `FAIRLEAD_DATA_DIR` points the CLI at the same data folder the engine uses.
 
 ## Commands
 

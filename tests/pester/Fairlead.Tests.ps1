@@ -204,6 +204,28 @@ Describe 'The fairlead CLI against a real host' {
         (Invoke-CliJson api).routes | Should -Contain 'POST /api/routes'
     }
 
+    It 'refuses remote or ambiguous admin URLs before reading or sending a session token' {
+        foreach ($url in @('https://example.invalid', 'http://127.0.0.1@example.invalid', 'http://localhost/api', 'http://localhost/?x=1', 'http://localhost/#x', 'file:///C:/temp')) {
+            $r = Invoke-Cli status --url $url
+            $r.Code | Should -Be 1
+            $r.Out | Should -Match 'loopback'
+            $r.Out | Should -Not -Match $script:CliInfo.SessionToken
+        }
+    }
+
+    It 'refuses a command-line session token and accepts the environment path for a loopback engine' {
+        $r = Invoke-Cli status --session synthetic-session
+        $r.Code | Should -Be 1
+        $r.Out | Should -Match 'FAIRLEAD_SESSION'
+        $r.Out | Should -Not -Match 'synthetic-session'
+        $old = $env:FAIRLEAD_SESSION
+        try {
+            $env:FAIRLEAD_SESSION = $script:CliHost.CliToken
+            $r = Invoke-Cli status --url $script:CliInfo.Url
+            $r.Code | Should -Be 0 -Because $r.Out
+        } finally { $env:FAIRLEAD_SESSION = $old }
+    }
+
     It 'changes routes, providers, clients, settings and Kedge mode through the API' {
         (Invoke-Cli routes set smart --targets 'ollama/qwen,ollama/tiny' --strategy fastest).Code | Should -Be 0
         $smart = Invoke-CliJson routes show smart
