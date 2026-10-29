@@ -57,12 +57,20 @@ claude
 Any OpenAI SDK: `base_url="http://127.0.0.1:8776/v1"`, `api_key="fl-..."`, `model="auto"`. More tools are in
 [`integrations/`](integrations/README.md) and on the Clients page.
 
+Everything the admin page does also works from the command line and over HTTP:
+
+```powershell
+.airlead.cmd status                       # or: help, routes set, providers test, clients add, kedge on, chat ...
+```
+
 ## Documentation
 
 - [Vision: the Fleet's intelligence router](docs/VISION.md): Fairlead as the default for AI endpoints, git repositories and databases; migration inventory and open questions
 - [Architecture](docs/ARCHITECTURE.md): components, request path, security
 - [Routing and Kedge mode](docs/ROUTING.md): routes, rules, aliases, failover, health
 - [AI gateway](docs/AI-GATEWAY.md): Responses API gateways from a model file, with the address and token from the environment
+- [Command line](docs/CLI.md): `fairlead.cmd`, one command per capability, for people and scripts
+- [API](docs/API.md): the gateway (`/v1`) and every admin route (`/api`)
 - [Operations](docs/OPERATIONS.md): running, stopping, config files, troubleshooting
 - [Development](docs/DEVELOPMENT.md): build, test, layout, conventions
 - [Integrations](integrations/README.md): per-tool setup and the hackathon worklist
