@@ -153,6 +153,9 @@ namespace Fairlead.Core.Gateway
             record.Target = winner.Ref;
             record.Local = winner.Local;
             record.Failover = record.Attempts.Count(a => a.Outcome != "skipped" && a.Outcome != "lost-race") > 1;
+            // Answered from outside the route asked for (a local fallback): say so, so a client never labels
+            // a local model's answer with the cloud model it named.
+            if (!string.IsNullOrEmpty(winner.Via) && !string.Equals(winner.Via, plan.Route, StringComparison.OrdinalIgnoreCase)) record.FallbackVia = winner.Via;
             record.FirstByteMs = (int)response.HeadersAfter.TotalMilliseconds;
             if (!profile.Stream) PublishFirstByte(record, winner.Ref, (int)sw.ElapsedMilliseconds);
             if (!winner.Local && _health != null) _health.ReportCloudSuccess();
@@ -660,6 +663,20 @@ namespace Fairlead.Core.Gateway
             http.Headers["X-Fairlead-Attempts"] = record.Attempts.Count(a => a.Outcome != "skipped").ToString();
             http.Headers["X-Fairlead-Request-Id"] = record.Id;
             if (record.Sensitive) http.Headers["X-Fairlead-Private"] = "1";
+            if (record.FallbackVia != null)
+            {
+                http.Headers["X-Fairlead-Fallback"] = record.FallbackVia;
+                var why = record.Decision.LastOrDefault(d => d.Contains("falling back") || d.Contains("found on a local server"));
+                if (why != null) http.Headers["X-Fairlead-Fallback-Reason"] = HeaderSafe(why);
+            }
+        }
+
+        /// <summary>Printable ASCII only, as an HTTP header value must be.</summary>
+        private static string HeaderSafe(string s)
+        {
+            var sb = new System.Text.StringBuilder(Math.Min(s.Length, 300));
+            foreach (var ch in s.Length > 300 ? s.Substring(0, 300) : s) sb.Append(ch >= 0x20 && ch < 0x7F ? ch : '?');
+            return sb.ToString();
         }
 
         private HttpResponse Fail(RequestRecord record, System.Diagnostics.Stopwatch sw, Dialect dialect, int status, string message)
