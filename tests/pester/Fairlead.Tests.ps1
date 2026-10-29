@@ -166,6 +166,136 @@ Describe 'A real host on a free port' {
     }
 }
 
+Describe 'The fairlead CLI against a real host' {
+    BeforeAll {
+        Import-FairleadCore
+        $script:CliTmp = Join-Path ([IO.Path]::GetTempPath()) ('fairlead-cli-' + [guid]::NewGuid().ToString('N'))
+        $settings = New-Object Fairlead.Core.Config.FairleadSettings
+        $settings.RootDirectory = $script:CliTmp
+        $settings.DataDirectory = (Join-Path $script:CliTmp 'data')
+        $settings.LogDirectory = (Join-Path $script:CliTmp 'logs')
+        $settings.PreferredPort = 0
+        $script:CliHost = [Fairlead.Core.Facade]::CreateHost($settings, $null, 0, $null, $false)
+        $script:CliInfo = $script:CliHost.Start()
+        $env:FAIRLEAD_DATA_DIR = $settings.DataDirectory
+        $script:Cli = Join-Path $script:Root 'fairlead.cmd'
+        function script:Invoke-Cli {
+            # Windows PowerShell wraps native stderr as ErrorRecords. Capture expected
+            # CLI failures instead of letting Pester's Stop preference terminate early.
+            $ErrorActionPreference = 'Continue'
+            $out = & $script:Cli @args 2>&1 | Out-String
+            return @{ Out = $out; Code = $LASTEXITCODE }
+        }
+        function script:Invoke-CliJson { $r = Invoke-Cli @args --json; $r.Code | Should -Be 0 -Because $r.Out; return ($r.Out | ConvertFrom-Json) }
+    }
+    AfterAll {
+        if ($script:CliHost) { $script:CliHost.Dispose() }
+        $env:FAIRLEAD_DATA_DIR = $null
+        Remove-Item $script:CliTmp -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    It 'finds the engine through its DPAPI-protected access file, which holds no plain token' {
+        $file = Join-Path $script:CliTmp 'data\fairlead-cli.json'
+        Test-Path $file | Should -BeTrue
+        (Get-Content $file -Raw) | Should -Not -Match $script:CliInfo.SessionToken
+        $r = Invoke-Cli status
+        $r.Code | Should -Be 0
+        $r.Out | Should -Match 'Fairlead 0\.'
+        (Invoke-CliJson api).routes | Should -Contain 'POST /api/routes'
+    }
+
+    It 'refuses remote or ambiguous admin URLs before reading or sending a session token' {
+        foreach ($url in @('https://example.invalid', 'http://127.0.0.1@example.invalid', 'http://localhost/api', 'http://localhost/?x=1', 'http://localhost/#x', 'file:///C:/temp')) {
+            $r = Invoke-Cli status --url $url
+            $r.Code | Should -Be 1
+            $r.Out | Should -Match 'loopback'
+            $r.Out | Should -Not -Match $script:CliInfo.SessionToken
+        }
+    }
+
+    It 'refuses a command-line session token and accepts the environment path for a loopback engine' {
+        $r = Invoke-Cli status --session synthetic-session
+        $r.Code | Should -Be 1
+        $r.Out | Should -Match 'FAIRLEAD_SESSION'
+        $r.Out | Should -Not -Match 'synthetic-session'
+        $old = $env:FAIRLEAD_SESSION
+        try {
+            $env:FAIRLEAD_SESSION = $script:CliHost.CliToken
+            $r = Invoke-Cli status --url $script:CliInfo.Url
+            $r.Code | Should -Be 0 -Because $r.Out
+        } finally { $env:FAIRLEAD_SESSION = $old }
+    }
+
+    It 'changes routes, providers, clients, settings and Kedge mode through the API' {
+        (Invoke-Cli routes set smart --targets 'ollama/qwen,ollama/tiny' --strategy fastest).Code | Should -Be 0
+        $smart = Invoke-CliJson routes show smart
+        @($smart.targets) | Should -Be @('ollama/qwen', 'ollama/tiny')
+        $smart.strategy | Should -Be 'fastest'
+        (Invoke-Cli routes set smart --remove-target ollama/tiny).Code | Should -Be 0
+        @((Invoke-CliJson routes show smart).targets) | Should -Be @('ollama/qwen')
+
+        (Invoke-Cli providers set groq --preset groq --enabled false).Code | Should -Be 0
+        (Invoke-CliJson providers show groq).enabled | Should -BeFalse
+        (Invoke-Cli providers enable groq).Code | Should -Be 0
+        (Invoke-CliJson providers show groq).enabled | Should -BeTrue
+
+        $added = Invoke-Cli clients add ci-bot --routes local
+        $added.Out | Should -Match 'fl-[A-Za-z0-9]{20,}'
+        (Invoke-CliJson clients list).name | Should -Contain 'ci-bot'
+        (Invoke-Cli clients remove ci-bot --yes).Code | Should -Be 0
+        @((Invoke-CliJson clients list)).Count | Should -Be 0
+
+        (Invoke-Cli settings set requireClientKey=false privacy.detectSecrets=false 'corsOrigins=http://localhost:3000').Code | Should -Be 0
+        $s = Invoke-CliJson settings show
+        $s.requireClientKey | Should -BeFalse
+        $s.privacy.detectSecrets | Should -BeFalse
+        $s.privacy.forceLocalWhenSensitive | Should -BeTrue
+        @($s.corsOrigins) | Should -Be @('http://localhost:3000')
+
+        (Invoke-Cli kedge on).Out | Should -Match 'Kedge mode on'
+        (Invoke-CliJson config).kedge | Should -Be 'on'
+        (Invoke-Cli explain 'hello there').Out | Should -Match 'Route: '
+    }
+
+    It 'runs every read-only command, in tables and as JSON' {
+        foreach ($c in @(@('help'), @('config'), @('presets'), @('providers'), @('routes'), @('routing'), @('clients'), @('settings'), @('kedge'), @('gateway'), @('lazarette'), @('health'), @('breakers'), @('requests'), @('metrics'), @('logs', '--level', 'info'))) {
+            $r = Invoke-Cli @c
+            $r.Code | Should -Be 0 -Because (($c -join ' ') + ': ' + $r.Out)
+            if ($c[0] -ne 'help') { { Invoke-CliJson @c } | Should -Not -Throw -Because ($c -join ' ') }
+        }
+    }
+
+    It 'takes a provider key from stdin, never from the command line, and never prints it back' {
+        $out = 'sk-test-0123456789abcdef' | & $script:Cli providers key groq 2>&1 | Out-String
+        $LASTEXITCODE | Should -Be 0 -Because $out
+        $p = Invoke-CliJson providers show groq
+        $p.keySource | Should -Be 'stored'
+        ($p | ConvertTo-Json -Depth 5) | Should -Not -Match '0123456789abcdef'
+    }
+
+    It 'fails with a message and exit code 1, and refuses destructive commands from a script without --yes' {
+        $r = Invoke-Cli providers show nope
+        $r.Code | Should -Be 1
+        $r.Out | Should -Match 'No provider nope'
+        $r = & {
+            $ErrorActionPreference = 'Continue'
+            $out = '' | & $script:Cli routes remove fast 2>&1 | Out-String
+            return @{ Out = $out; Code = $LASTEXITCODE }
+        }
+        $r.Code | Should -Be 1
+        $r.Out | Should -Match '--yes'
+        (Invoke-CliJson routes show fast).id | Should -Be 'fast'
+    }
+
+    It 'says Fairlead is not running once the engine stops and its access file is gone' {
+        $script:CliHost.Dispose(); $script:CliHost = $null
+        Test-Path (Join-Path $script:CliTmp 'data\fairlead-cli.json') | Should -BeFalse
+        $r = Invoke-Cli status
+        $r.Code | Should -Be 1
+        $r.Out | Should -Match 'not running'
+    }
+}
+
 Describe 'Repository rules' {
     BeforeAll {
         $script:Ps = @(Get-ChildItem -Path $script:Root -Recurse -Include *.ps1, *.psm1, *.psd1 -File | Where-Object { $_.FullName -notmatch '\\(node_modules|dist|bin|obj)\\' })

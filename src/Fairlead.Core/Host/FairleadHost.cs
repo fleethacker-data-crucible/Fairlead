@@ -114,6 +114,7 @@ namespace Fairlead.Core.Host
             Metrics = new Metrics(Settings.LogDirectory);
             Engine = new GatewayEngine(Config, Upstream, Health, Breakers, Metrics, Log);
             SessionToken = string.IsNullOrEmpty(options.SessionToken) ? NewToken() : options.SessionToken;
+            CliToken = NewToken();
             Admin = new Router();
             Gateway = new Router();
             StartedAt = DateTimeOffset.UtcNow;
@@ -252,6 +253,7 @@ namespace Fairlead.Core.Host
             };
             WriteRuntimeFile(info);
             info.RuntimeFile = _runtimeFile;
+            WriteCliFile(info);
             if (Options.Monitor) Health.Start();
             if (Options.Monitor) Lazarette.Start();
             if (Options.AutoStop) _presenceTimer = new Timer(PresenceTick, null, 2000, 2000);
@@ -270,6 +272,7 @@ namespace Fairlead.Core.Host
             {
                 try { File.Delete(_runtimeFile); } catch (IOException) { }
             }
+            RemoveCliFile();
         }
 
         /// <summary>Blocks the calling (PowerShell) thread until End session, the tray's Exit, or Stop().</summary>
@@ -446,7 +449,7 @@ namespace Fairlead.Core.Host
         private bool TokenMatches(HttpRequest request)
         {
             var token = request.Header(SessionHeader);
-            return !string.IsNullOrEmpty(token) && FixedTimeEquals(token, SessionToken);
+            return !string.IsNullOrEmpty(token) && (FixedTimeEquals(token, SessionToken) || FixedTimeEquals(token, CliToken));
         }
 
         private bool IsOwnOrigin(string origin)
