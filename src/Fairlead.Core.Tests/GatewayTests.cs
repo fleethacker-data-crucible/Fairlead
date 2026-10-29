@@ -87,6 +87,24 @@ namespace Fairlead.Core.Tests
         }
 
         [Fact]
+        public async Task SaysWhenALocalFallbackAnswered()
+        {
+            var fake = new FakeUpstream().On("ollama.test", (r, b) => FakeUpstream.Json(HttpStatusCode.OK, FakeUpstream.OpenAiAnswer("from local")));
+            // 'fast' has nothing usable, so the local route answers in its place.
+            var host = Start(fake, c => c.FindRoute("fast")!.Targets.Clear(), out var key);
+            var r = await Post(host, "/v1/chat/completions", Chat("fast", "hi"), key);
+            Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+            Assert.Equal("ollama/qwen", r.Headers.GetValues("X-Fairlead-Target").Single());
+            Assert.Equal("local", r.Headers.GetValues("X-Fairlead-Fallback").Single());
+            Assert.Contains("falling back to 'local'", r.Headers.GetValues("X-Fairlead-Fallback-Reason").Single());
+            Assert.Equal("local", host.Metrics.Recent(1).Single().FallbackVia);
+
+            // An answer from the route asked for carries no fallback header.
+            var direct = await Post(host, "/v1/chat/completions", Chat("local", "hi"), key);
+            Assert.False(direct.Headers.Contains("X-Fairlead-Fallback"));
+        }
+
+        [Fact]
         public async Task LiveFeedStreamsTheRequestLifecycleToTheAdminUi()
         {
             var fake = new FakeUpstream()
