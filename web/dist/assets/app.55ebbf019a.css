@@ -13,6 +13,7 @@
     --font-weight-medium: 500;
     --font-weight-semibold: 600;
     --leading-tight: 1.25;
+    --ease-out: cubic-bezier(0, 0, 0.2, 1);
     --animate-spin: spin 1s linear infinite;
     --animate-pulse: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
     --default-transition-duration: 150ms;
@@ -206,8 +207,14 @@
   .sticky {
     position: sticky;
   }
+  .inset-y-0 {
+    inset-block: 0px;
+  }
   .top-1\/2 {
     top: calc(1 / 2 * 100%);
+  }
+  .right-0 {
+    right: 0px;
   }
   .right-2 {
     right: calc(var(--spacing) * 2);
@@ -217,6 +224,9 @@
   }
   .bottom-4 {
     bottom: calc(var(--spacing) * 4);
+  }
+  .z-10 {
+    z-index: 10;
   }
   .z-50 {
     z-index: 50;
@@ -323,6 +333,9 @@
   .h-40 {
     height: calc(var(--spacing) * 40);
   }
+  .h-64 {
+    height: calc(var(--spacing) * 64);
+  }
   .h-full {
     height: 100%;
   }
@@ -386,6 +399,9 @@
   .w-\[360px\] {
     width: 360px;
   }
+  .w-\[380px\] {
+    width: 380px;
+  }
   .w-\[480px\] {
     width: 480px;
   }
@@ -406,6 +422,9 @@
   }
   .max-w-\[calc\(100vw-2rem\)\] {
     max-width: calc(100vw - 2rem);
+  }
+  .max-w-full {
+    max-width: 100%;
   }
   .max-w-md {
     max-width: var(--container-md);
@@ -432,6 +451,9 @@
     --tw-translate-y: calc(calc(1 / 2 * 100%) * -1);
     translate: var(--tw-translate-x) var(--tw-translate-y);
   }
+  .transform {
+    transform: var(--tw-rotate-x,) var(--tw-rotate-y,) var(--tw-rotate-z,) var(--tw-skew-x,) var(--tw-skew-y,);
+  }
   .animate-pulse {
     animation: var(--animate-pulse);
   }
@@ -455,6 +477,9 @@
   }
   .grid-cols-\[64px_minmax\(0\,1fr\)\] {
     grid-template-columns: 64px minmax(0,1fr);
+  }
+  .grid-cols-\[110px_1fr\] {
+    grid-template-columns: 110px 1fr;
   }
   .grid-cols-\[240px_minmax\(0\,1fr\)\] {
     grid-template-columns: 240px minmax(0,1fr);
@@ -518,6 +543,9 @@
   }
   .gap-px {
     gap: 1px;
+  }
+  .gap-x-3 {
+    column-gap: calc(var(--spacing) * 3);
   }
   .gap-x-4 {
     column-gap: calc(var(--spacing) * 4);
@@ -614,6 +642,9 @@
   }
   .border-transparent {
     border-color: transparent;
+  }
+  .bg-\[var\(--fl-popover\)\] {
+    background-color: var(--fl-popover);
   }
   .bg-accent {
     background-color: var(--accent);
@@ -726,6 +757,9 @@
   .pt-3 {
     padding-top: calc(var(--spacing) * 3);
   }
+  .pt-4 {
+    padding-top: calc(var(--spacing) * 4);
+  }
   .pr-7 {
     padding-right: calc(var(--spacing) * 7);
   }
@@ -778,6 +812,9 @@
   .text-\[14px\] {
     font-size: 14px;
   }
+  .text-\[16px\] {
+    font-size: 16px;
+  }
   .text-\[22px\] {
     font-size: 22px;
   }
@@ -795,6 +832,9 @@
   .font-semibold {
     --tw-font-weight: var(--font-weight-semibold);
     font-weight: var(--font-weight-semibold);
+  }
+  .break-words {
+    overflow-wrap: break-word;
   }
   .break-all {
     word-break: break-all;
@@ -846,9 +886,21 @@
   .opacity-70 {
     opacity: 70%;
   }
+  .shadow-lg {
+    --tw-shadow: 0 10px 15px -3px var(--tw-shadow-color, rgb(0 0 0 / 0.1)), 0 4px 6px -4px var(--tw-shadow-color, rgb(0 0 0 / 0.1));
+    box-shadow: var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow);
+  }
   .shadow-none {
     --tw-shadow: 0 0 #0000;
     box-shadow: var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow);
+  }
+  .ring {
+    --tw-ring-shadow: var(--tw-ring-inset,) 0 0 0 calc(1px + var(--tw-ring-offset-width)) var(--tw-ring-color, currentcolor);
+    box-shadow: var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow);
+  }
+  .outline {
+    outline-style: var(--tw-outline-style);
+    outline-width: 1px;
   }
   .filter {
     filter: var(--tw-blur,) var(--tw-brightness,) var(--tw-contrast,) var(--tw-grayscale,) var(--tw-hue-rotate,) var(--tw-invert,) var(--tw-saturate,) var(--tw-sepia,) var(--tw-drop-shadow,);
@@ -862,6 +914,10 @@
     transition-property: color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to;
     transition-timing-function: var(--tw-ease, var(--default-transition-timing-function));
     transition-duration: var(--tw-duration, var(--default-transition-duration));
+  }
+  .ease-out {
+    --tw-ease: var(--ease-out);
+    transition-timing-function: var(--ease-out);
   }
   .select-none {
     -webkit-user-select: none;
@@ -950,9 +1006,6 @@
     }
     .md\:grid-cols-4 {
       grid-template-columns: repeat(4, minmax(0, 1fr));
-    }
-    .md\:grid-cols-\[1fr_auto_1fr\] {
-      grid-template-columns: 1fr auto 1fr;
     }
     .md\:grid-cols-\[minmax\(0\,1fr\)_200px\] {
       grid-template-columns: minmax(0,1fr) 200px;
@@ -1455,6 +1508,26 @@ textarea.fl-input {
       stroke-dashoffset: -12;
     }
   }
+  .lead-payout {
+    stroke-dasharray: 1;
+    stroke-dashoffset: 1;
+    animation: payout 600ms ease-out forwards;
+  }
+  @keyframes payout {
+    to {
+      stroke-dashoffset: 0;
+    }
+  }
+  .lead-fade {
+    transition: opacity 200ms ease-out, stroke-width 200ms ease-out;
+  }
+  .map-node:focus {
+    outline: none;
+  }
+  .map-node:focus-visible rect, .map-node:focus-visible text {
+    outline: none;
+    stroke: var(--focus);
+  }
 }
 @property --tw-translate-x {
   syntax: "*";
@@ -1470,6 +1543,26 @@ textarea.fl-input {
   syntax: "*";
   inherits: false;
   initial-value: 0;
+}
+@property --tw-rotate-x {
+  syntax: "*";
+  inherits: false;
+}
+@property --tw-rotate-y {
+  syntax: "*";
+  inherits: false;
+}
+@property --tw-rotate-z {
+  syntax: "*";
+  inherits: false;
+}
+@property --tw-skew-x {
+  syntax: "*";
+  inherits: false;
+}
+@property --tw-skew-y {
+  syntax: "*";
+  inherits: false;
 }
 @property --tw-divide-y-reverse {
   syntax: "*";
@@ -1574,6 +1667,11 @@ textarea.fl-input {
   inherits: false;
   initial-value: 0 0 #0000;
 }
+@property --tw-outline-style {
+  syntax: "*";
+  inherits: false;
+  initial-value: solid;
+}
 @property --tw-blur {
   syntax: "*";
   inherits: false;
@@ -1627,6 +1725,10 @@ textarea.fl-input {
   syntax: "*";
   inherits: false;
 }
+@property --tw-ease {
+  syntax: "*";
+  inherits: false;
+}
 @keyframes spin {
   to {
     transform: rotate(360deg);
@@ -1643,6 +1745,11 @@ textarea.fl-input {
       --tw-translate-x: 0;
       --tw-translate-y: 0;
       --tw-translate-z: 0;
+      --tw-rotate-x: initial;
+      --tw-rotate-y: initial;
+      --tw-rotate-z: initial;
+      --tw-skew-x: initial;
+      --tw-skew-y: initial;
       --tw-divide-y-reverse: 0;
       --tw-border-style: solid;
       --tw-leading: initial;
@@ -1666,6 +1773,7 @@ textarea.fl-input {
       --tw-ring-offset-width: 0px;
       --tw-ring-offset-color: #fff;
       --tw-ring-offset-shadow: 0 0 #0000;
+      --tw-outline-style: solid;
       --tw-blur: initial;
       --tw-brightness: initial;
       --tw-contrast: initial;
@@ -1679,6 +1787,7 @@ textarea.fl-input {
       --tw-drop-shadow-color: initial;
       --tw-drop-shadow-alpha: 100%;
       --tw-drop-shadow-size: initial;
+      --tw-ease: initial;
     }
   }
 }

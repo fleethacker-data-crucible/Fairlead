@@ -122,6 +122,10 @@ namespace Fairlead.Core.Telemetry
 
         public DateTimeOffset StartedAt { get; private set; }
 
+        /// <summary>Request lifecycle events for the live routing view.</summary>
+        public LiveFeed Live { get { return _live; } }
+        private readonly LiveFeed _live = new LiveFeed();
+
         public void Record(RequestRecord r)
         {
             lock (_lock)
@@ -150,6 +154,7 @@ namespace Fairlead.Core.Telemetry
                     catch (IOException) { }
                 }
             }
+            _live.Publish("done", () => Host.Json.Serialize(LiveDone(r)));
             foreach (var a in r.Attempts)
             {
                 if (a.Outcome == "skipped" || a.Outcome == "lost-race" || a.Outcome == "cancelled") continue;
@@ -169,6 +174,31 @@ namespace Fairlead.Core.Telemetry
                     }
                 }
             }
+        }
+
+        /// <summary>The finished request as the live view needs it: the trace without previews.</summary>
+        public static object LiveDone(RequestRecord r)
+        {
+            return new
+            {
+                id = r.Id,
+                time = r.Time,
+                client = r.Client,
+                requestedModel = r.RequestedModel,
+                route = r.Route,
+                decision = r.Decision,
+                attempts = r.Attempts,
+                target = r.Target,
+                local = r.Local,
+                kedge = r.Kedge,
+                sensitive = r.Sensitive,
+                failover = r.Failover,
+                stream = r.Stream,
+                status = r.Status,
+                error = r.Error,
+                firstByteMs = r.FirstByteMs,
+                totalMs = r.TotalMs,
+            };
         }
 
         public TargetStats Stats(string target)

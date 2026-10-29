@@ -87,6 +87,55 @@ namespace Fairlead.Core.Tests
         }
 
         [Fact]
+        public async Task LiveFeedStreamsTheRequestLifecycleToTheAdminUi()
+        {
+            var fake = new FakeUpstream()
+                .On("groq.test", (r, b) => FakeUpstream.Json(HttpStatusCode.ServiceUnavailable, new JObject { ["error"] = new JObject { ["message"] = "overloaded" } }))
+                .On("ollama.test", (r, b) => FakeUpstream.Json(HttpStatusCode.OK, FakeUpstream.OpenAiAnswer("from local")));
+            var host = Start(fake, null, out var key);
+            var anon = await _http.GetAsync(host.BaseUrl + "/api/live", HttpCompletionOption.ResponseHeadersRead);
+            Assert.Equal(HttpStatusCode.Unauthorized, anon.StatusCode);
+
+            var req = new HttpRequestMessage(HttpMethod.Get, host.BaseUrl + "/api/live");
+            req.Headers.TryAddWithoutValidation(FairleadHost.SessionHeader, host.SessionToken);
+            var live = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead);
+            Assert.Equal(HttpStatusCode.OK, live.StatusCode);
+            Assert.StartsWith("text/event-stream", live.Content.Headers.ContentType!.ToString());
+            using var reader = new StreamReader(await live.Content.ReadAsStreamAsync());
+            async Task<List<string>> ReadUntil(string type)
+            {
+                var events = new List<string>();
+                var cts = Task.Delay(10000);
+                while (true)
+                {
+                    var line = reader.ReadLineAsync();
+                    if (await Task.WhenAny(line, cts) == cts) throw new TimeoutException("No '" + type + "' event; saw " + string.Join(" ", events));
+                    var text = await line;
+                    if (text == null) throw new EndOfStreamException();
+                    if (text.StartsWith("event: ")) events.Add(text.Substring(7));
+                    if (text.StartsWith("data: ")) events[events.Count - 1] += " " + text.Substring(6);
+                    if (events.Count > 0 && events[events.Count - 1].StartsWith(type + " ")) return events;
+                }
+            }
+            await ReadUntil("hello");
+
+            var r = await Post(host, "/v1/chat/completions", Chat("fast", "hi"), key);
+            Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+            var seen = await ReadUntil("done");
+            var kinds = seen.Select(e => e.Split(' ')[0] + (e.Contains("\"phase\":\"begin\"") ? ":begin" : e.Contains("\"phase\":\"end\"") ? ":end" : "")).ToList();
+            Assert.Equal(new[] { "start", "attempt:begin", "attempt:end", "attempt:begin", "attempt:end", "firstByte", "done" }, kinds);
+            var start = JObject.Parse(seen[0].Substring(6));
+            Assert.Equal("tests", (string?)start["client"]);
+            Assert.Equal("fast", (string?)start["route"]);
+            Assert.Equal("fast", (string?)start["candidates"]![0]!["via"]);
+            Assert.Contains("\"outcome\":\"server\"", seen[2]);
+            var done = JObject.Parse(seen[6].Substring(5));
+            Assert.Equal("ollama/tiny", (string?)done["target"]);
+            Assert.True((bool)done["failover"]!);
+            Assert.Null(done["promptPreview"]);
+        }
+
+        [Fact]
         public async Task OfflineCloudFallsBackToLocalAndNudgesTheMonitor()
         {
             // No handler for groq.test: the fake throws like a DNS failure.
