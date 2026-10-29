@@ -17,11 +17,13 @@ namespace Fairlead.Core.Host
             public Route(string method, string template, RouteHandler handler)
             {
                 Method = method;
+                Template = template;
                 Segments = template.Trim('/').Split('/');
                 Handler = handler;
             }
 
             public string Method;
+            public string Template;
             public string[] Segments;
             public RouteHandler Handler;
         }
@@ -32,6 +34,12 @@ namespace Fairlead.Core.Host
         {
             _routes.Add(new Route(method.ToUpperInvariant(), template, handler));
             return this;
+        }
+
+        /// <summary>Every route as "METHOD /template", in registration order: the API describes itself at GET /api.</summary>
+        public List<string> Describe()
+        {
+            return _routes.Select(r => r.Method + " " + r.Template).ToList();
         }
 
         public Router Get(string template, RouteHandler handler) { return Map("GET", template, handler); }
