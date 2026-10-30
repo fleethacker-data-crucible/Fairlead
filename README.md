@@ -63,6 +63,10 @@ Everything the admin page does also works from the command line and over HTTP:
 .airlead.cmd status                       # or: help, routes set, providers test, clients add, kedge on, chat ...
 ```
 
+## Privacy and data
+
+Fairlead runs on this PC. A prompt goes only where its route sends it: local models keep it on the machine, and a cloud provider receives it under that provider's terms and your organization's AI policy. Prompts carrying secrets, or marked `X-Fairlead-Privacy: local`, never leave the machine. The request log never holds prompt text; prompt text is kept in memory only while content logging is on. Cloud keys are DPAPI-encrypted, and Fairlead sends no usage data anywhere.
+
 ## Documentation
 
 - [Vision: the Fleet's intelligence router](docs/VISION.md): Fairlead as the default for AI endpoints, git repositories and databases; migration inventory and open questions
