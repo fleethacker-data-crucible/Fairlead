@@ -16,7 +16,7 @@ namespace Fairlead.Core.Tests
         internal static FairleadConfig Config()
         {
             var c = FairleadConfig.CreateDefault();
-            c.Providers[0].Models.Add(new ModelInfo { Id = "qwen", ContextWindow = 32768, Tools = true });
+            c.Providers[0].Models.Add(new ModelInfo { Id = "phi4", ContextWindow = 32768, Tools = true });
             c.Providers[0].Models.Add(new ModelInfo { Id = "tiny", ContextWindow = 2048, Tools = false });
             var cloud = ProviderPresets.Create("anthropic");
             cloud.Models.Add(new ModelInfo { Id = "claude-big", ContextWindow = 200000, Tools = true, Vision = true, InputPricePerMTok = 3m, OutputPricePerMTok = 15m });
@@ -24,9 +24,9 @@ namespace Fairlead.Core.Tests
             var fast = ProviderPresets.Create("groq");
             fast.Models.Add(new ModelInfo { Id = "llama-fast" });
             c.Providers.Add(fast);
-            c.FindRoute("smart")!.Targets = new List<string> { "anthropic/claude-big", "ollama/qwen" };
+            c.FindRoute("smart")!.Targets = new List<string> { "anthropic/claude-big", "ollama/phi4" };
             c.FindRoute("fast")!.Targets = new List<string> { "groq/llama-fast", "ollama/tiny" };
-            c.FindRoute("local")!.Targets = new List<string> { "ollama/qwen" };
+            c.FindRoute("local")!.Targets = new List<string> { "ollama/phi4" };
             return c;
         }
 
@@ -87,8 +87,8 @@ namespace Fairlead.Core.Tests
             var c = Config();
             var direct = Plan(c, Profile("groq/llama-fast", "x"));
             Assert.Equal("groq/llama-fast", direct.Candidates[0].Ref);
-            var bare = Plan(c, Profile("qwen", "x"));
-            Assert.Equal("ollama/qwen", bare.Candidates[0].Ref);
+            var bare = Plan(c, Profile("phi4", "x"));
+            Assert.Equal("ollama/phi4", bare.Candidates[0].Ref);
         }
 
         [Fact]
@@ -112,7 +112,7 @@ namespace Fairlead.Core.Tests
                 Assert.True(plan.Kedge);
                 Assert.Equal("ollama/tiny", plan.Candidates[0].Ref);
                 var smart = Plan(c, Profile("anthropic/claude-big", "hello"), health);
-                Assert.Equal("ollama/qwen", smart.Candidates.Single().Ref);
+                Assert.Equal("ollama/phi4", smart.Candidates.Single().Ref);
             }
         }
 
@@ -135,7 +135,7 @@ namespace Fairlead.Core.Tests
             var breakers = new BreakerBoard();
             breakers.For("anthropic").Failure(FailureKind.Network, "offline");
             var plan = Plan(c, Profile("smart", "hello"), null, breakers);
-            Assert.Equal("ollama/qwen", plan.Candidates[0].Ref);
+            Assert.Equal("ollama/phi4", plan.Candidates[0].Ref);
             Assert.True(plan.Candidates.Last().Parked);
         }
 
@@ -145,7 +145,7 @@ namespace Fairlead.Core.Tests
             var c = Config();
             c.FindRoute("smart")!.Targets.Clear();
             var plan = Plan(c, Profile("smart", "hello"));
-            Assert.Equal("ollama/qwen", plan.Candidates.Single().Ref);
+            Assert.Equal("ollama/phi4", plan.Candidates.Single().Ref);
             Assert.Contains(plan.Decision, d => d.Contains("falling back to 'local'"));
         }
 

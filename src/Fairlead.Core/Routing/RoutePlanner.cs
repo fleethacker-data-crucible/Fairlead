@@ -177,7 +177,7 @@ namespace Fairlead.Core.Routing
                 var r = cfg.FindRoute(alias);
                 if (r != null) { plan.Decision.Add("Model '" + model + "' matches an alias for route '" + r.Id + "'."); return r; }
             }
-            // A bare model id that one provider serves ("qwen2.5:14b", "gpt-4.1") goes straight to it.
+            // A bare model id that one provider serves ("phi4", "gpt-4.1") goes straight to it.
             foreach (var p in cfg.Providers.Where(x => x.Enabled))
             {
                 if (p.FindModel(model) != null || HealthModels(health, p.Id).Any(m => string.Equals(m.Id, model, StringComparison.OrdinalIgnoreCase)))

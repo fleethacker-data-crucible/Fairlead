@@ -19,8 +19,8 @@ namespace Fairlead.Core.Tests
                 {""role"":""assistant"",""content"":[{""type"":""text"",""text"":""Checking.""},{""type"":""tool_use"",""id"":""t1"",""name"":""get_time"",""input"":{}}]},
                 {""role"":""user"",""content"":[{""type"":""tool_result"",""tool_use_id"":""t1"",""content"":""12:00""},{""type"":""text"",""text"":""thanks""}]}
               ]}");
-            var o = Translate.AnthropicToOpenAiRequest(a, "qwen", false, true);
-            Assert.Equal("qwen", (string?)o["model"]);
+            var o = Translate.AnthropicToOpenAiRequest(a, "phi4", false, true);
+            Assert.Equal("phi4", (string?)o["model"]);
             Assert.Equal(256, (int)o["max_tokens"]!);
             var msgs = (JArray)o["messages"]!;
             Assert.Equal("system", (string?)msgs[0]["role"]);
@@ -110,7 +110,7 @@ namespace Fairlead.Core.Tests
                 {""role"":""system"",""content"":[{""type"":""text"",""text"":""<total_tokens>99 left</total_tokens>""}]},
                 {""role"":""user"",""content"":[{""type"":""tool_result"",""tool_use_id"":""t1"",""content"":""line one""}]}
               ]}");
-            var msgs = (JArray)Translate.AnthropicToOpenAiRequest(a, "qwen", false, true)["messages"]!;
+            var msgs = (JArray)Translate.AnthropicToOpenAiRequest(a, "phi4", false, true)["messages"]!;
             Assert.Equal(new[] { "system", "user", "user", "assistant", "tool", "user" }, msgs.Select(m => (string?)m["role"]).ToArray());
             Assert.Equal("Plan mode is off.", (string?)msgs[2]["content"]);
             Assert.Equal("t1", (string?)msgs[4]["tool_call_id"]);
