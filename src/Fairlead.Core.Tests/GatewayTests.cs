@@ -94,7 +94,7 @@ namespace Fairlead.Core.Tests
             var host = Start(fake, c => c.FindRoute("fast")!.Targets.Clear(), out var key);
             var r = await Post(host, "/v1/chat/completions", Chat("fast", "hi"), key);
             Assert.Equal(HttpStatusCode.OK, r.StatusCode);
-            Assert.Equal("ollama/qwen", r.Headers.GetValues("X-Fairlead-Target").Single());
+            Assert.Equal("ollama/phi4", r.Headers.GetValues("X-Fairlead-Target").Single());
             Assert.Equal("local", r.Headers.GetValues("X-Fairlead-Fallback").Single());
             Assert.Contains("falling back to 'local'", r.Headers.GetValues("X-Fairlead-Fallback-Reason").Single());
             Assert.Equal("local", host.Metrics.Recent(1).Single().FallbackVia);
@@ -183,7 +183,7 @@ namespace Fairlead.Core.Tests
             Assert.Contains("event: message_stop", text);
             // The upstream got an OpenAI request asking for usage, for the local model.
             var sent = fake.Seen.Single().Value;
-            Assert.Equal("qwen", (string?)sent["model"]);
+            Assert.Equal("phi4", (string?)sent["model"]);
             Assert.True((bool)sent["stream_options"]!["include_usage"]!);
             await Task.Delay(100);
             var rec = host.Metrics.Recent(1).Single();
@@ -245,7 +245,7 @@ namespace Fairlead.Core.Tests
             var r = await _http.SendAsync(req);
             var ids = JObject.Parse(await r.Content.ReadAsStringAsync())["data"]!.Select(d => (string?)d["id"]).ToList();
             Assert.Equal("auto", ids[0]);
-            Assert.Contains("ollama/qwen", ids);
+            Assert.Contains("ollama/phi4", ids);
             Assert.Contains("anthropic/claude-big", ids);
         }
 
