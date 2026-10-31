@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type Dispatch, type SetStateAction } from 'react';
 import { LuArrowLeft, LuArrowRight, LuCheck, LuCloud, LuExternalLink, LuHardDrive, LuRefreshCw } from 'react-icons/lu';
 import { navigate } from '../app';
 import { TargetList, targetOptions } from '../components/targets';
@@ -10,6 +10,7 @@ import { snippets } from '../lib/snippets';
 import { invalidate, useResource } from '../lib/useResource';
 
 const STEPS = ['Local models', 'Cloud providers', 'Routes', 'Connect tools'] as const;
+type RouteDrafts = Record<string, string[]>;
 
 /**
  * The one-time browser setup: find local servers, add cloud keys, fill the routes, hand out the first key.
@@ -17,9 +18,15 @@ const STEPS = ['Local models', 'Cloud providers', 'Routes', 'Connect tools'] as 
  */
 export function SetupPage({ status, refreshStatus }: { status: Status | undefined; refreshStatus: () => Promise<void> }) {
   const [step, setStep] = useState(0);
+  // The wizard owns edits so leaving the Routes step cannot discard them.
+  const [routeDrafts, setRouteDrafts] = useState<RouteDrafts>({});
+  const [savingRoutes, setSavingRoutes] = useState(false);
+  const routesDirty = Object.keys(routeDrafts).length > 0;
   const config = useConfig();
   const toast = useToast();
+  const cloudSkipped = config.data && !config.data.providers.some((p) => !p.local && p.enabled && p.keySource !== 'none');
   const finish = async () => {
+    if (routesDirty || savingRoutes) { setStep(2); return; }
     try {
       await saveSettings({ setupComplete: true });
       await refreshStatus();
@@ -32,23 +39,24 @@ export function SetupPage({ status, refreshStatus }: { status: Status | undefine
       <ol className="flex flex-wrap gap-2" aria-label="Setup steps">
         {STEPS.map((s, i) => (
           <li key={s}>
-            <button type="button" onClick={() => setStep(i)} aria-current={i === step ? 'step' : undefined}
+            <button type="button" disabled={savingRoutes} onClick={() => setStep(i)} aria-current={i === step ? 'step' : undefined}
               className={cn('flex h-8 items-center gap-2 rounded-full border px-3 text-[13px]', i === step ? 'border-accent text-accent' : i < step ? 'border-line-2 text-ink' : 'border-line-2 text-ink-3')}>
-              <span className={cn('num inline-flex h-5 w-5 items-center justify-center rounded-full text-[11px]', i < step ? 'bg-accent text-accent-ink' : 'bg-surface-2')}>{i < step ? <LuCheck size={12} /> : i + 1}</span>{s}
+              <span className={cn('num inline-flex h-5 w-5 items-center justify-center rounded-full text-[11px]', i < step ? 'bg-accent text-accent-ink' : 'bg-surface-2')}>{i < step && !(i === 1 && cloudSkipped) && !(i === 2 && routesDirty) ? <LuCheck size={12} /> : i + 1}</span>{s}{i === 1 && i < step && cloudSkipped ? ' · skipped (optional)' : ''}
             </button>
           </li>
         ))}
       </ol>
       {config.error ? <Notice tone="err">{config.error}</Notice> : null}
+      {routesDirty ? <Notice tone="warn">Route changes are not saved yet. They stay available when you change setup steps. Save them in Routes before finishing setup.{step !== 2 ? <Button size="sm" disabled={savingRoutes} onClick={() => setStep(2)}>Review route changes</Button> : null}</Notice> : null}
       {step === 0 ? <LocalStep config={config.data} /> : null}
       {step === 1 ? <CloudStep config={config.data} /> : null}
-      {step === 2 ? <RoutesStep config={config.data} /> : null}
+      {step === 2 ? <RoutesStep config={config.data} drafts={routeDrafts} setDrafts={setRouteDrafts} saving={savingRoutes} setSaving={setSavingRoutes} /> : null}
       {step === 3 ? <ConnectStep status={status} config={config.data} /> : null}
       <div className="flex items-center justify-between">
-        <Button variant="quiet" disabled={step === 0} onClick={() => setStep(step - 1)}><LuArrowLeft size={14} />Back</Button>
+        <Button variant="quiet" disabled={step === 0 || savingRoutes} onClick={() => setStep(step - 1)}><LuArrowLeft size={14} />Back</Button>
         {step < STEPS.length - 1
-          ? <Button variant="primary" onClick={() => setStep(step + 1)}>Next: {STEPS[step + 1]}<LuArrowRight size={14} /></Button>
-          : <Button variant="primary" onClick={finish}><LuCheck size={14} />Finish setup</Button>}
+          ? <Button variant="primary" disabled={savingRoutes} onClick={() => setStep(step + 1)}>Next: {STEPS[step + 1]}<LuArrowRight size={14} /></Button>
+          : <Button variant="primary" disabled={routesDirty || savingRoutes} onClick={finish}><LuCheck size={14} />Finish setup</Button>}
       </div>
     </Page>
   );
@@ -146,10 +154,9 @@ function CloudRow({ preset, config }: { preset: { id: string; name: string; base
   );
 }
 
-function RoutesStep({ config }: { config: Config | undefined }) {
+function RoutesStep({ config, drafts, setDrafts, saving, setSaving }: { config: Config | undefined; drafts: RouteDrafts; setDrafts: Dispatch<SetStateAction<RouteDrafts>>; saving: boolean; setSaving: Dispatch<SetStateAction<boolean>> }) {
   const options = useMemo(() => targetOptions(config), [config]);
   const toast = useToast();
-  const [drafts, setDrafts] = useState<Record<string, string[]>>({});
   if (!config) return <div className="panel h-40" />;
   const routes = config.routes.filter((r) => r.strategy !== 'auto');
   const suggest = () => {
@@ -167,6 +174,8 @@ function RoutesStep({ config }: { config: Config | undefined }) {
     toast.push('info', 'Suggested targets filled in. Review the order, then save.');
   };
   const save = async () => {
+    if (saving) return;
+    setSaving(true);
     try {
       for (const r of routes) {
         const targets = drafts[r.id];
@@ -174,21 +183,21 @@ function RoutesStep({ config }: { config: Config | undefined }) {
       }
       setDrafts({});
       toast.push('ok', 'Routes saved.');
-    } catch (e) { toast.push('err', describeError(e)); }
+    } catch (e) { toast.push('err', describeError(e)); } finally { setSaving(false); }
   };
   const dirty = Object.keys(drafts).length > 0;
   return (
-    <Section title="Routes" aside={<><Button size="sm" onClick={suggest} disabled={options.length === 0}>Suggest targets</Button><Button size="sm" variant="primary" disabled={!dirty} onClick={() => void save()}>Save routes</Button></>}>
+    <Section title="Routes" aside={<><Button size="sm" onClick={suggest} disabled={options.length === 0 || saving}>Suggest targets</Button><Button size="sm" variant="primary" busy={saving} disabled={!dirty} onClick={() => void save()}>Save routes</Button></>}>
       <div className="px-4 py-3 text-ink-2">Tools ask for a route by name (<code>auto</code>, <code>smart</code>, <code>fast</code>, <code>local</code>). Each route tries its models in order. <code>auto</code> picks one of the others per request with the routing rules.</div>
       {options.length === 0 ? <Notice tone="warn" className="mx-4 mb-4">No models yet. Go back and add a local server or a cloud key first.</Notice> : null}
-      <div className="grid gap-4 px-4 pb-4 2xl:grid-cols-3 xl:grid-cols-2">
+      <fieldset disabled={saving} className="grid gap-4 px-4 pb-4 2xl:grid-cols-3 xl:grid-cols-2">
         {routes.map((r) => (
           <div key={r.id} className="flex flex-col gap-2">
             <div><span className="mono font-semibold text-ink">{r.id}</span> <span className="text-[12.5px] text-ink-3">{r.description}</span></div>
             <TargetList value={drafts[r.id] ?? r.targets} options={options} localOnly={r.id === 'local'} onChange={(next) => setDrafts({ ...drafts, [r.id]: next })} />
           </div>
         ))}
-      </div>
+      </fieldset>
     </Section>
   );
 }
