@@ -35,6 +35,7 @@ namespace Fairlead.Core.Config
         public static readonly IReadOnlyList<ProviderPreset> All = new List<ProviderPreset>
         {
             new ProviderPreset { Id = "ollama", Name = "Ollama", Kind = ProviderKind.Ollama, BaseUrl = "http://127.0.0.1:11434", Local = true, Hint = "Local models pulled with `ollama pull`." },
+            new ProviderPreset { Id = "phoenix-lai", Name = "phoenix-lai", Kind = ProviderKind.OpenAi, BaseUrl = "http://127.0.0.1:1234/v1", Local = true, Hint = "The Fleet's local chat model (Gemma). Same address as LM Studio's default server, so run one of them; Fleet tools default to this address." },
             new ProviderPreset { Id = "lmstudio", Name = "LM Studio", Kind = ProviderKind.OpenAi, BaseUrl = "http://127.0.0.1:1234/v1", Local = true, Hint = "Start the local server in LM Studio (Developer tab)." },
             new ProviderPreset { Id = "llamacpp", Name = "llama.cpp server", Kind = ProviderKind.OpenAi, BaseUrl = "http://127.0.0.1:8080/v1", Local = true, Hint = "llama-server -m model.gguf --port 8080" },
             new ProviderPreset { Id = "vllm", Name = "vLLM", Kind = ProviderKind.OpenAi, BaseUrl = "http://127.0.0.1:8000/v1", Local = true, Hint = "vllm serve <model> (a GPU box on the network also counts as local)." },
@@ -49,6 +50,24 @@ namespace Fairlead.Core.Config
             new ProviderPreset { Id = "together", Name = "Together AI", Kind = ProviderKind.OpenAi, BaseUrl = "https://api.together.xyz/v1", ApiKeyEnv = "TOGETHER_API_KEY", NeedsKey = true, KeyUrl = "https://api.together.ai/settings/api-keys", Hint = "Open models in the cloud." },
             new ProviderPreset { Id = "custom", Name = "Custom (OpenAI-compatible)", Kind = ProviderKind.OpenAi, BaseUrl = "http://127.0.0.1:8000/v1", Hint = "Any server that speaks /v1/chat/completions." },
         };
+
+        /// <summary>
+        /// The local presets grouped by address: presets that default to the same address (phoenix-lai and LM Studio both
+        /// use port 1234) are one server to look for, so local detection probes and reports each address once. The first
+        /// preset of a group is the one setup offers; the order of <see cref="All"/> decides.
+        /// </summary>
+        public static List<List<ProviderPreset>> LocalByAddress()
+        {
+            var groups = new List<List<ProviderPreset>>();
+            foreach (var p in All.Where(x => x.Local))
+            {
+                var key = p.BaseUrl.TrimEnd('/');
+                var group = groups.FirstOrDefault(g => string.Equals(g[0].BaseUrl.TrimEnd('/'), key, StringComparison.OrdinalIgnoreCase));
+                if (group == null) groups.Add(new List<ProviderPreset> { p });
+                else group.Add(p);
+            }
+            return groups;
+        }
 
         public static ProviderPreset Find(string id)
         {

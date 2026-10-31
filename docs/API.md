@@ -17,7 +17,10 @@ machine a key is optional when `requireClientKey` is off. Other machines always 
 | `POST /v1/messages` | Anthropic messages, routed the same way |
 | `POST /v1/messages/count_tokens` | Anthropic token estimate |
 | `POST /v1/embeddings` | OpenAI embeddings |
-| `GET /v1/models`, `GET /v1/models/{id}` | routes, then targets |
+| `POST /v1/completions` | the legacy completions API some autocomplete plugins still call: `prompt` (one string) becomes one user message of a chat request and goes through the gateway like any other (keys, routes, privacy, failover, request log); the answer is a `text_completion`, streamed chunk by chunk when `stream` is true. `max_tokens`, `temperature`, `top_p`, `stop`, `seed`, penalties and `user` pass through. Not supported, with a 400: several prompts in one request, `n` other than 1, `echo`, `suffix` |
+| `POST /v1/audio/speech` | OpenAI speech: JSON `{ model, input, voice, ... }` in, audio out (the upstream's content type). Same client keys, routes, privacy header, failover and request log as chat (the request log never holds the text). Only OpenAI-compatible providers serve it; Anthropic, Ollama and Responses targets are skipped, so a private request has no target unless a local OpenAI-compatible server (for example a speech server on this machine) is on the route. `model` is a route, a `provider/model` or a served model name, as for chat |
+| `POST /v1/audio/transcriptions` | OpenAI transcription: `multipart/form-data` (`file`, `model`, optional fields) in, JSON or text out. The file bytes are forwarded untouched; only `model` is rewritten to the target model. Same rules as speech |
+| `GET /v1/models`, `GET /v1/models/{id}` | routes, then targets. An id that can serve audio carries `"audio": ["speech"]` and/or `["transcription"]`: a provider/model whose name says so (tts, speech, whisper, transcribe, stt) on an OpenAI-compatible provider, and a route with such a target. `GET /v1/models?capability=audio` lists only those |
 | `GET /v1/health` | `{ ok, kedge, internet }`, no auth |
 
 Request headers: `X-Fairlead-Route: <route>` forces a route; `X-Fairlead-Privacy: local` keeps the request on local
@@ -40,6 +43,7 @@ config view, unless noted.
 | Route | Body | Returns |
 |---|---|---|
 | `GET /api` | | `{ version, routes: ["GET /api/status", ...] }` |
+| `GET /api/commands` | every CLI command with usage, routes and `destructive`: the same versioned JSON as `fairlead commands --json` (`schemaVersion` 1), read from the CLI script's help text |
 | `GET /api/health` | | `{ ok, version }` (no auth) |
 | `GET /api/status` | | version, port, gateway URL, connectivity, providers with health, routes with target counts, metrics |
 | `POST /api/heartbeat` | `{ leaving }` | browser presence, for auto-stop |
@@ -102,7 +106,7 @@ config view, unless noted.
 | `GET /api/requests/{id}` | one request |
 | `GET /api/bearing` | cited answers: whether `FAIRLEAD_BEARING_DIR` is set, files and passages indexed (see [BEARING.md](BEARING.md)) |
 | `GET /api/bearing/search?q=&limit=` | the passages a question would retrieve, with file, lines, score and link (no model is called) |
-| `GET /api/requestlog?since=&until=&client=&label=&model=&route=&status=&limit=` | the durable request log read from `logsairlead-requests-<date>.jsonl` (survives restarts): who (client key name, id and visible prefix, optional `X-Fairlead-Label`), what (endpoint, route, status, tokens, latency) and which model served it. `since` is `90m`, `24h`, `7d` or a date; `status` is `ok`, `error`, `4xx`, `5xx` or a code; newest first, default 100, up to 5000. Never holds prompt or response text |
+| `GET /api/requestlog?since=&until=&client=&label=&model=&route=&status=&limit=` | the durable request log read from `logs\fairlead-requests-<date>.jsonl` (survives restarts): who (client key name, id and visible prefix, optional `X-Fairlead-Label`), what (endpoint, route, status, tokens, latency) and which model served it. `since` is `90m`, `24h`, `7d` or a date; `status` is `ok`, `error`, `4xx`, `5xx` or a code; newest first, default 100, up to 5000. Never holds prompt or response text |
 | `GET /api/requestlog/summary` | the same filters, totalled per client, label, serving model and route (requests, failures, tokens, cost when priced, p50/p95 latency) |
 | `GET /api/metrics` | totals, last hour, per-target stats |
 | `GET /api/logs?level=` | recent diagnostics |

@@ -201,7 +201,7 @@ function Get-Route($Config, [string]$Id) {
 
 # ---------- commands ----------
 
-function Show-Help {
+function Get-HelpText {
 @'
 fairlead <command> [options]          every command maps to one admin API route (docs\API.md)
 
@@ -211,6 +211,7 @@ Engine
   startup on|off                      start Fairlead at Windows sign-in (Register-FairleadStartup.ps1)
   status                              engine, connectivity, providers, metrics   GET /api/status
   api                                 list every admin API route         GET /api
+  commands [--json]                   list every command with its usage, routes and whether it needs --yes
 
 Providers
   providers [list]                    GET /api/config
@@ -239,7 +240,10 @@ Routes and routing
 
 Clients
   clients [list]
-  clients add <name> [--routes a,b]   prints the key once                POST /api/clients
+  clients add <name> [--routes a,b] [--rate N]   prints the key once; --rate limits requests a minute   POST /api/clients
+  clients budget <id|name> [--daily N|off] [--soft N|off]   daily token limit (429 over it) and a soft limit (smart becomes fast)   POST /api/clients/{id}/budget
+  clients usage                       tokens used today by each key   GET /api/clients/usage
+  clients rate <id|name> <N|off>      limit a key to N requests a minute (off = no limit)   POST /api/clients/{id}/rate-limit
   clients remove <id|name> --yes      DELETE /api/clients/{id}
 
 Settings and Kedge mode
@@ -277,6 +281,53 @@ Health and activity
 Options for every command: --json (the value as JSON), --url U (loopback only).
 Use FAIRLEAD_URL and FAIRLEAD_SESSION for a different local engine. Never put a session token on the command line.
 '@
+}
+
+function Show-Help { Write-Output (Get-HelpText) }
+
+# The command list is read from the help text, so `commands` and `help` cannot disagree.
+function Get-CommandList {
+    $group = ''
+    $items = New-Object System.Collections.ArrayList
+    $cur = $null
+    foreach ($raw in ((Get-HelpText) -split "`n")) {
+        $line = $raw.TrimEnd("`r")
+        if ($line -match '^[A-Z]' -and $line -notmatch '^(Options|Use) ') { $group = $line.Trim(); $cur = $null; continue }
+        if ($line -match '^  \S') {
+            $cur = @{ group = $group; text = $line.Trim() }
+            [void]$items.Add($cur)
+            continue
+        }
+        if ($cur -and $line -match '^    +\S') { $cur.text = $cur.text + ' ' + $line.Trim() }
+    }
+    $result = @()
+    foreach ($i in $items) {
+        $parts = @($i.text -split '\s{2,}')
+        $usage = $parts[0]
+        $routes = @()
+        foreach ($m in [regex]::Matches($i.text, '\b(GET|POST|PUT|DELETE) (/api[^\s,|]*)')) { $routes += ($m.Groups[1].Value + ' ' + $m.Groups[2].Value) }
+        $description = ''
+        if ($parts.Count -gt 1) { $description = (($parts[1..($parts.Count - 1)] -join ' ') -replace '\b(GET|POST|PUT|DELETE) /api\S*', '').Trim() }
+        $result += [ordered]@{
+            name        = ($usage -split ' ')[0]
+            usage       = $usage
+            group       = $i.group
+            description = $description
+            routes      = [string[]]$routes
+            destructive = ($i.text -match '--yes')
+        }
+    }
+    return , $result
+}
+
+function Show-Commands {
+    $list = Get-CommandList
+    if (Opt 'json') {
+        $doc = [ordered]@{ schemaVersion = 1; tool = 'fairlead'; globalOptions = [string[]]@('--json', '--url'); commands = $list }
+        ConvertTo-Json -InputObject $doc -Depth 6
+        return
+    }
+    $list | ForEach-Object { New-Object psobject -Property @{ command = $_.name; group = $_.group; usage = $_.usage } } | Format-Table command, group, usage -AutoSize | Out-String -Width 200 | Write-Output
 }
 
 function Invoke-Providers {
@@ -447,11 +498,44 @@ function Invoke-Clients {
     switch ($sub) {
         'list' {
             $c = Get-Config
-            Out-Result $c.clients { param($v) if (@($v).Count -eq 0) { 'No client keys. Create one: fairlead clients add <name>' } else { $v | Select-Object id, name, prefix, created, @{ n = 'routes'; e = { if (@($_.routes).Count) { $_.routes -join ', ' } else { '(all)' } } } | Format-Table -AutoSize | Out-String -Width 200 } }
+            Out-Result $c.clients { param($v) if (@($v).Count -eq 0) { 'No client keys. Create one: fairlead clients add <name>' } else { $v | Select-Object id, name, prefix, created, @{ n = 'routes'; e = { if (@($_.routes).Count) { $_.routes -join ', ' } else { '(all)' } } }, @{ n = 'perMinute'; e = { if ($_.rateLimitPerMinute) { $_.rateLimitPerMinute } else { '(none)' } } }, @{ n = 'dailyTokens'; e = { if ($_.dailyTokenLimit) { $_.dailyTokenLimit } else { '(none)' } } } | Format-Table -AutoSize | Out-String -Width 200 } }
         }
         'add' {
-            $r = Invoke-Api POST '/api/clients' @{ name = (Word 2 'client name'); routes = @(Split-List (Opt 'routes')) }
+            $payload = @{ name = (Word 2 'client name'); routes = @(Split-List (Opt 'routes')) }
+            if (Opt 'rate') { $payload.rateLimitPerMinute = [int](Opt 'rate') }
+            $r = Invoke-Api POST '/api/clients' $payload
             Out-Result $r { param($v) 'Client key for ' + (Word 2) + ' (shown once; Fairlead keeps only its hash):'; $v.key }
+        }
+        'usage' {
+            Out-Result (Invoke-Api GET '/api/clients/usage') { param($v) @($v) | Select-Object name, usedToday, dailyTokenLimit, dailyTokenSoftLimit | Format-Table -AutoSize | Out-String -Width 200 }
+        }
+        'budget' {
+            $which = Word 2 'client id or name'
+            $k = @((Get-Config).clients | Where-Object { $_.id -eq $which -or $_.name -eq $which })
+            if ($k.Count -eq 0) { throw "No client key $which." }
+            if ($k.Count -gt 1) { throw "Several client keys are named $which; give the id." }
+            $payload = @{}
+            foreach ($pair in @(@('daily', 'dailyTokens'), @('soft', 'softDailyTokens'))) {
+                $v = Opt $pair[0]
+                if ($null -eq $v) { continue }
+                $n = 0
+                if ($v -ne 'off') { if (-not [long]::TryParse([string]$v, [ref]$n) -or $n -lt 1) { throw ('--' + $pair[0] + ' is a whole number of tokens, or off.') } }
+                $payload[$pair[1]] = $n
+            }
+            if ($payload.Count -eq 0) { throw 'Give --daily N and/or --soft N (or off).' }
+            $r = Invoke-Api POST ('/api/clients/' + (Esc $k[0].id) + '/budget') $payload
+            Out-Result $r { param($v) $k[0].name + ': daily limit ' + $(if ($v.dailyTokenLimit) { $v.dailyTokenLimit } else { 'none' }) + ', soft limit ' + $(if ($v.dailyTokenSoftLimit) { $v.dailyTokenSoftLimit } else { 'none' }) + '.' }
+        }
+        'rate' {
+            $which = Word 2 'client id or name'
+            $k = @((Get-Config).clients | Where-Object { $_.id -eq $which -or $_.name -eq $which })
+            if ($k.Count -eq 0) { throw "No client key $which." }
+            if ($k.Count -gt 1) { throw "Several client keys are named $which; give the id." }
+            $value = Word 3 'requests a minute, or off'
+            $n = 0
+            if ($value -ne 'off') { if (-not [int]::TryParse($value, [ref]$n) -or $n -lt 1) { throw 'Give a whole number of requests a minute, or off.' } }
+            $r = Invoke-Api POST ('/api/clients/' + (Esc $k[0].id) + '/rate-limit') @{ requestsPerMinute = $n }
+            Out-Result $r { param($v) if ($v.rateLimitPerMinute) { $k[0].name + ' is limited to ' + $v.rateLimitPerMinute + ' requests a minute.' } else { $k[0].name + ' has no request limit.' } }
         }
         'remove' {
             $which = Word 2 'client id or name'
@@ -642,6 +726,7 @@ function Invoke-Fairlead([string[]]$List) {
                 if ($empty.Count) { 'Routes with no targets (requests fall back to local): ' + ($empty -join ', ') }
             }
         }
+        'commands' { Show-Commands }
         'api' { Out-Result (Invoke-Api GET '/api') { param($v) $v.routes } }
         'health' { Out-Result (Invoke-Api GET '/api/health/providers') }
         'config' { Out-Result (Get-Config) { param($v) $v | ConvertTo-Json -Depth 10 } }

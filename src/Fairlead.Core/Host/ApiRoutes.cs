@@ -37,6 +37,9 @@ namespace Fairlead.Core.Host
             Gateway.Post("/v1/chat/completions", r => Engine.HandleChatAsync(r, Dialect.OpenAi));
             Gateway.Post("/v1/messages", r => Engine.HandleChatAsync(r, Dialect.Anthropic));
             Gateway.Post("/v1/embeddings", r => Engine.HandleEmbeddingsAsync(r));
+            Gateway.Post("/v1/completions", r => LegacyCompletions.HandleAsync(Engine, r));
+            Gateway.Post("/v1/audio/speech", r => Engine.HandleAudioAsync(r, "speech"));
+            Gateway.Post("/v1/audio/transcriptions", r => Engine.HandleAudioAsync(r, "transcriptions"));
             Gateway.Post("/v1/messages/count_tokens", CountTokens);
             Gateway.Get("/v1/models", ListModels);
             Gateway.Get("/v1/models/{id}", GetModel);
@@ -61,7 +64,23 @@ namespace Fairlead.Core.Host
             if (!Engine.Authenticate(r, out client, out error)) return Task.FromResult(HttpResponse.Json(401, Translate.Error(Dialect.OpenAi, 401, error).ToString(Formatting.None)));
             var created = StartedAt.ToUnixTimeSeconds();
             var data = new JArray();
-            foreach (var m in ModelIds(client)) data.Add(new JObject { { "id", m.Key }, { "object", "model" }, { "created", created }, { "owned_by", m.Value }, { "type", "model" }, { "display_name", m.Key } });
+            string capability;
+            r.QueryValues.TryGetValue("capability", out capability);
+            var audioOnly = string.Equals(capability, "audio", StringComparison.OrdinalIgnoreCase);
+            foreach (var m in ModelIds(client))
+            {
+                var audio = AudioKinds(m.Key);
+                if (audioOnly && audio.Count == 0) continue;
+                var entry = new JObject { { "id", m.Key }, { "object", "model" }, { "created", created }, { "owned_by", m.Value }, { "type", "model" }, { "display_name", m.Key } };
+                if (audio.Count > 0)
+                {
+                    // Additive: which of /v1/audio/speech and /v1/audio/transcriptions this id can serve.
+                    var kinds = new JArray();
+                    foreach (var k in audio) kinds.Add(new JValue(k));
+                    entry["audio"] = kinds;
+                }
+                data.Add(entry);
+            }
             // Both shapes in one: OpenAI clients read data[].id; Anthropic clients read data[].id plus has_more.
             return Task.FromResult(Json.Ok(new JObject { { "object", "list" }, { "data", data }, { "has_more", false } }));
         }
@@ -74,7 +93,36 @@ namespace Fairlead.Core.Host
             var id = r.RouteValues["id"];
             var hit = ModelIds(client).FirstOrDefault(m => string.Equals(m.Key, id, StringComparison.OrdinalIgnoreCase));
             if (hit.Key == null) return Task.FromResult(HttpResponse.Json(404, Translate.Error(Dialect.OpenAi, 404, "Unknown model '" + id + "'.").ToString(Formatting.None)));
-            return Task.FromResult(Json.Ok(new JObject { { "id", hit.Key }, { "object", "model" }, { "created", StartedAt.ToUnixTimeSeconds() }, { "owned_by", hit.Value } }));
+            var one = new JObject { { "id", hit.Key }, { "object", "model" }, { "created", StartedAt.ToUnixTimeSeconds() }, { "owned_by", hit.Value } };
+            var audio = AudioKinds(hit.Key);
+            if (audio.Count > 0)
+            {
+                var kinds = new JArray();
+                foreach (var k in audio) kinds.Add(new JValue(k));
+                one["audio"] = kinds;
+            }
+            return Task.FromResult(Json.Ok(one));
+        }
+
+        /// <summary>
+        /// The audio operations an id (a route or provider/model) can serve: only OpenAI-compatible providers do, and a model
+        /// is an audio model by its name (see <see cref="AudioModels"/>). A route has them when one of its targets does.
+        /// </summary>
+        private List<string> AudioKinds(string id)
+        {
+            var cfg = Config.Current;
+            var kinds = new List<string>();
+            var route = cfg.FindRoute(id);
+            var targets = route != null ? route.Targets : new List<string> { id };
+            foreach (var t in targets)
+            {
+                var slash = t.IndexOf('/');
+                if (slash <= 0) continue;
+                var provider = cfg.FindProvider(t.Substring(0, slash));
+                if (provider == null || !provider.Enabled || provider.Kind != ProviderKind.OpenAi) continue;
+                foreach (var k in AudioModels.KindsOf(t.Substring(slash + 1))) if (!kinds.Contains(k)) kinds.Add(k);
+            }
+            return kinds;
         }
 
         /// <summary>Routes first (what tools should use), then every provider/model target.</summary>
@@ -101,6 +149,12 @@ namespace Fairlead.Core.Host
         private void RegisterAdminRoutes()
         {
             Admin.Get("/api", r => Task.FromResult(Json.Ok(new { version = Version, docs = "docs/API.md", cli = "fairlead help", routes = Admin.Describe() })));
+            Admin.Get("/api/commands", r =>
+            {
+                var script = CommandCatalog.ScriptPath(Settings.RootDirectory);
+                if (script == null) throw new NotFoundException("The command line (scripts/fairlead.ps1) is not installed next to this engine, so there is no command list to give.");
+                return Task.FromResult(Json.Ok(CommandCatalog.Document(CommandCatalog.FromScript(System.IO.File.ReadAllText(script)))));
+            });
             Admin.Get("/api/health", r => Task.FromResult(Json.Ok(new { ok = true, version = Version })));
             Admin.Get("/api/status", r => Task.FromResult(Json.Ok(Status())));
             Admin.Post("/api/heartbeat", r =>
@@ -185,11 +239,63 @@ namespace Fairlead.Core.Host
             });
 
             Admin.Post("/api/clients", CreateClient);
+            Admin.Get("/api/clients/usage", r =>
+            {
+                var now = DateTime.UtcNow;
+                return Task.FromResult(Json.Ok(Config.Current.Clients.Select(k => new
+                {
+                    k.Id,
+                    k.Name,
+                    usedToday = Metrics.Usage.Used(k.Id, now),
+                    dailyTokenLimit = k.DailyTokenLimit,
+                    dailyTokenSoftLimit = k.DailyTokenSoftLimit,
+                    resetsInSeconds = ClientUsage.SecondsToReset(now),
+                }).ToList()));
+            });
+            Admin.Post("/api/clients/{id}/budget", r =>
+            {
+                var id = r.RouteValues["id"];
+                var body = Json.Body(r);
+                var daily = Json.Read<long?>(body, "dailyTokens");
+                var soft = Json.Read<long?>(body, "softDailyTokens");
+                if ((daily.HasValue && daily.Value < 0) || (soft.HasValue && soft.Value < 0)) throw new BadRequestException("The daily token limits are whole numbers of tokens (0 or empty for no limit).");
+                if (daily.HasValue && soft.HasValue && daily.Value > 0 && soft.Value > daily.Value) throw new BadRequestException("The soft limit must be below the daily limit.");
+                var found = false;
+                Config.Update(c =>
+                {
+                    var k = c.Clients.FirstOrDefault(x => x.Id == id);
+                    if (k == null) return;
+                    found = true;
+                    if (body["dailyTokens"] != null) k.DailyTokenLimit = daily.HasValue && daily.Value > 0 ? daily : null;
+                    if (body["softDailyTokens"] != null) k.DailyTokenSoftLimit = soft.HasValue && soft.Value > 0 ? soft : null;
+                });
+                if (!found) throw new NotFoundException("No client key " + id + ".");
+                var now = Config.Current.Clients.First(x => x.Id == id);
+                return Task.FromResult(Json.Ok(new { id = id, dailyTokenLimit = now.DailyTokenLimit, dailyTokenSoftLimit = now.DailyTokenSoftLimit }));
+            });
+            Admin.Post("/api/clients/{id}/rate-limit", r =>
+            {
+                var id = r.RouteValues["id"];
+                var rate = Json.Read<int?>(Json.Body(r), "requestsPerMinute");
+                if (rate.HasValue && (rate.Value < 0 || rate.Value > 1000000)) throw new BadRequestException("requestsPerMinute is a whole number of requests a minute (0 or empty for no limit).");
+                var found = false;
+                Config.Update(c =>
+                {
+                    var k = c.Clients.FirstOrDefault(x => x.Id == id);
+                    if (k == null) return;
+                    found = true;
+                    k.RateLimitPerMinute = rate.HasValue && rate.Value > 0 ? rate : null;
+                });
+                if (!found) throw new NotFoundException("No client key " + id + ".");
+                Engine.ForgetClient(id);
+                return Task.FromResult(Json.Ok(new { id = id, rateLimitPerMinute = rate.HasValue && rate.Value > 0 ? rate : null }));
+            });
             Admin.Delete("/api/clients/{id}", r =>
             {
                 var id = r.RouteValues["id"];
                 var removed = false;
                 Config.Update(c => removed = c.Clients.RemoveAll(k => k.Id == id) > 0);
+                Engine.ForgetClient(id);
                 if (!removed) throw new NotFoundException("No client key " + id + ".");
                 return Task.FromResult(Json.Ok(new { removed = id }));
             });
@@ -364,7 +470,7 @@ namespace Fairlead.Core.Host
                 c.AutoFallbackRoute,
                 kedge = c.Kedge,
                 c.RequireClientKey,
-                clients = c.Clients.Select(k => new { k.Id, k.Name, k.Prefix, k.Created, k.Routes }),
+                clients = c.Clients.Select(k => new { k.Id, k.Name, k.Prefix, k.Created, k.Routes, k.RateLimitPerMinute, k.DailyTokenLimit, k.DailyTokenSoftLimit }),
                 c.Network,
                 c.Privacy,
                 c.CorsOrigins,
@@ -376,18 +482,21 @@ namespace Fairlead.Core.Host
         private async Task<HttpResponse> DetectLocal(HttpRequest r)
         {
             var cfg = Config.Current;
-            var found = await Task.WhenAll(ProviderPresets.All.Where(p => p.Local).Select(async preset =>
+            var found = await Task.WhenAll(ProviderPresets.LocalByAddress().Select(async group =>
             {
+                var preset = group[0];
+                var name = string.Join(" or ", group.Select(g => g.Name));
+                var alsoPreset = group.Skip(1).Select(g => g.Id).ToList();
                 var probe = ProviderPresets.Create(preset.Id);
                 var existing = cfg.Providers.FirstOrDefault(p => string.Equals(p.BaseUrl.TrimEnd('/'), probe.BaseUrl.TrimEnd('/'), StringComparison.OrdinalIgnoreCase));
                 try
                 {
                     var models = await Upstream.ListModelsAsync(existing ?? probe, CancellationToken.None, 2500).ConfigureAwait(false);
-                    return new { preset = preset.Id, name = preset.Name, baseUrl = probe.BaseUrl, running = true, configured = existing == null ? null : existing.Id, models = models, error = (string)null };
+                    return new { preset = preset.Id, name = name, alsoPreset = alsoPreset, baseUrl = probe.BaseUrl, running = true, configured = existing == null ? null : existing.Id, models = models, error = (string)null };
                 }
                 catch (UpstreamException ex)
                 {
-                    return new { preset = preset.Id, name = preset.Name, baseUrl = probe.BaseUrl, running = ex.Kind != FailureKind.Network && ex.Kind != FailureKind.Timeout, configured = existing == null ? null : existing.Id, models = new List<ModelInfo>(), error = (string)ex.Message };
+                    return new { preset = preset.Id, name = name, alsoPreset = alsoPreset, baseUrl = probe.BaseUrl, running = ex.Kind != FailureKind.Network && ex.Kind != FailureKind.Timeout, configured = existing == null ? null : existing.Id, models = new List<ModelInfo>(), error = (string)ex.Message };
                 }
             })).ConfigureAwait(false);
             return Json.Ok(found);
@@ -593,6 +702,12 @@ namespace Fairlead.Core.Host
             var name = (Json.Read<string>(body, "name") ?? string.Empty).Trim();
             if (name.Length == 0 || name.Length > 60) throw new BadRequestException("Give the key a name of 1 to 60 characters (the tool that will use it).");
             var routes = Json.Read<List<string>>(body, "routes") ?? new List<string>();
+            var rate = Json.Read<int?>(body, "rateLimitPerMinute");
+            if (rate.HasValue && (rate.Value < 0 || rate.Value > 1000000)) throw new BadRequestException("rateLimitPerMinute is a whole number of requests a minute (0 or empty for no limit).");
+            var daily = Json.Read<long?>(body, "dailyTokenLimit");
+            var soft = Json.Read<long?>(body, "dailyTokenSoftLimit");
+            if ((daily.HasValue && daily.Value < 0) || (soft.HasValue && soft.Value < 0)) throw new BadRequestException("The daily token limits are whole numbers of tokens (0 or empty for no limit).");
+            if (daily.HasValue && soft.HasValue && daily.Value > 0 && soft.Value > daily.Value) throw new BadRequestException("The soft limit must be below the daily limit.");
             var key = GatewayEngine.NewClientKey();
             var client = new ClientKey
             {
@@ -601,6 +716,9 @@ namespace Fairlead.Core.Host
                 Prefix = key.Substring(0, 7),
                 Hash = GatewayEngine.HashKey(key),
                 Routes = routes.Where(x => !string.IsNullOrWhiteSpace(x)).ToList(),
+                RateLimitPerMinute = rate.HasValue && rate.Value > 0 ? rate : null,
+                DailyTokenLimit = daily.HasValue && daily.Value > 0 ? daily : null,
+                DailyTokenSoftLimit = soft.HasValue && soft.Value > 0 ? soft : null,
             };
             Config.Update(c =>
             {
@@ -609,7 +727,7 @@ namespace Fairlead.Core.Host
                 c.Clients.Add(client);
             });
             // The only time the key leaves Fairlead.
-            return Task.FromResult(Json.Ok(new { client = new { client.Id, client.Name, client.Prefix, client.Created, client.Routes }, key = key }));
+            return Task.FromResult(Json.Ok(new { client = new { client.Id, client.Name, client.Prefix, client.Created, client.Routes, client.RateLimitPerMinute, client.DailyTokenLimit, client.DailyTokenSoftLimit }, key = key }));
         }
 
         private async Task<HttpResponse> Playground(HttpRequest r)

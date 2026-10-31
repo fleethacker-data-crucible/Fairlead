@@ -104,6 +104,7 @@ namespace Fairlead.Core.Host
             Config = options.Config != null ? new ConfigStore(options.Config) : new ConfigStore(Settings.ConfigPath);
             GatewayValues = options.GatewayStore ?? new GatewayStore(options.Config != null ? null : Settings.DataDirectory);
             Upstream = new UpstreamClient(options.UpstreamHandler);
+            Upstream.TotalCapSeconds = Settings.MaxRequestSeconds;
             Lazarette = new LazaretteLink(Settings.DataDirectory, Upstream, LazaretteNames, options.LazaretteDataDirectory == null ? null : (Func<string>)(() => options.LazaretteDataDirectory), options.Protect, options.Unprotect);
             Lazarette.HoldHours = Config.Current.LazaretteHoldHours;
             Upstream.VaultLookup = Lazarette.Value;
@@ -430,8 +431,8 @@ namespace Fairlead.Core.Host
             r.Headers["Access-Control-Allow-Origin"] = origin;
             r.Headers["Vary"] = "Origin";
             r.Headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS";
-            r.Headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type, x-api-key, anthropic-version, anthropic-beta, X-Fairlead-Route, X-Fairlead-Privacy";
-            r.Headers["Access-Control-Expose-Headers"] = "X-Fairlead-Route, X-Fairlead-Target, X-Fairlead-Mode, X-Fairlead-Attempts, X-Fairlead-Request-Id, X-Fairlead-Private, X-Fairlead-Fallback, X-Fairlead-Fallback-Reason";
+            r.Headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type, x-api-key, anthropic-version, anthropic-beta, X-Fairlead-Route, X-Fairlead-Privacy, X-Fairlead-Label, X-Fairlead-Bearing, X-Fairlead-Bearing-Top";
+            r.Headers["Access-Control-Expose-Headers"] = "X-Fairlead-Bearing, X-Fairlead-Route, X-Fairlead-Target, X-Fairlead-Mode, X-Fairlead-Attempts, X-Fairlead-Request-Id, X-Fairlead-Private, X-Fairlead-Fallback, X-Fairlead-Fallback-Reason";
             r.Headers["Access-Control-Max-Age"] = "600";
         }
 
