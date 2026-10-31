@@ -227,7 +227,7 @@ namespace Fairlead.Core.Gateway
             if (!profile.Stream) PublishFirstByte(record, winner.Ref, (int)sw.ElapsedMilliseconds);
             if (!winner.Local && _health != null) _health.ReportCloudSuccess();
 
-            if (profile.Stream) return StreamResponse(response, winner, dialect, profile, record, sw);
+            if (profile.Stream) return StreamResponse(response, winner, dialect, profile, record, sw, bearing);
             return await BufferedResponse(response, winner, dialect, profile, record, sw, bearing, cacheKey).ConfigureAwait(false);
         }
 
