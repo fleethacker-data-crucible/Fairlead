@@ -37,7 +37,7 @@ The Overview with synthetic demo data: Ollama on this machine, one cloud provide
 | **Kedge mode** | A health monitor watches Windows network events, probes the internet and every provider, and switches to local models within seconds of losing the cloud, then back when it returns. It can also be forced on. |
 | **Failover and hedging** | Per-provider circuit breakers keep dead targets out of the way; a failed call moves to the next target before any byte reaches the caller. Optional hedging races a second target when the first is slow. |
 | **Privacy routing** | Prompts carrying secrets (API keys, private keys, passwords, card numbers) or `X-Fairlead-Privacy: local` never leave the machine. |
-| **One-time browser setup** | Finds Ollama, LM Studio, llama.cpp, vLLM and Jan on this machine, takes cloud keys (DPAPI-encrypted), suggests routes and hands out client keys with copy-paste setup for each tool. |
+| **One-time browser setup** | Finds Ollama, phoenix-lai, LM Studio, llama.cpp, vLLM and Jan on this machine, takes cloud keys (DPAPI-encrypted), suggests routes and hands out client keys with copy-paste setup for each tool. |
 | **Visible** | Live overview, per-request decision traces, token counts, latency, cost (from prices you enter), a playground with a dry-run "Explain". |
 
 ## Quick start
