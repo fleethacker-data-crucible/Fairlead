@@ -24,6 +24,9 @@ namespace Fairlead.Core.Config
         /// <summary>Request-log retention (FAIRLEAD_LOG_MAX_DAYS, FAIRLEAD_LOG_MAX_MB). 0 = keep everything, the default.</summary>
         public int LogMaxAgeDays { get; set; }
         public int LogMaxMegabytes { get; set; }
+        /// <summary>The most seconds one request may take, however busy its stream (FAIRLEAD_MAX_REQUEST_SECONDS). 0 = no cap, the default; the provider timeout stays an idle limit.</summary>
+        public int MaxRequestSeconds { get; set; }
+
         /// <summary>Folder of documents for cited answers (Bearing). Empty = off. Set by FAIRLEAD_BEARING_DIR; never in fairlead.json.</summary>
         public string BearingDirectory { get; set; }
         public string WebRootDirectory { get; set; }
@@ -59,6 +62,8 @@ namespace Fairlead.Core.Config
             int retain;
             if (int.TryParse(Env("FAIRLEAD_LOG_MAX_DAYS"), out retain) && retain > 0) s.LogMaxAgeDays = retain;
             if (int.TryParse(Env("FAIRLEAD_LOG_MAX_MB"), out retain) && retain > 0) s.LogMaxMegabytes = retain;
+            int cap;
+            if (int.TryParse(Env("FAIRLEAD_MAX_REQUEST_SECONDS"), out cap) && cap > 0) s.MaxRequestSeconds = cap;
             s.BearingDirectory = Env("FAIRLEAD_BEARING_DIR");
             int port;
             var portText = Env("FAIRLEAD_PORT");
