@@ -17,6 +17,7 @@ machine a key is optional when `requireClientKey` is off. Other machines always 
 | `POST /v1/messages` | Anthropic messages, routed the same way |
 | `POST /v1/messages/count_tokens` | Anthropic token estimate |
 | `POST /v1/embeddings` | OpenAI embeddings |
+| `POST /v1/completions` | the legacy completions API some autocomplete plugins still call: `prompt` (one string) becomes one user message of a chat request and goes through the gateway like any other (keys, routes, privacy, failover, request log); the answer is a `text_completion`, streamed chunk by chunk when `stream` is true. `max_tokens`, `temperature`, `top_p`, `stop`, `seed`, penalties and `user` pass through. Not supported, with a 400: several prompts in one request, `n` other than 1, `echo`, `suffix` |
 | `GET /v1/models`, `GET /v1/models/{id}` | routes, then targets |
 | `GET /v1/health` | `{ ok, kedge, internet }`, no auth |
 
