@@ -21,6 +21,9 @@ namespace Fairlead.Core.Routing
         public bool HasImages { get; set; }
         /// <summary>The latest user message, for keyword rules. Never logged unless content logging is on.</summary>
         public string LastUserText { get; set; }
+        private Dictionary<string, string> _pass;
+        /// <summary>Request headers to forward to an Anthropic target (today only anthropic-beta). Never logged.</summary>
+        public Dictionary<string, string> PassHeaders { get { return _pass ?? (_pass = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)); } }
         public bool Sensitive { get; set; }
         /// <summary>Why the request is sensitive ("header", "aws-key", "private-key"...).</summary>
         public List<string> SensitiveReasons { get; set; }

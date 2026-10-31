@@ -89,6 +89,21 @@ namespace Fairlead.Core.Telemetry
             return Path.Combine(logDirectory, FilePrefix + time.UtcDateTime.ToString("yyyyMMdd", CultureInfo.InvariantCulture) + ".jsonl");
         }
 
+        /// <summary>Every entry in the file for one UTC day (no limit), for totals that must not miss any.</summary>
+        public static List<RequestLogEntry> ReadDay(string logDirectory, DateTimeOffset day)
+        {
+            var result = new List<RequestLogEntry>();
+            if (string.IsNullOrEmpty(logDirectory)) return result;
+            var path = FileFor(logDirectory, day);
+            if (!File.Exists(path)) return result;
+            foreach (var line in ReadLines(path))
+            {
+                var entry = Parse(line);
+                if (entry != null) result.Add(entry);
+            }
+            return result;
+        }
+
         /// <summary>Names the caller on the record: the client key (id, visible prefix) and the cleaned label.</summary>
         public static void Identify(RequestRecord record, ClientKey client, string label)
         {

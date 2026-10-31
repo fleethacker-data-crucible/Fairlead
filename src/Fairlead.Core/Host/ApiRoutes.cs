@@ -37,11 +37,13 @@ namespace Fairlead.Core.Host
             Gateway.Post("/v1/chat/completions", r => Engine.HandleChatAsync(r, Dialect.OpenAi));
             Gateway.Post("/v1/messages", r => Engine.HandleChatAsync(r, Dialect.Anthropic));
             Gateway.Post("/v1/embeddings", r => Engine.HandleEmbeddingsAsync(r));
+            Gateway.Post("/v1/completions", r => LegacyCompletions.HandleAsync(Engine, r));
             Gateway.Post("/v1/audio/speech", r => Engine.HandleAudioAsync(r, "speech"));
             Gateway.Post("/v1/audio/transcriptions", r => Engine.HandleAudioAsync(r, "transcriptions"));
             Gateway.Post("/v1/messages/count_tokens", CountTokens);
             Gateway.Get("/v1/models", ListModels);
             Gateway.Get("/v1/models/{id}", GetModel);
+            Gateway.Get("/v1/models/{provider}/{model}", GetModel); // a provider/model id has a slash in it
             Gateway.Get("/v1/health", r => Task.FromResult(Json.Ok(new { ok = true, kedge = Health.KedgeActive, internet = Health.Connectivity.Internet.ToString().ToLowerInvariant() })));
         }
 
@@ -78,6 +80,8 @@ namespace Fairlead.Core.Host
                     foreach (var k in audio) kinds.Add(new JValue(k));
                     entry["audio"] = kinds;
                 }
+                var window = ContextWindowOf(m.Key);
+                if (window.HasValue) entry["context_window"] = window.Value; // only when a provider reported it or the operator entered it
                 data.Add(entry);
             }
             // Both shapes in one: OpenAI clients read data[].id; Anthropic clients read data[].id plus has_more.
@@ -89,7 +93,9 @@ namespace Fairlead.Core.Host
             ClientKey client;
             string error;
             if (!Engine.Authenticate(r, out client, out error)) return Task.FromResult(HttpResponse.Json(401, Translate.Error(Dialect.OpenAi, 401, error).ToString(Formatting.None)));
-            var id = r.RouteValues["id"];
+            string id;
+            if (!r.RouteValues.TryGetValue("id", out id)) id = r.RouteValues["provider"] + "/" + r.RouteValues["model"];
+            id = Uri.UnescapeDataString(id);
             var hit = ModelIds(client).FirstOrDefault(m => string.Equals(m.Key, id, StringComparison.OrdinalIgnoreCase));
             if (hit.Key == null) return Task.FromResult(HttpResponse.Json(404, Translate.Error(Dialect.OpenAi, 404, "Unknown model '" + id + "'.").ToString(Formatting.None)));
             var one = new JObject { { "id", hit.Key }, { "object", "model" }, { "created", StartedAt.ToUnixTimeSeconds() }, { "owned_by", hit.Value } };
@@ -100,7 +106,30 @@ namespace Fairlead.Core.Host
                 foreach (var k in audio) kinds.Add(new JValue(k));
                 one["audio"] = kinds;
             }
+            var oneWindow = ContextWindowOf(hit.Key);
+            if (oneWindow.HasValue) one["context_window"] = oneWindow.Value;
             return Task.FromResult(Json.Ok(one));
+        }
+
+        /// <summary>The context window of a provider/model id, when it is known; for a route, the smallest window among its targets (what a prompt must fit in the worst case).</summary>
+        private int? ContextWindowOf(string id)
+        {
+            var cfg = Config.Current;
+            var route = cfg.FindRoute(id);
+            var targets = route != null ? route.Targets : new List<string> { id };
+            int? smallest = null;
+            foreach (var t in targets)
+            {
+                var slash = t.IndexOf('/');
+                if (slash <= 0) continue;
+                var provider = cfg.FindProvider(t.Substring(0, slash));
+                if (provider == null || !provider.Enabled) continue;
+                var name = t.Substring(slash + 1);
+                var info = provider.FindModel(name) ?? DiscoveredModels(provider.Id).FirstOrDefault(m => string.Equals(m.Id, name, StringComparison.OrdinalIgnoreCase));
+                if (info == null || !info.ContextWindow.HasValue || info.ContextWindow.Value <= 0) continue;
+                if (!smallest.HasValue || info.ContextWindow.Value < smallest.Value) smallest = info.ContextWindow.Value;
+            }
+            return smallest;
         }
 
         /// <summary>
@@ -148,6 +177,12 @@ namespace Fairlead.Core.Host
         private void RegisterAdminRoutes()
         {
             Admin.Get("/api", r => Task.FromResult(Json.Ok(new { version = Version, docs = "docs/API.md", cli = "fairlead help", routes = Admin.Describe() })));
+            Admin.Get("/api/commands", r =>
+            {
+                var script = CommandCatalog.ScriptPath(Settings.RootDirectory);
+                if (script == null) throw new NotFoundException("The command line (scripts/fairlead.ps1) is not installed next to this engine, so there is no command list to give.");
+                return Task.FromResult(Json.Ok(CommandCatalog.Document(CommandCatalog.FromScript(System.IO.File.ReadAllText(script)))));
+            });
             Admin.Get("/api/health", r => Task.FromResult(Json.Ok(new { ok = true, version = Version })));
             Admin.Get("/api/status", r => Task.FromResult(Json.Ok(Status())));
             Admin.Post("/api/heartbeat", r =>
@@ -232,6 +267,40 @@ namespace Fairlead.Core.Host
             });
 
             Admin.Post("/api/clients", CreateClient);
+            Admin.Get("/api/clients/usage", r =>
+            {
+                var now = DateTime.UtcNow;
+                return Task.FromResult(Json.Ok(Config.Current.Clients.Select(k => new
+                {
+                    k.Id,
+                    k.Name,
+                    usedToday = Metrics.Usage.Used(k.Id, now),
+                    dailyTokenLimit = k.DailyTokenLimit,
+                    dailyTokenSoftLimit = k.DailyTokenSoftLimit,
+                    resetsInSeconds = ClientUsage.SecondsToReset(now),
+                }).ToList()));
+            });
+            Admin.Post("/api/clients/{id}/budget", r =>
+            {
+                var id = r.RouteValues["id"];
+                var body = Json.Body(r);
+                var daily = Json.Read<long?>(body, "dailyTokens");
+                var soft = Json.Read<long?>(body, "softDailyTokens");
+                if ((daily.HasValue && daily.Value < 0) || (soft.HasValue && soft.Value < 0)) throw new BadRequestException("The daily token limits are whole numbers of tokens (0 or empty for no limit).");
+                if (daily.HasValue && soft.HasValue && daily.Value > 0 && soft.Value > daily.Value) throw new BadRequestException("The soft limit must be below the daily limit.");
+                var found = false;
+                Config.Update(c =>
+                {
+                    var k = c.Clients.FirstOrDefault(x => x.Id == id);
+                    if (k == null) return;
+                    found = true;
+                    if (body["dailyTokens"] != null) k.DailyTokenLimit = daily.HasValue && daily.Value > 0 ? daily : null;
+                    if (body["softDailyTokens"] != null) k.DailyTokenSoftLimit = soft.HasValue && soft.Value > 0 ? soft : null;
+                });
+                if (!found) throw new NotFoundException("No client key " + id + ".");
+                var now = Config.Current.Clients.First(x => x.Id == id);
+                return Task.FromResult(Json.Ok(new { id = id, dailyTokenLimit = now.DailyTokenLimit, dailyTokenSoftLimit = now.DailyTokenSoftLimit }));
+            });
             Admin.Post("/api/clients/{id}/rate-limit", r =>
             {
                 var id = r.RouteValues["id"];
@@ -435,7 +504,7 @@ namespace Fairlead.Core.Host
                 c.AutoFallbackRoute,
                 kedge = c.Kedge,
                 c.RequireClientKey,
-                clients = c.Clients.Select(k => new { k.Id, k.Name, k.Prefix, k.Created, k.Routes, k.RateLimitPerMinute }),
+                clients = c.Clients.Select(k => new { k.Id, k.Name, k.Prefix, k.Created, k.Routes, k.RateLimitPerMinute, k.DailyTokenLimit, k.DailyTokenSoftLimit }),
                 c.Network,
                 c.Privacy,
                 c.CorsOrigins,
@@ -669,6 +738,10 @@ namespace Fairlead.Core.Host
             var routes = Json.Read<List<string>>(body, "routes") ?? new List<string>();
             var rate = Json.Read<int?>(body, "rateLimitPerMinute");
             if (rate.HasValue && (rate.Value < 0 || rate.Value > 1000000)) throw new BadRequestException("rateLimitPerMinute is a whole number of requests a minute (0 or empty for no limit).");
+            var daily = Json.Read<long?>(body, "dailyTokenLimit");
+            var soft = Json.Read<long?>(body, "dailyTokenSoftLimit");
+            if ((daily.HasValue && daily.Value < 0) || (soft.HasValue && soft.Value < 0)) throw new BadRequestException("The daily token limits are whole numbers of tokens (0 or empty for no limit).");
+            if (daily.HasValue && soft.HasValue && daily.Value > 0 && soft.Value > daily.Value) throw new BadRequestException("The soft limit must be below the daily limit.");
             var key = GatewayEngine.NewClientKey();
             var client = new ClientKey
             {
@@ -678,6 +751,8 @@ namespace Fairlead.Core.Host
                 Hash = GatewayEngine.HashKey(key),
                 Routes = routes.Where(x => !string.IsNullOrWhiteSpace(x)).ToList(),
                 RateLimitPerMinute = rate.HasValue && rate.Value > 0 ? rate : null,
+                DailyTokenLimit = daily.HasValue && daily.Value > 0 ? daily : null,
+                DailyTokenSoftLimit = soft.HasValue && soft.Value > 0 ? soft : null,
             };
             Config.Update(c =>
             {
@@ -686,7 +761,7 @@ namespace Fairlead.Core.Host
                 c.Clients.Add(client);
             });
             // The only time the key leaves Fairlead.
-            return Task.FromResult(Json.Ok(new { client = new { client.Id, client.Name, client.Prefix, client.Created, client.Routes, client.RateLimitPerMinute }, key = key }));
+            return Task.FromResult(Json.Ok(new { client = new { client.Id, client.Name, client.Prefix, client.Created, client.Routes, client.RateLimitPerMinute, client.DailyTokenLimit, client.DailyTokenSoftLimit }, key = key }));
         }
 
         private async Task<HttpResponse> Playground(HttpRequest r)

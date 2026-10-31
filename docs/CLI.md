@@ -53,6 +53,7 @@ encrypted with Windows DPAPI for the user who started Fairlead. The CLI decrypts
 | `chat <prompt> [--model] [--route] [--system] [--max-tokens] [--tools] [--private]` | `POST /api/playground` |
 | `clients [list]` | `GET /api/config` |
 | `clients add <name> [--routes a,b] [--rate N]` (prints the key once) | `POST /api/clients` |
+| `clients budget <id\|name> [--daily N\|off] [--soft N\|off]`, `clients usage` | `POST /api/clients/{id}/budget`, `GET /api/clients/usage` |
 | `clients rate <id\|name> <N\|off>` | `POST /api/clients/{id}/rate-limit` |
 | `clients remove <id\|name> --yes` | `DELETE /api/clients/{id}` |
 | `kedge [auto\|on\|off]` | `POST /api/kedge` |
