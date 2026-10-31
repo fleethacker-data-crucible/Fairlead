@@ -34,7 +34,7 @@ that saved them, so re-enter keys on a new machine (or use environment variables
 
 - Fairlead listens on this machine only (127.0.0.1, a Fleet rule), so tools must run on the same PC. Containers and other
   machines cannot reach it; `FAIRLEAD_BIND=lan` was removed and is refused at start.
-- Browser apps calling `/v1` directly: list their origin under Settings → Browser origins.
+- Browser apps calling `/v1` directly: list their origin under Settings → Browser origins. A new install starts with Scrimshaw's editor listed (`http://localhost:8775` and `http://127.0.0.1:8775`); an existing install keeps the list it has (add them with `fairlead settings set corsOrigins=http://127.0.0.1:8775,...`, which replaces the whole list).
 - Teams on a budget: give each team its own key limited to `local,fast` (Clients page) and a rule on the client name.
 - Conference Wi-Fi drops: leave Kedge on **auto**. For a demo that must not depend on the network, force **on**.
 
