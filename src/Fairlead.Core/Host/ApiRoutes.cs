@@ -101,6 +101,12 @@ namespace Fairlead.Core.Host
         private void RegisterAdminRoutes()
         {
             Admin.Get("/api", r => Task.FromResult(Json.Ok(new { version = Version, docs = "docs/API.md", cli = "fairlead help", routes = Admin.Describe() })));
+            Admin.Get("/api/commands", r =>
+            {
+                var script = CommandCatalog.ScriptPath(Settings.RootDirectory);
+                if (script == null) throw new NotFoundException("The command line (scripts/fairlead.ps1) is not installed next to this engine, so there is no command list to give.");
+                return Task.FromResult(Json.Ok(CommandCatalog.Document(CommandCatalog.FromScript(System.IO.File.ReadAllText(script)))));
+            });
             Admin.Get("/api/health", r => Task.FromResult(Json.Ok(new { ok = true, version = Version })));
             Admin.Get("/api/status", r => Task.FromResult(Json.Ok(Status())));
             Admin.Post("/api/heartbeat", r =>
