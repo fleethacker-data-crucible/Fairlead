@@ -20,6 +20,14 @@ namespace Fairlead.Core.Protocol
         public string Data { get; private set; }
         public bool IsDone { get { return Data == "[DONE]"; } }
 
+        /// <summary>A comment line (": keep-alive"): no data, but proof the upstream is still alive.</summary>
+        public bool IsComment { get; private set; }
+
+        public static SseEvent Comment()
+        {
+            return new SseEvent(null, string.Empty) { IsComment = true };
+        }
+
         /// <summary>The data as JSON, or null when it is not JSON ([DONE], comments, keep-alives).</summary>
         public JObject Json()
         {
@@ -43,6 +51,9 @@ namespace Fairlead.Core.Protocol
     public sealed class SseReader : IDisposable
     {
         private readonly StreamReader _reader;
+
+        /// <summary>When true, a comment line between events comes back as an event with IsComment set, so a caller can reset its idle timer and pass the keep-alive on. Off by default: comments are skipped.</summary>
+        public bool EmitComments { get; set; }
 
         public SseReader(Stream stream)
         {
@@ -68,7 +79,11 @@ namespace Fairlead.Core.Protocol
                     name = null;
                     continue;
                 }
-                if (line[0] == ':') continue; // comment / keep-alive
+                if (line[0] == ':')
+                {
+                    if (EmitComments && data == null) return SseEvent.Comment();
+                    continue; // comment / keep-alive
+                }
                 var colon = line.IndexOf(':');
                 var field = colon < 0 ? line : line.Substring(0, colon);
                 var value = colon < 0 ? string.Empty : line.Substring(colon + 1);
@@ -101,5 +116,8 @@ namespace Fairlead.Core.Protocol
         }
 
         public const string Done = "data: [DONE]\n\n";
+
+        /// <summary>An SSE comment: every client ignores it, and it keeps idle-timeout timers in between from firing.</summary>
+        public const string KeepAlive = ": keep-alive\n\n";
     }
 }

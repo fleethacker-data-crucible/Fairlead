@@ -102,6 +102,8 @@ config view, unless noted.
 | `GET /api/requests/{id}` | one request |
 | `GET /api/bearing` | cited answers: whether `FAIRLEAD_BEARING_DIR` is set, files and passages indexed (see [BEARING.md](BEARING.md)) |
 | `GET /api/bearing/search?q=&limit=` | the passages a question would retrieve, with file, lines, score and link (no model is called) |
+| `GET /api/requestlog?since=&until=&client=&label=&model=&route=&status=&limit=` | the durable request log read from `logsairlead-requests-<date>.jsonl` (survives restarts): who (client key name, id and visible prefix, optional `X-Fairlead-Label`), what (endpoint, route, status, tokens, latency) and which model served it. `since` is `90m`, `24h`, `7d` or a date; `status` is `ok`, `error`, `4xx`, `5xx` or a code; newest first, default 100, up to 5000. Never holds prompt or response text |
+| `GET /api/requestlog/summary` | the same filters, totalled per client, label, serving model and route (requests, failures, tokens, cost when priced, p50/p95 latency) |
 | `GET /api/metrics` | totals, last hour, per-target stats |
 | `GET /api/logs?level=` | recent diagnostics |
 | `GET /api/live` | server-sent events (`start`, `attempt`, `firstByte`, `done`) for each request as it happens (engines with the live routing view) |

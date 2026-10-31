@@ -28,6 +28,8 @@ namespace Fairlead.Core.Gateway
     {
         public const string RouteHeader = "X-Fairlead-Route";
         public const string PrivacyHeader = "X-Fairlead-Privacy";
+        /// <summary>Optional free-text caller label (a tool or job name) kept in the request log next to the client key's name.</summary>
+        public const string LabelHeader = "X-Fairlead-Label";
         private readonly ConfigStore _config;
         private readonly UpstreamClient _upstream;
         private readonly HealthMonitor _health;
@@ -122,8 +124,10 @@ namespace Fairlead.Core.Gateway
             var sw = System.Diagnostics.Stopwatch.StartNew();
             ClientKey client;
             string authError;
+            record.Label = RequestLog.CleanLabel(request.Header(LabelHeader));
             if (!Authenticate(request, out client, out authError)) return Fail(record, sw, dialect, 401, authError);
             record.Client = (client == null ? null : client.Name);
+            RequestLog.Identify(record, client, request.Header(LabelHeader));
             JObject body;
             try { body = JObject.Parse(request.BodyText); }
             catch (JsonException ex) { return Fail(record, sw, dialect, 400, "Body is not valid JSON: " + ex.Message); }
@@ -208,8 +212,10 @@ namespace Fairlead.Core.Gateway
             var sw = System.Diagnostics.Stopwatch.StartNew();
             ClientKey client;
             string authError;
+            record.Label = RequestLog.CleanLabel(request.Header(LabelHeader));
             if (!Authenticate(request, out client, out authError)) return Fail(record, sw, Dialect.OpenAi, 401, authError);
             record.Client = (client == null ? null : client.Name);
+            RequestLog.Identify(record, client, request.Header(LabelHeader));
             JObject body;
             try { body = JObject.Parse(request.BodyText); }
             catch (JsonException ex) { return Fail(record, sw, Dialect.OpenAi, 400, "Body is not valid JSON: " + ex.Message); }
@@ -356,7 +362,7 @@ namespace Fairlead.Core.Gateway
                 }
             }
             if (last == null) return new Outcome { Error = "Every target for route '" + plan.Route + "' is unavailable right now.", ErrorStatus = 503 };
-            var status = last.Kind == FailureKind.RateLimited ? 429 : last.Kind == FailureKind.Auth ? 502 : last.Kind == FailureKind.Timeout ? 504 : last.Kind == FailureKind.ModelNotFound ? 404 : 502;
+            var status = last.Kind == FailureKind.RateLimited ? 429 : last.Kind == FailureKind.Auth ? 502 : last.Kind == FailureKind.Timeout ? 504 : last.Kind == FailureKind.ModelNotFound ? 404 : (last.Kind == FailureKind.Server && (last.Status == 503 || last.Status == 529)) ? 503 : 502;
             var tried = record.Attempts.Count(a => a.Outcome != "skipped");
             return new Outcome { Error = (tried > 1 ? "All " + tried + " targets failed. Last: " : string.Empty) + last.Message, ErrorStatus = status };
         }
@@ -573,7 +579,7 @@ namespace Fairlead.Core.Gateway
                 {
                     using (response)
                     using (var stream = await response.OpenStreamAsync().ConfigureAwait(false))
-                    using (var reader = new SseReader(stream))
+                    using (var reader = new SseReader(stream) { EmitComments = true })
                     {
                         while (true)
                         {
@@ -583,10 +589,19 @@ namespace Fairlead.Core.Gateway
                             catch (Exception ex)
                             {
                                 if (!(ex is IOException || ex is OperationCanceledException || ex is ObjectDisposedException)) throw;
-                                error = token.IsCancellationRequested ? "Fairlead is stopping." : winner.Ref + " stopped sending (" + ex.GetType().Name + ").";
+                                // The idle timer is Fairlead's own: say so, instead of blaming the upstream for a limit Fairlead applied.
+                                error = token.IsCancellationRequested ? "Fairlead is stopping."
+                                    : response.Token.IsCancellationRequested ? winner.Ref + " sent nothing for " + winner.Provider.TimeoutSeconds + " s, so Fairlead ended the stream (the provider's timeout is an idle limit; keep-alives and data reset it)."
+                                    : winner.Ref + " stopped sending (" + ex.GetType().Name + ").";
                                 break;
                             }
                             if (ev == null) break;
+                            if (ev.IsComment)
+                            {
+                                // Pass the upstream's keep-alive on, so the caller's own timeout does not fire while the model is still working.
+                                await output.WriteAsync(SseWriter.KeepAlive, token).ConfigureAwait(false);
+                                continue;
+                            }
                             if (ev.IsDone)
                             {
                                 sawDone = true;
