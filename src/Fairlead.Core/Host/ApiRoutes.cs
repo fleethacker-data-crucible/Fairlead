@@ -226,6 +226,17 @@ namespace Fairlead.Core.Host
                 return Task.FromResult(Json.Ok(rec));
             });
             Admin.Get("/api/requestlog", r => Task.FromResult(Json.Ok(RequestLogEntries(r))));
+            Admin.Post("/api/requestlog/prune", r =>
+            {
+                var body = r.Body.Length == 0 ? new JObject() : Json.Body(r);
+                var days = Json.Read<int?>(body, "maxDays") ?? Metrics.MaxAgeDays;
+                var mb = Json.Read<int?>(body, "maxMb");
+                var bytes = mb.HasValue ? mb.Value * 1024L * 1024L : Metrics.MaxTotalBytes;
+                if (days < 0 || bytes < 0) throw new BadRequestException("maxDays and maxMb cannot be negative.");
+                if (days == 0 && bytes == 0) throw new BadRequestException("Give maxDays and/or maxMb (or set FAIRLEAD_LOG_MAX_DAYS / FAIRLEAD_LOG_MAX_MB); with no limit nothing is removed.");
+                var dry = Json.Read<bool?>(body, "dryRun") ?? false;
+                return Task.FromResult(Json.Ok(RequestLog.Prune(Metrics.LogDirectory, days, bytes, DateTimeOffset.UtcNow, dry)));
+            });
             Admin.Get("/api/requestlog/summary", r => Task.FromResult(Json.Ok(RequestLog.Summarize(RequestLogEntries(r)))));
             Admin.Get("/api/metrics", r => Task.FromResult(Json.Ok(Metrics.Summary())));
             Admin.Get("/api/live", r => Task.FromResult(LiveStream()));

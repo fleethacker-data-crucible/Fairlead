@@ -13,7 +13,7 @@ param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Argv)
 
 $ErrorActionPreference = 'Stop'
 $script:Root = Split-Path $PSScriptRoot -Parent
-$script:Flags = @('json', 'yes', 'private', 'tools', 'clear-key', 'key-stdin', 'console', 'no-tray', 'no-browser', 'open', 'replace', 'remove', 'summary')
+$script:Flags = @('json', 'yes', 'private', 'tools', 'clear-key', 'key-stdin', 'console', 'no-tray', 'no-browser', 'open', 'replace', 'remove', 'summary', 'dry-run')
 
 # ---------- arguments ----------
 
@@ -266,6 +266,7 @@ Health and activity
   breakers reset [provider]           POST /api/breakers/reset
   requests [--limit N]                GET /api/requests
   request <id>                        GET /api/requests/{id}
+  requestlog prune [--days N] [--max-mb N] [--dry-run] --yes   POST /api/requestlog/prune: delete old daily files (never today's)
   requestlog [--since 24h] [--client N] [--label L] [--model M] [--route R] [--status ok|error|4xx|5xx|CODE] [--limit N] [--summary]
                                       GET /api/requestlog[/summary]: the durable who/what/which-model log (no prompts)
   metrics                             GET /api/metrics
@@ -673,6 +674,15 @@ function Invoke-Fairlead([string[]]$List) {
             Out-Result $r { param($v) $v | Select-Object @{ n = 'time'; e = { ([DateTime]$_.time).ToLocalTime().ToString('HH:mm:ss') } }, id, client, requestedModel, route, target, status, totalMs, failover, kedge | Format-Table -AutoSize | Out-String -Width 200 }
         }
         'requestlog' {
+            if ((Word 1) -eq 'prune') {
+                $payload = @{}
+                if (Opt 'days') { $payload.maxDays = [int](Opt 'days') }
+                if (Opt 'max-mb') { $payload.maxMb = [int](Opt 'max-mb') }
+                if (Opt 'dry-run') { $payload.dryRun = $true } else { Confirm-Action 'Delete old request-log files' }
+                $r = Invoke-Api POST '/api/requestlog/prune' $payload
+                Out-Result $r { param($v) $(if ($v.dryRun) { 'Would delete ' } else { 'Deleted ' }) + @($v.deleted).Count + ' file(s), ' + $v.freedBytes + ' bytes; kept ' + $v.keptFiles + ' file(s), ' + $v.keptBytes + ' bytes.' }
+                return
+            }
             $qs = New-Object System.Collections.ArrayList
             foreach ($k in @('since', 'until', 'client', 'label', 'model', 'route', 'status', 'limit')) { $v = Opt $k; if ($v) { [void]$qs.Add($k + '=' + (Esc ([string]$v))) } }
             $suffix = ''; if ($qs.Count) { $suffix = '?' + ($qs -join '&') }

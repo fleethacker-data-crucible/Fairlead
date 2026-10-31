@@ -112,6 +112,7 @@ namespace Fairlead.Core.Host
             Breakers = new BreakerBoard();
             Health = new HealthMonitor(Config, Upstream, Breakers, Log);
             Metrics = new Metrics(Settings.LogDirectory);
+            Metrics.Retain(Settings.LogMaxAgeDays, Settings.LogMaxMegabytes);
             Engine = new GatewayEngine(Config, Upstream, Health, Breakers, Metrics, Log);
             SessionToken = string.IsNullOrEmpty(options.SessionToken) ? NewToken() : options.SessionToken;
             CliToken = NewToken();

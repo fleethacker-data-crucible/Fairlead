@@ -20,6 +20,10 @@ namespace Fairlead.Core.Config
         public string DataDirectory { get; set; }
         /// <summary>logs\ under the app root: runtime files and JSONL logs (never prompts or keys).</summary>
         public string LogDirectory { get; set; }
+
+        /// <summary>Request-log retention (FAIRLEAD_LOG_MAX_DAYS, FAIRLEAD_LOG_MAX_MB). 0 = keep everything, the default.</summary>
+        public int LogMaxAgeDays { get; set; }
+        public int LogMaxMegabytes { get; set; }
         public string WebRootDirectory { get; set; }
         public int PreferredPort { get; set; }
         /// <summary>
@@ -50,6 +54,9 @@ namespace Fairlead.Core.Config
             s.DataDirectory = data;
             s.LogDirectory = Env("FAIRLEAD_LOG_DIR") ?? Path.Combine(rootDirectory, "logs");
             s.WebRootDirectory = Env("FAIRLEAD_WEBROOT");
+            int retain;
+            if (int.TryParse(Env("FAIRLEAD_LOG_MAX_DAYS"), out retain) && retain > 0) s.LogMaxAgeDays = retain;
+            if (int.TryParse(Env("FAIRLEAD_LOG_MAX_MB"), out retain) && retain > 0) s.LogMaxMegabytes = retain;
             int port;
             var portText = Env("FAIRLEAD_PORT");
             if (portText != null && int.TryParse(portText, out port) && port > 0 && port < 65536) s.PreferredPort = port;

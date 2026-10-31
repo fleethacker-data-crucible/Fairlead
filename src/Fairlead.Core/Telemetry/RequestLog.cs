@@ -51,6 +51,21 @@ namespace Fairlead.Core.Telemetry
         public int? P95Ms { get; set; }
     }
 
+    /// <summary>What a prune removed (or, for a dry run, would remove).</summary>
+    public sealed class RequestLogPruneResult
+    {
+        public List<string> Deleted { get; set; }
+        public long FreedBytes { get; set; }
+        public int KeptFiles { get; set; }
+        public long KeptBytes { get; set; }
+        public bool DryRun { get; set; }
+
+        public RequestLogPruneResult()
+        {
+            Deleted = new List<string>();
+        }
+    }
+
     /// <summary>What to read from the request log. Empty fields match everything.</summary>
     public sealed class RequestLogQuery
     {
@@ -87,6 +102,59 @@ namespace Fairlead.Core.Telemetry
         public static string FileFor(string logDirectory, DateTimeOffset time)
         {
             return Path.Combine(logDirectory, FilePrefix + time.UtcDateTime.ToString("yyyyMMdd", CultureInfo.InvariantCulture) + ".jsonl");
+        }
+
+        /// <summary>
+        /// Removes old daily files: those older than <paramref name="maxAgeDays"/> days (0 = no age limit), then the oldest
+        /// until the files total at most <paramref name="maxTotalBytes"/> (0 = no size limit). Today's file is never removed,
+        /// and only <c>fairlead-requests-yyyyMMdd.jsonl</c> files are looked at. With both limits at 0 nothing is removed.
+        /// </summary>
+        public static RequestLogPruneResult Prune(string logDirectory, int maxAgeDays, long maxTotalBytes, DateTimeOffset now, bool dryRun)
+        {
+            var result = new RequestLogPruneResult { DryRun = dryRun };
+            if (string.IsNullOrEmpty(logDirectory) || !Directory.Exists(logDirectory)) return result;
+            var today = now.UtcDateTime.Date;
+            var files = new List<KeyValuePair<DateTime, FileInfo>>();
+            foreach (var path in Directory.GetFiles(logDirectory, FilePrefix + "*.jsonl"))
+            {
+                var day = FileDay(path);
+                if (day == DateTime.MinValue) continue;
+                files.Add(new KeyValuePair<DateTime, FileInfo>(day, new FileInfo(path)));
+            }
+            files = files.OrderBy(f => f.Key).ToList();
+            var remaining = new List<KeyValuePair<DateTime, FileInfo>>();
+            foreach (var f in files)
+            {
+                if (maxAgeDays > 0 && f.Key < today.AddDays(-maxAgeDays) && f.Key < today) Remove(f.Value, result);
+                else remaining.Add(f);
+            }
+            if (maxTotalBytes > 0)
+            {
+                var total = remaining.Sum(f => f.Value.Length);
+                var keep = new List<KeyValuePair<DateTime, FileInfo>>();
+                foreach (var f in remaining)
+                {
+                    if (total > maxTotalBytes && f.Key < today) { total -= f.Value.Length; Remove(f.Value, result); }
+                    else keep.Add(f);
+                }
+                remaining = keep;
+            }
+            result.KeptFiles = remaining.Count;
+            result.KeptBytes = remaining.Sum(f => f.Value.Length);
+            return result;
+        }
+
+        private static void Remove(FileInfo file, RequestLogPruneResult result)
+        {
+            var length = file.Length;
+            if (!result.DryRun)
+            {
+                try { file.Delete(); }
+                catch (IOException) { return; }
+                catch (UnauthorizedAccessException) { return; }
+            }
+            result.Deleted.Add(file.Name);
+            result.FreedBytes += length;
         }
 
         /// <summary>Names the caller on the record: the client key (id, visible prefix) and the cleaned label.</summary>

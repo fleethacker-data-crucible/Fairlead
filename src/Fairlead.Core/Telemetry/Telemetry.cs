@@ -127,6 +127,40 @@ namespace Fairlead.Core.Telemetry
             }
         }
 
+        private int _maxAgeDays;
+        private long _maxTotalBytes;
+        private DateTime _lastPruneDay = DateTime.MinValue;
+
+        /// <summary>
+        /// Keeps the request-log folder in bounds: files older than <paramref name="maxAgeDays"/> days and, beyond that, the
+        /// oldest files past <paramref name="maxMegabytes"/> are deleted (0 = no limit, the default). Runs now and then once
+        /// a day when the first request of a new day is recorded. Today's file is never deleted.
+        /// </summary>
+        public void Retain(int maxAgeDays, int maxMegabytes)
+        {
+            lock (_lock)
+            {
+                _maxAgeDays = Math.Max(0, maxAgeDays);
+                _maxTotalBytes = Math.Max(0, maxMegabytes) * 1024L * 1024L;
+                _lastPruneDay = DateTime.MinValue;
+                PruneIfDue();
+            }
+        }
+
+        public int MaxAgeDays { get { return _maxAgeDays; } }
+        public long MaxTotalBytes { get { return _maxTotalBytes; } }
+
+        private void PruneIfDue()
+        {
+            if (_logDirectory == null || (_maxAgeDays == 0 && _maxTotalBytes == 0)) return;
+            var today = DateTime.UtcNow.Date;
+            if (_lastPruneDay == today) return;
+            _lastPruneDay = today;
+            try { RequestLog.Prune(_logDirectory, _maxAgeDays, _maxTotalBytes, DateTimeOffset.UtcNow, false); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+
         /// <summary>The folder the daily request logs are written to; null when it could not be created.</summary>
         public string LogDirectory { get { return _logDirectory; } }
 
@@ -150,6 +184,7 @@ namespace Fairlead.Core.Telemetry
                 if (r.Sensitive) _sensitive++;
                 if (_logDirectory != null)
                 {
+                    PruneIfDue();
                     try
                     {
                         // Previews never go to disk, even with content logging on.
