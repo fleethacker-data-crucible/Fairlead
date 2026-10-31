@@ -365,18 +365,21 @@ namespace Fairlead.Core.Host
         private async Task<HttpResponse> DetectLocal(HttpRequest r)
         {
             var cfg = Config.Current;
-            var found = await Task.WhenAll(ProviderPresets.All.Where(p => p.Local).Select(async preset =>
+            var found = await Task.WhenAll(ProviderPresets.LocalByAddress().Select(async group =>
             {
+                var preset = group[0];
+                var name = string.Join(" or ", group.Select(g => g.Name));
+                var alsoPreset = group.Skip(1).Select(g => g.Id).ToList();
                 var probe = ProviderPresets.Create(preset.Id);
                 var existing = cfg.Providers.FirstOrDefault(p => string.Equals(p.BaseUrl.TrimEnd('/'), probe.BaseUrl.TrimEnd('/'), StringComparison.OrdinalIgnoreCase));
                 try
                 {
                     var models = await Upstream.ListModelsAsync(existing ?? probe, CancellationToken.None, 2500).ConfigureAwait(false);
-                    return new { preset = preset.Id, name = preset.Name, baseUrl = probe.BaseUrl, running = true, configured = existing == null ? null : existing.Id, models = models, error = (string)null };
+                    return new { preset = preset.Id, name = name, alsoPreset = alsoPreset, baseUrl = probe.BaseUrl, running = true, configured = existing == null ? null : existing.Id, models = models, error = (string)null };
                 }
                 catch (UpstreamException ex)
                 {
-                    return new { preset = preset.Id, name = preset.Name, baseUrl = probe.BaseUrl, running = ex.Kind != FailureKind.Network && ex.Kind != FailureKind.Timeout, configured = existing == null ? null : existing.Id, models = new List<ModelInfo>(), error = (string)ex.Message };
+                    return new { preset = preset.Id, name = name, alsoPreset = alsoPreset, baseUrl = probe.BaseUrl, running = ex.Kind != FailureKind.Network && ex.Kind != FailureKind.Timeout, configured = existing == null ? null : existing.Id, models = new List<ModelInfo>(), error = (string)ex.Message };
                 }
             })).ConfigureAwait(false);
             return Json.Ok(found);

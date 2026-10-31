@@ -51,6 +51,24 @@ namespace Fairlead.Core.Config
             new ProviderPreset { Id = "custom", Name = "Custom (OpenAI-compatible)", Kind = ProviderKind.OpenAi, BaseUrl = "http://127.0.0.1:8000/v1", Hint = "Any server that speaks /v1/chat/completions." },
         };
 
+        /// <summary>
+        /// The local presets grouped by address: presets that default to the same address (phoenix-lai and LM Studio both
+        /// use port 1234) are one server to look for, so local detection probes and reports each address once. The first
+        /// preset of a group is the one setup offers; the order of <see cref="All"/> decides.
+        /// </summary>
+        public static List<List<ProviderPreset>> LocalByAddress()
+        {
+            var groups = new List<List<ProviderPreset>>();
+            foreach (var p in All.Where(x => x.Local))
+            {
+                var key = p.BaseUrl.TrimEnd('/');
+                var group = groups.FirstOrDefault(g => string.Equals(g[0].BaseUrl.TrimEnd('/'), key, StringComparison.OrdinalIgnoreCase));
+                if (group == null) groups.Add(new List<ProviderPreset> { p });
+                else group.Add(p);
+            }
+            return groups;
+        }
+
         public static ProviderPreset Find(string id)
         {
             if (string.IsNullOrEmpty(id)) return null;
