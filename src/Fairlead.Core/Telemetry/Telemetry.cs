@@ -121,6 +121,7 @@ namespace Fairlead.Core.Telemetry
                 {
                     Directory.CreateDirectory(logDirectory);
                     _logDirectory = logDirectory;
+                    _usage.Seed(RequestLog.ReadDay(logDirectory, DateTimeOffset.UtcNow), DateTime.UtcNow);
                 }
                 catch (IOException) { _logDirectory = null; }
                 catch (UnauthorizedAccessException) { _logDirectory = null; }
@@ -166,6 +167,10 @@ namespace Fairlead.Core.Telemetry
 
         public DateTimeOffset StartedAt { get; private set; }
 
+        /// <summary>Tokens each client key has used today (for daily budgets).</summary>
+        public Gateway.ClientUsage Usage { get { return _usage; } }
+        private readonly Gateway.ClientUsage _usage = new Gateway.ClientUsage();
+
         /// <summary>Request lifecycle events for the live routing view.</summary>
         public LiveFeed Live { get { return _live; } }
         private readonly LiveFeed _live = new LiveFeed();
@@ -182,6 +187,7 @@ namespace Fairlead.Core.Telemetry
                 if (r.Local && r.Status < 400) _local++;
                 if (r.Kedge) _kedge++;
                 if (r.Sensitive) _sensitive++;
+                _usage.Add(r.ClientId, (long)(r.InputTokens ?? 0) + (r.OutputTokens ?? 0), DateTime.UtcNow);
                 if (_logDirectory != null)
                 {
                     PruneIfDue();
