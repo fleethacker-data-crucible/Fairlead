@@ -34,5 +34,16 @@ namespace Fairlead.Core.Tests
             Assert.Equal("gemma-desk", p.Id);
             Assert.Equal("http://127.0.0.1:1234/v1", p.BaseUrl);
         }
+
+        [Fact]
+        public void PresetsOnTheSameAddressAreDetectedOnce()
+        {
+            var groups = ProviderPresets.LocalByAddress();
+            var urls = groups.Select(g => g[0].BaseUrl.TrimEnd('/')).ToList();
+            Assert.Equal(urls.Count, urls.Distinct(System.StringComparer.OrdinalIgnoreCase).Count());
+            var shared = groups.Single(g => g[0].BaseUrl.EndsWith(":1234/v1"));
+            Assert.Equal(new[] { "phoenix-lai", "lmstudio" }, shared.Select(x => x.Id).ToArray());
+            Assert.Equal(ProviderPresets.All.Count(x => x.Local), groups.Sum(g => g.Count));
+        }
     }
 }
