@@ -239,6 +239,40 @@ namespace Fairlead.Core.Host
             });
 
             Admin.Post("/api/clients", CreateClient);
+            Admin.Get("/api/clients/usage", r =>
+            {
+                var now = DateTime.UtcNow;
+                return Task.FromResult(Json.Ok(Config.Current.Clients.Select(k => new
+                {
+                    k.Id,
+                    k.Name,
+                    usedToday = Metrics.Usage.Used(k.Id, now),
+                    dailyTokenLimit = k.DailyTokenLimit,
+                    dailyTokenSoftLimit = k.DailyTokenSoftLimit,
+                    resetsInSeconds = ClientUsage.SecondsToReset(now),
+                }).ToList()));
+            });
+            Admin.Post("/api/clients/{id}/budget", r =>
+            {
+                var id = r.RouteValues["id"];
+                var body = Json.Body(r);
+                var daily = Json.Read<long?>(body, "dailyTokens");
+                var soft = Json.Read<long?>(body, "softDailyTokens");
+                if ((daily.HasValue && daily.Value < 0) || (soft.HasValue && soft.Value < 0)) throw new BadRequestException("The daily token limits are whole numbers of tokens (0 or empty for no limit).");
+                if (daily.HasValue && soft.HasValue && daily.Value > 0 && soft.Value > daily.Value) throw new BadRequestException("The soft limit must be below the daily limit.");
+                var found = false;
+                Config.Update(c =>
+                {
+                    var k = c.Clients.FirstOrDefault(x => x.Id == id);
+                    if (k == null) return;
+                    found = true;
+                    if (body["dailyTokens"] != null) k.DailyTokenLimit = daily.HasValue && daily.Value > 0 ? daily : null;
+                    if (body["softDailyTokens"] != null) k.DailyTokenSoftLimit = soft.HasValue && soft.Value > 0 ? soft : null;
+                });
+                if (!found) throw new NotFoundException("No client key " + id + ".");
+                var now = Config.Current.Clients.First(x => x.Id == id);
+                return Task.FromResult(Json.Ok(new { id = id, dailyTokenLimit = now.DailyTokenLimit, dailyTokenSoftLimit = now.DailyTokenSoftLimit }));
+            });
             Admin.Post("/api/clients/{id}/rate-limit", r =>
             {
                 var id = r.RouteValues["id"];
@@ -436,7 +470,7 @@ namespace Fairlead.Core.Host
                 c.AutoFallbackRoute,
                 kedge = c.Kedge,
                 c.RequireClientKey,
-                clients = c.Clients.Select(k => new { k.Id, k.Name, k.Prefix, k.Created, k.Routes, k.RateLimitPerMinute }),
+                clients = c.Clients.Select(k => new { k.Id, k.Name, k.Prefix, k.Created, k.Routes, k.RateLimitPerMinute, k.DailyTokenLimit, k.DailyTokenSoftLimit }),
                 c.Network,
                 c.Privacy,
                 c.CorsOrigins,
@@ -670,6 +704,10 @@ namespace Fairlead.Core.Host
             var routes = Json.Read<List<string>>(body, "routes") ?? new List<string>();
             var rate = Json.Read<int?>(body, "rateLimitPerMinute");
             if (rate.HasValue && (rate.Value < 0 || rate.Value > 1000000)) throw new BadRequestException("rateLimitPerMinute is a whole number of requests a minute (0 or empty for no limit).");
+            var daily = Json.Read<long?>(body, "dailyTokenLimit");
+            var soft = Json.Read<long?>(body, "dailyTokenSoftLimit");
+            if ((daily.HasValue && daily.Value < 0) || (soft.HasValue && soft.Value < 0)) throw new BadRequestException("The daily token limits are whole numbers of tokens (0 or empty for no limit).");
+            if (daily.HasValue && soft.HasValue && daily.Value > 0 && soft.Value > daily.Value) throw new BadRequestException("The soft limit must be below the daily limit.");
             var key = GatewayEngine.NewClientKey();
             var client = new ClientKey
             {
@@ -679,6 +717,8 @@ namespace Fairlead.Core.Host
                 Hash = GatewayEngine.HashKey(key),
                 Routes = routes.Where(x => !string.IsNullOrWhiteSpace(x)).ToList(),
                 RateLimitPerMinute = rate.HasValue && rate.Value > 0 ? rate : null,
+                DailyTokenLimit = daily.HasValue && daily.Value > 0 ? daily : null,
+                DailyTokenSoftLimit = soft.HasValue && soft.Value > 0 ? soft : null,
             };
             Config.Update(c =>
             {
@@ -687,7 +727,7 @@ namespace Fairlead.Core.Host
                 c.Clients.Add(client);
             });
             // The only time the key leaves Fairlead.
-            return Task.FromResult(Json.Ok(new { client = new { client.Id, client.Name, client.Prefix, client.Created, client.Routes, client.RateLimitPerMinute }, key = key }));
+            return Task.FromResult(Json.Ok(new { client = new { client.Id, client.Name, client.Prefix, client.Created, client.Routes, client.RateLimitPerMinute, client.DailyTokenLimit, client.DailyTokenSoftLimit }, key = key }));
         }
 
         private async Task<HttpResponse> Playground(HttpRequest r)
