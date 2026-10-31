@@ -73,6 +73,7 @@ Fairlead runs on this PC. A prompt goes only where its route sends it: local mod
 - [Architecture](docs/ARCHITECTURE.md): components, request path, security
 - [Routing and Kedge mode](docs/ROUTING.md): routes, rules, aliases, failover, health
 - [AI gateway](docs/AI-GATEWAY.md): Responses API gateways from a model file, with the address and token from the environment
+- [Cited answers (Bearing)](docs/BEARING.md): optional, off by default; answers that quote a local folder of documents with a link back
 - [Command line](docs/CLI.md): `fairlead.cmd`, one command per capability, for people and scripts
 - [API](docs/API.md): the gateway (`/v1`) and every admin route (`/api`)
 - [Operations](docs/OPERATIONS.md): running, stopping, config files, troubleshooting

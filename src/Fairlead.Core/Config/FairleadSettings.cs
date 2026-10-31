@@ -20,6 +20,9 @@ namespace Fairlead.Core.Config
         public string DataDirectory { get; set; }
         /// <summary>logs\ under the app root: runtime files and JSONL logs (never prompts or keys).</summary>
         public string LogDirectory { get; set; }
+
+        /// <summary>Folder of documents for cited answers (Bearing). Empty = off. Set by FAIRLEAD_BEARING_DIR; never in fairlead.json.</summary>
+        public string BearingDirectory { get; set; }
         public string WebRootDirectory { get; set; }
         public int PreferredPort { get; set; }
         /// <summary>
@@ -50,6 +53,7 @@ namespace Fairlead.Core.Config
             s.DataDirectory = data;
             s.LogDirectory = Env("FAIRLEAD_LOG_DIR") ?? Path.Combine(rootDirectory, "logs");
             s.WebRootDirectory = Env("FAIRLEAD_WEBROOT");
+            s.BearingDirectory = Env("FAIRLEAD_BEARING_DIR");
             int port;
             var portText = Env("FAIRLEAD_PORT");
             if (portText != null && int.TryParse(portText, out port) && port > 0 && port < 65536) s.PreferredPort = port;
