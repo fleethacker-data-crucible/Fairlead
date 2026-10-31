@@ -225,6 +225,17 @@ namespace Fairlead.Core.Host
                 if (rec == null) throw new NotFoundException("That request is no longer in the activity log.");
                 return Task.FromResult(Json.Ok(rec));
             });
+            Admin.Get("/api/bearing", r => Task.FromResult(Json.Ok(Engine.CitedAnswers == null ? (object)new { enabled = false } : Engine.CitedAnswers.Status())));
+            Admin.Get("/api/bearing/search", r =>
+            {
+                string q;
+                if (!r.QueryValues.TryGetValue("q", out q) || string.IsNullOrWhiteSpace(q)) throw new BadRequestException("Give the question as ?q=...");
+                int limit;
+                string l;
+                if (!r.QueryValues.TryGetValue("limit", out l) || !int.TryParse(l, out limit)) limit = Fairlead.Core.Bearing.BearingService.DefaultTop;
+                if (Engine.CitedAnswers == null || !Engine.CitedAnswers.Enabled) throw new BadRequestException("Cited answers are not set up: set FAIRLEAD_BEARING_DIR to a folder of documents and restart Fairlead.");
+                return Task.FromResult(Json.Ok(Engine.CitedAnswers.Search(q, Math.Max(1, limit))));
+            });
             Admin.Get("/api/requestlog", r => Task.FromResult(Json.Ok(RequestLogEntries(r))));
             Admin.Get("/api/requestlog/summary", r => Task.FromResult(Json.Ok(RequestLog.Summarize(RequestLogEntries(r)))));
             Admin.Get("/api/metrics", r => Task.FromResult(Json.Ok(Metrics.Summary())));
