@@ -1,22 +1,27 @@
 import { useState } from 'react';
+import { RequestLogView } from '../components/request-log';
 import { Dot, Empty, Page, Pill, Section, Tabs, cn } from '../components/ui';
 import { DASH, clock, count, ms, usd } from '../lib/format';
 import { RequestList, type RequestRecord } from '../lib/schemas';
 import { useResource } from '../lib/useResource';
 
 type Filter = 'all' | 'failed' | 'failover' | 'kedge' | 'private';
+type View = 'run' | 'log';
 
 export function ActivityPage() {
   const requests = useResource('/api/requests?limit=500', RequestList, { pollMs: 3000 });
   const [filter, setFilter] = useState<Filter>('all');
   const [open, setOpen] = useState<string | null>(null);
+  const [view, setView] = useState<View>('run');
   const all = requests.data ?? [];
   const pick = (f: Filter) => (r: RequestRecord) => f === 'all' || (f === 'failed' && r.status >= 400) || (f === 'failover' && r.failover) || (f === 'kedge' && r.kedge) || (f === 'private' && r.sensitive);
   const rows = all.filter(pick(filter));
   const selected = rows.find((r) => r.id === open) ?? null;
   return (
-    <Page title="Activity" lede="Every gateway request since Fairlead started: what was asked for, how the route was chosen, which targets were tried. Prompts are not kept unless content logging is on (Settings).">
+    <Page title="Activity" lede="Every gateway request: what was asked for, how the route was chosen, which targets were tried. Prompts are not kept unless content logging is on (Settings).">
       <section className="panel flex min-h-0 flex-col">
+        <Tabs value={view} onChange={setView} items={[{ value: 'run', label: 'This run' }, { value: 'log', label: 'Log on disk' }]} />
+        {view === 'log' ? <RequestLogView /> : <>
         <Tabs value={filter} onChange={setFilter} items={(['all', 'failed', 'failover', 'kedge', 'private'] as Filter[]).map((f) => ({ value: f, label: f === 'all' ? 'All' : f === 'kedge' ? 'Kedge mode' : f[0]!.toUpperCase() + f.slice(1), count: all.filter(pick(f)).length }))} />
         {rows.length === 0 ? <Empty title={all.length ? 'Nothing matches this filter' : 'No requests yet'} /> : (
           <div className="grid min-h-0 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
@@ -43,6 +48,7 @@ export function ActivityPage() {
             </div>
           </div>
         )}
+        </>}
       </section>
     </Page>
   );
