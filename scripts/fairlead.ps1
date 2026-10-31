@@ -681,6 +681,8 @@ function Invoke-Fairlead([string[]]$List) {
                 Out-Result $r { param($v) @($v) | Select-Object score, source, location, heading | Format-Table -AutoSize | Out-String -Width 200 }
             } else {
                 Out-Result (Invoke-Api GET '/api/bearing') { param($v) if ($v.enabled) { 'Bearing is on: ' + $v.folder + ' (' + $v.files + ' files, ' + $v.passages + ' passages). Opt in per request with ' + $v.optIn } else { 'Bearing is off. Set FAIRLEAD_BEARING_DIR to a folder of documents and restart Fairlead.' } }
+            }
+        }
         'requestlog' {
             $qs = New-Object System.Collections.ArrayList
             foreach ($k in @('since', 'until', 'client', 'label', 'model', 'route', 'status', 'limit')) { $v = Opt $k; if ($v) { [void]$qs.Add($k + '=' + (Esc ([string]$v))) } }
