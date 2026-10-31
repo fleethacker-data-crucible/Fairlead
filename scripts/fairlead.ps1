@@ -267,6 +267,8 @@ Health and activity
   breakers reset [provider]           POST /api/breakers/reset
   requests [--limit N]                GET /api/requests
   request <id>                        GET /api/requests/{id}
+  bearing [status]                    GET /api/bearing: cited answers (off unless FAIRLEAD_BEARING_DIR is set)
+  bearing search <question> [--limit N]  GET /api/bearing/search: what a question would retrieve
   requestlog [--since 24h] [--client N] [--label L] [--model M] [--route R] [--status ok|error|4xx|5xx|CODE] [--limit N] [--summary]
                                       GET /api/requestlog[/summary]: the durable who/what/which-model log (no prompts)
   metrics                             GET /api/metrics
@@ -720,6 +722,15 @@ function Invoke-Fairlead([string[]]$List) {
         'requests' {
             $r = Invoke-Api GET ('/api/requests?limit=' + [int](Opt 'limit' 20))
             Out-Result $r { param($v) $v | Select-Object @{ n = 'time'; e = { ([DateTime]$_.time).ToLocalTime().ToString('HH:mm:ss') } }, id, client, requestedModel, route, target, status, totalMs, failover, kedge | Format-Table -AutoSize | Out-String -Width 200 }
+        }
+        'bearing' {
+            if ((Word 1) -eq 'search') {
+                $q = Word 2 'question'
+                $r = Invoke-Api GET ('/api/bearing/search?q=' + (Esc $q) + '&limit=' + [int](Opt 'limit' 4))
+                Out-Result $r { param($v) @($v) | Select-Object score, source, location, heading | Format-Table -AutoSize | Out-String -Width 200 }
+            } else {
+                Out-Result (Invoke-Api GET '/api/bearing') { param($v) if ($v.enabled) { 'Bearing is on: ' + $v.folder + ' (' + $v.files + ' files, ' + $v.passages + ' passages). Opt in per request with ' + $v.optIn } else { 'Bearing is off. Set FAIRLEAD_BEARING_DIR to a folder of documents and restart Fairlead.' } }
+            }
         }
         'requestlog' {
             $qs = New-Object System.Collections.ArrayList

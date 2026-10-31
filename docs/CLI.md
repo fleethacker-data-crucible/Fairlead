@@ -67,6 +67,7 @@ encrypted with Windows DPAPI for the user who started Fairlead. The CLI decrypts
 | `probe` | `POST /api/probe` |
 | `breakers`, `breakers reset [provider]` | `GET /api/health/providers`, `POST /api/breakers/reset` |
 | `requests [--limit N]`, `request <id>` | `GET /api/requests[/{id}]` |
+| `bearing [status]`, `bearing search <question> [--limit N]` | `GET /api/bearing[/search]` |
 | `requestlog [--since 24h] [--client N] [--label L] [--model M] [--route R] [--status S] [--limit N] [--summary]` | `GET /api/requestlog[/summary]` |
 | `commands [--json]` | none (offline): every command with usage, routes and whether it needs `--yes` |
 | `metrics` | `GET /api/metrics` |
