@@ -258,11 +258,26 @@ Describe 'The fairlead CLI against a real host' {
     }
 
     It 'runs every read-only command, in tables and as JSON' {
-        foreach ($c in @(@('help'), @('config'), @('presets'), @('providers'), @('routes'), @('routing'), @('clients'), @('settings'), @('kedge'), @('gateway'), @('lazarette'), @('health'), @('breakers'), @('cache'), @('requests'), @('requestlog'), @('requestlog', '--summary'), @('bearing'), @('metrics'), @('logs', '--level', 'info'))) {
+        foreach ($c in @(@('help'), @('config'), @('presets'), @('providers'), @('routes'), @('routing'), @('clients'), @('settings'), @('kedge'), @('gateway'), @('lazarette'), @('health'), @('breakers'), @('cache'), @('requests'), @('requestlog'), @('requestlog', '--summary'), @('bearing'), @('commands'), @('metrics'), @('logs', '--level', 'info'))) {
             $r = Invoke-Cli @c
             $r.Code | Should -Be 0 -Because (($c -join ' ') + ': ' + $r.Out)
             if ($c[0] -ne 'help') { { Invoke-CliJson @c } | Should -Not -Throw -Because ($c -join ' ') }
         }
+    }
+
+    It 'lists every command as JSON with a versioned schema, offline' {
+        $doc = Invoke-CliJson commands
+        $doc.schemaVersion | Should -Be 1
+        $doc.tool | Should -Be 'fairlead'
+        $names = @($doc.commands | ForEach-Object { $_.name })
+        foreach ($n in @('providers', 'routes', 'clients', 'requests', 'requestlog', 'kedge', 'stop', 'commands', 'api')) { $names | Should -Contain $n }
+        ($names | Select-Object -Unique).Count | Should -BeGreaterThan 20
+        $script = Get-Content -Raw (Join-Path $script:Root 'scripts/fairlead.ps1')
+        foreach ($c in $doc.commands) { $script | Should -Match ("'" + [regex]::Escape($c.name) + "'") -Because ('command ' + $c.name + ' is listed but not handled') }
+        ($doc.commands | Where-Object { $_.name -eq 'stop' }).destructive | Should -BeTrue
+        ($doc.commands | Where-Object { $_.name -eq 'status' }).destructive | Should -BeFalse
+        @(($doc.commands | Where-Object { $_.name -eq 'status' }).routes) | Should -Contain 'GET /api/status'
+        (Invoke-Cli commands).Out | Should -Match 'requestlog'
     }
 
     It 'takes a provider key from stdin, never from the command line, and never prints it back' {

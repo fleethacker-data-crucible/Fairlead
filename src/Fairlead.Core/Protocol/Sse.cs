@@ -68,7 +68,10 @@ namespace Fairlead.Core.Protocol
             while (true)
             {
                 token.ThrowIfCancellationRequested();
-                var line = await _reader.ReadLineAsync().ConfigureAwait(false);
+                var pending = _reader.ReadLineAsync();
+                // A stalled upstream must not hold the request past its idle or total limit, whatever the HTTP stack does with the token.
+                if (!pending.IsCompleted) await CancellableRead.Wait(pending, token).ConfigureAwait(false);
+                var line = await pending.ConfigureAwait(false);
                 if (line == null)
                 {
                     return data == null ? null : new SseEvent(name, data.ToString());

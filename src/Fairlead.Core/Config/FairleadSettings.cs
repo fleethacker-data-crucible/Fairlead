@@ -24,6 +24,8 @@ namespace Fairlead.Core.Config
         /// <summary>Response cache (FAIRLEAD_RESPONSE_CACHE_SECONDS lifetime, FAIRLEAD_RESPONSE_CACHE_ENTRIES size). 0 seconds = off, the default.</summary>
         public int ResponseCacheSeconds { get; set; }
         public int ResponseCacheEntries { get; set; }
+        /// <summary>The most seconds one request may take, however busy its stream (FAIRLEAD_MAX_REQUEST_SECONDS). 0 = no cap, the default; the provider timeout stays an idle limit.</summary>
+        public int MaxRequestSeconds { get; set; }
 
         /// <summary>Folder of documents for cited answers (Bearing). Empty = off. Set by FAIRLEAD_BEARING_DIR; never in fairlead.json.</summary>
         public string BearingDirectory { get; set; }
@@ -60,6 +62,8 @@ namespace Fairlead.Core.Config
             int cacheValue;
             if (int.TryParse(Env("FAIRLEAD_RESPONSE_CACHE_SECONDS"), out cacheValue) && cacheValue > 0) s.ResponseCacheSeconds = cacheValue;
             if (int.TryParse(Env("FAIRLEAD_RESPONSE_CACHE_ENTRIES"), out cacheValue) && cacheValue > 0) s.ResponseCacheEntries = cacheValue;
+            int cap;
+            if (int.TryParse(Env("FAIRLEAD_MAX_REQUEST_SECONDS"), out cap) && cap > 0) s.MaxRequestSeconds = cap;
             s.BearingDirectory = Env("FAIRLEAD_BEARING_DIR");
             int port;
             var portText = Env("FAIRLEAD_PORT");

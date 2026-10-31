@@ -37,6 +37,8 @@ namespace Fairlead.Core.Gateway
         private readonly Metrics _metrics;
         private readonly Diagnostics _log;
         private readonly RoutePlanner _planner = new RoutePlanner();
+        /// <summary>The multipart body of an audio-transcription request, by the placeholder body that travels through route planning.</summary>
+        private readonly System.Runtime.CompilerServices.ConditionalWeakTable<JObject, RawUpload> _uploads = new System.Runtime.CompilerServices.ConditionalWeakTable<JObject, RawUpload>();
 
         public GatewayEngine(ConfigStore config, UpstreamClient upstream, HealthMonitor health, BreakerBoard breakers, Metrics metrics, Diagnostics log)
         {
@@ -120,6 +122,25 @@ namespace Fairlead.Core.Gateway
 
         // ---------- requests ----------
 
+        private readonly ClientRateLimiter _limits = new ClientRateLimiter();
+
+        /// <summary>The per-key request limit: null when the request may go on, else the 429 (in the caller's dialect, with Retry-After).</summary>
+        private HttpResponse RateLimited(ClientKey client, Dialect dialect, RequestRecord record, System.Diagnostics.Stopwatch sw)
+        {
+            if (client == null || !client.RateLimitPerMinute.HasValue || client.RateLimitPerMinute.Value <= 0) return null;
+            int retry;
+            if (_limits.TryAcquire(client.Id, client.RateLimitPerMinute.Value, DateTime.UtcNow, out retry)) return null;
+            var response = Fail(record, sw, dialect, 429, "Client key '" + client.Name + "' is limited to " + client.RateLimitPerMinute.Value + " requests a minute. Try again in " + retry + " s.");
+            response.Headers["Retry-After"] = retry.ToString();
+            return response;
+        }
+
+        /// <summary>Forgets a client key's request window (its limit changed or it was revoked).</summary>
+        public void ForgetClient(string clientId)
+        {
+            _limits.Forget(clientId);
+        }
+
         /// <summary>Handles POST /v1/chat/completions (OpenAI) and POST /v1/messages (Anthropic).</summary>
         public async Task<HttpResponse> HandleChatAsync(HttpRequest request, Dialect dialect)
         {
@@ -131,6 +152,8 @@ namespace Fairlead.Core.Gateway
             if (!Authenticate(request, out client, out authError)) return Fail(record, sw, dialect, 401, authError);
             record.Client = (client == null ? null : client.Name);
             RequestLog.Identify(record, client, request.Header(LabelHeader));
+            var limited = RateLimited(client, dialect, record, sw);
+            if (limited != null) return limited;
             JObject body;
             try { body = JObject.Parse(request.BodyText); }
             catch (JsonException ex) { return Fail(record, sw, dialect, 400, "Body is not valid JSON: " + ex.Message); }
@@ -141,7 +164,6 @@ namespace Fairlead.Core.Gateway
             if (BearingService.Requested(request.Header(BearingService.OptInHeader)))
             {
                 if (CitedAnswers == null || !CitedAnswers.Enabled) return Fail(record, sw, dialect, 400, "Cited answers are not set up: set FAIRLEAD_BEARING_DIR to a folder of documents and restart Fairlead.");
-                if (body["stream"] != null && body["stream"].Type == JTokenType.Boolean && (bool)body["stream"]) return Fail(record, sw, dialect, 400, "Cited answers need \"stream\": false; the sources are checked once the whole answer is in.");
                 string bearingError;
                 bearing = CitedAnswers.Prepare(body, dialect, BearingService.TopFrom(request.Header(BearingService.TopHeader)), out bearingError);
                 if (bearing == null) return Fail(record, sw, dialect, 400, bearingError);
@@ -221,6 +243,42 @@ namespace Fairlead.Core.Gateway
             _metrics.Record(record);
             var output = bearing.NoSourcesAnswer();
             var model = (string)body["model"] ?? "bearing";
+            if (body["stream"] != null && body["stream"].Type == JTokenType.Boolean && (bool)body["stream"])
+            {
+                // A streaming caller gets a stream: the one sentence, the end of the answer and the (empty) citations event.
+                var streamed = HttpResponse.EventStream(async (sink, token) =>
+                {
+                    var chunk = new JObject { { "id", "chatcmpl-bearing" }, { "object", "chat.completion.chunk" }, { "model", model } };
+                    chunk["choices"] = new JArray { new JObject { { "index", 0 }, { "delta", new JObject { { "role", "assistant" }, { "content", BearingRun.NoSourcesText } } }, { "finish_reason", null } } };
+                    var finish = new JObject { { "id", "chatcmpl-bearing" }, { "object", "chat.completion.chunk" }, { "model", model } };
+                    finish["choices"] = new JArray { new JObject { { "index", 0 }, { "delta", new JObject() }, { "finish_reason", "stop" } } };
+                    var payload = new JObject { { "fairlead_citations", output["fairlead_citations"].DeepClone() }, { "fairlead_bearing", output["fairlead_bearing"].DeepClone() } };
+                    if (dialect == Dialect.Anthropic)
+                    {
+                        var o2a = new OpenAiToAnthropicStream(model);
+                        foreach (var s in o2a.Feed(chunk)) await sink.WriteAsync(s, token).ConfigureAwait(false);
+                        foreach (var s in o2a.Feed(finish)) await sink.WriteAsync(s, token).ConfigureAwait(false);
+                        payload["type"] = "fairlead_citations";
+                        await sink.WriteAsync(SseWriter.Named("fairlead_citations", payload), token).ConfigureAwait(false);
+                        foreach (var s in o2a.Finish()) await sink.WriteAsync(s, token).ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        await sink.WriteAsync(SseWriter.Data(chunk), token).ConfigureAwait(false);
+                        await sink.WriteAsync(SseWriter.Data(finish), token).ConfigureAwait(false);
+                        payload["id"] = "chatcmpl-bearing";
+                        payload["object"] = "chat.completion.chunk";
+                        payload["model"] = model;
+                        payload["choices"] = new JArray();
+                        await sink.WriteAsync(SseWriter.Data(payload), token).ConfigureAwait(false);
+                        await sink.WriteAsync(SseWriter.Done, token).ConfigureAwait(false);
+                    }
+                });
+                streamed.Headers["X-Fairlead-Request-Id"] = record.Id;
+                streamed.Headers["X-Fairlead-Route"] = "bearing";
+                streamed.Headers["X-Fairlead-Bearing"] = "sources=0";
+                return streamed;
+            }
             var text = dialect == Dialect.Anthropic ? Translate.OpenAiToAnthropicResponse(output, model) : output;
             if (dialect == Dialect.Anthropic) { text["fairlead_citations"] = output["fairlead_citations"]; text["fairlead_bearing"] = output["fairlead_bearing"]; }
             var http = HttpResponse.Json(200, text.ToString(Formatting.None));
@@ -241,6 +299,8 @@ namespace Fairlead.Core.Gateway
             if (!Authenticate(request, out client, out authError)) return Fail(record, sw, Dialect.OpenAi, 401, authError);
             record.Client = (client == null ? null : client.Name);
             RequestLog.Identify(record, client, request.Header(LabelHeader));
+            var limited = RateLimited(client, Dialect.OpenAi, record, sw);
+            if (limited != null) return limited;
             JObject body;
             try { body = JObject.Parse(request.BodyText); }
             catch (JsonException ex) { return Fail(record, sw, Dialect.OpenAi, 400, "Body is not valid JSON: " + ex.Message); }
@@ -265,6 +325,74 @@ namespace Fairlead.Core.Gateway
                 try { record.InputTokens = (int?)JObject.Parse(text)["usage"].At("prompt_tokens"); } catch (JsonException) { }
                 _metrics.Record(record);
                 var http = HttpResponse.Json(200, text);
+                AddHeaders(http, record, outcome.Winner);
+                return http;
+            }
+        }
+
+        /// <summary>
+        /// POST /v1/audio/speech (JSON in, audio out) and POST /v1/audio/transcriptions (multipart in, JSON or text out): the same
+        /// keys, routes, privacy rules, failover and request log as chat. Only OpenAI-compatible providers can serve them.
+        /// </summary>
+        public async Task<HttpResponse> HandleAudioAsync(HttpRequest request, string operation)
+        {
+            var record = new RequestRecord { Id = request.RequestId, Dialect = "openai", Endpoint = request.Path };
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            ClientKey client;
+            string authError;
+            record.Label = RequestLog.CleanLabel(request.Header(LabelHeader));
+            if (!Authenticate(request, out client, out authError)) return Fail(record, sw, Dialect.OpenAi, 401, authError);
+            record.Client = (client == null ? null : client.Name);
+            RequestLog.Identify(record, client, request.Header(LabelHeader));
+            var cfg = _config.Current;
+            JObject body;
+            string spoken = null;
+            if (operation == "speech")
+            {
+                try { body = JObject.Parse(request.BodyText); }
+                catch (JsonException ex) { return Fail(record, sw, Dialect.OpenAi, 400, "Body is not valid JSON: " + ex.Message); }
+                spoken = (string)body["input"];
+                if (string.IsNullOrEmpty(spoken)) return Fail(record, sw, Dialect.OpenAi, 400, "'input' (the text to speak) is required.");
+                record.EstimatedTokens = spoken.Length / 4;
+            }
+            else
+            {
+                string uploadError;
+                var upload = RawUpload.Parse(request.Body, request.Header("Content-Type"), out uploadError);
+                if (upload == null) return Fail(record, sw, Dialect.OpenAi, 400, uploadError);
+                if (!upload.HasFile) return Fail(record, sw, Dialect.OpenAi, 400, "The audio is missing: send it as the 'file' field.");
+                body = new JObject { { "model", upload.Field("model") ?? string.Empty } };
+                _uploads.Add(body, upload);
+            }
+            var profile = new RequestProfile { Dialect = Dialect.OpenAi, RequestedModel = (string)body["model"] ?? string.Empty, ClientName = (client == null ? null : client.Name), RouteOverride = request.Header(RouteHeader) };
+            if (string.Equals(request.Header(PrivacyHeader), "local", StringComparison.OrdinalIgnoreCase)) profile.MarkSensitive("header");
+            if (spoken != null && cfg.Privacy.DetectSecrets) foreach (var reason in SecretScanner.Scan(spoken)) profile.MarkSensitive(reason);
+            record.RequestedModel = profile.RequestedModel;
+            record.Sensitive = profile.Sensitive;
+            var plan = _planner.Plan(cfg, profile, _health, _breakers, _metrics, client, operation);
+            record.Route = plan.Route;
+            record.Decision = plan.Decision;
+            record.Kedge = plan.Kedge;
+            PublishStart(record, plan, client);
+            if (plan.Error != null) return Fail(record, sw, Dialect.OpenAi, plan.ErrorStatus, plan.Error);
+            var outcome = await TryCandidatesAsync(plan, body, Dialect.OpenAi, profile, record, sw, request.Aborted, operation).ConfigureAwait(false);
+            if (outcome.Error != null) return Fail(record, sw, Dialect.OpenAi, outcome.ErrorStatus, outcome.Error);
+            using (var response = outcome.Response)
+            {
+                byte[] bytes;
+                try { bytes = await response.ReadBytesAsync().ConfigureAwait(false); }
+                catch (Exception ex)
+                {
+                    if (!(ex is IOException || ex is OperationCanceledException || ex is System.Net.Http.HttpRequestException)) throw;
+                    return Fail(record, sw, Dialect.OpenAi, 502, outcome.Winner.Ref + " dropped the connection while answering.");
+                }
+                record.Target = outcome.Winner.Ref;
+                record.Local = outcome.Winner.Local;
+                record.Failover = record.Attempts.Count(a => a.Outcome != "skipped" && a.Outcome != "lost-race") > 1;
+                record.Status = 200;
+                record.TotalMs = (int)sw.ElapsedMilliseconds;
+                _metrics.Record(record);
+                var http = HttpResponse.Bytes(200, bytes, response.ContentType ?? (operation == "speech" ? "audio/mpeg" : "application/json"));
                 AddHeaders(http, record, outcome.Winner);
                 return http;
             }
@@ -494,7 +622,7 @@ namespace Fairlead.Core.Gateway
         }
 
         /// <summary>Sends to one target, retrying transient failures as many times as the provider allows before giving up on it.</summary>
-        private async Task<UpstreamResponse> SendWithRetriesAsync(Candidate c, string operation, JObject outgoing, CancellationToken aborted, RetryCount count)
+        private async Task<UpstreamResponse> SendWithRetriesAsync(Candidate c, string operation, JObject outgoing, CancellationToken aborted, RetryCount count, RawUpload upload = null)
         {
             var p = c.Provider;
             var max = Math.Max(0, p.Retries ?? 0);
@@ -505,7 +633,7 @@ namespace Fairlead.Core.Gateway
                 int delay;
                 try
                 {
-                    return await _upstream.SendAsync(p, operation, outgoing, aborted).ConfigureAwait(false);
+                    return await _upstream.SendAsync(p, operation, outgoing, aborted, null, upload).ConfigureAwait(false);
                 }
                 catch (UpstreamException ex)
                 {
@@ -530,7 +658,13 @@ namespace Fairlead.Core.Gateway
         {
             var target = UpstreamClient.DialectOf(c.Provider.Kind);
             JObject outgoing;
-            if (operation == "embeddings")
+            if (operation == "transcriptions")
+            {
+                RawUpload original;
+                if (!_uploads.TryGetValue(body, out original)) throw new InvalidOperationException("No upload for this transcription request.");
+                return SendWithRetriesAsync(c, operation, new JObject(), aborted, count, original.WithField("model", c.Model));
+            }
+            if (operation == "embeddings" || operation == "speech")
             {
                 outgoing = (JObject)body.DeepClone();
                 outgoing["model"] = c.Model;
@@ -541,6 +675,8 @@ namespace Fairlead.Core.Gateway
                 outgoing["model"] = c.Model;
                 if (target == Dialect.OpenAi && outgoing.Value<bool?>("stream") == true && c.Provider.StreamUsage && outgoing["stream_options"] == null)
                     outgoing["stream_options"] = new JObject { { "include_usage", true } };
+                if (target == Dialect.OpenAi && string.Equals(c.Provider.Preset, "openai", StringComparison.OrdinalIgnoreCase))
+                    Translate.AdaptForOpenAi(outgoing, c.Model);
             }
             else if (dialect == Dialect.Anthropic)
             {
@@ -564,6 +700,7 @@ namespace Fairlead.Core.Gateway
                 catch (Exception ex)
                 {
                     if (!(ex is IOException || ex is OperationCanceledException || ex is System.Net.Http.HttpRequestException)) throw;
+                    if (response.CapReached) return Fail(record, sw, dialect, 504, winner.Ref + " did not finish within the " + _upstream.TotalCapSeconds + " s total limit (FAIRLEAD_MAX_REQUEST_SECONDS).");
                     return Fail(record, sw, dialect, 502, winner.Ref + " dropped the connection while answering.");
                 }
                 var target = UpstreamClient.DialectOf(winner.Provider.Kind);
@@ -593,7 +730,7 @@ namespace Fairlead.Core.Gateway
             }
         }
 
-        private HttpResponse StreamResponse(UpstreamResponse response, Candidate winner, Dialect dialect, RequestProfile profile, RequestRecord record, System.Diagnostics.Stopwatch sw)
+        private HttpResponse StreamResponse(UpstreamResponse response, Candidate winner, Dialect dialect, RequestProfile profile, RequestRecord record, System.Diagnostics.Stopwatch sw, BearingRun bearing = null)
         {
             var target = UpstreamClient.DialectOf(winner.Provider.Kind);
             var modelName = profile.RequestedModel.Length > 0 ? profile.RequestedModel : winner.Ref;
@@ -606,6 +743,30 @@ namespace Fairlead.Core.Gateway
                 var a2o = target == Dialect.Anthropic && dialect == Dialect.OpenAi ? new AnthropicToOpenAiStream(modelName, true) : null;
                 var sawDone = false;
                 var firstEvent = false;
+                var answer = new StringBuilder();
+                var cited = false;
+                // Cited answers, streamed: the text goes through as it comes, and once it is complete the citations follow as
+                // one last event (a chunk with no choices for an OpenAI client, a named event for an Anthropic client).
+                Func<Task> citeNow = async () =>
+                {
+                    if (bearing == null || cited) return;
+                    cited = true;
+                    bearing.Check(answer.ToString());
+                    var payload = new JObject { { "fairlead_citations", bearing.CitationsJson }, { "fairlead_bearing", bearing.BearingJson } };
+                    if (dialect == Dialect.Anthropic)
+                    {
+                        payload["type"] = "fairlead_citations";
+                        await output.WriteAsync(SseWriter.Named("fairlead_citations", payload), token).ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        payload["id"] = "chatcmpl-bearing";
+                        payload["object"] = "chat.completion.chunk";
+                        payload["model"] = modelName;
+                        payload["choices"] = new JArray();
+                        await output.WriteAsync(SseWriter.Data(payload), token).ConfigureAwait(false);
+                    }
+                };
                 try
                 {
                     using (response)
@@ -622,6 +783,7 @@ namespace Fairlead.Core.Gateway
                                 if (!(ex is IOException || ex is OperationCanceledException || ex is ObjectDisposedException)) throw;
                                 // The idle timer is Fairlead's own: say so, instead of blaming the upstream for a limit Fairlead applied.
                                 error = token.IsCancellationRequested ? "Fairlead is stopping."
+                                    : response.CapReached ? winner.Ref + " was still answering after the " + _upstream.TotalCapSeconds + " s total limit (FAIRLEAD_MAX_REQUEST_SECONDS), so Fairlead ended the stream."
                                     : response.Token.IsCancellationRequested ? winner.Ref + " sent nothing for " + winner.Provider.TimeoutSeconds + " s, so Fairlead ended the stream (the provider's timeout is an idle limit; keep-alives and data reset it)."
                                     : winner.Ref + " stopped sending (" + ex.GetType().Name + ").";
                                 break;
@@ -633,9 +795,20 @@ namespace Fairlead.Core.Gateway
                                 await output.WriteAsync(SseWriter.KeepAlive, token).ConfigureAwait(false);
                                 continue;
                             }
+                            if (bearing != null && !ev.IsDone)
+                            {
+                                var piece = ev.Json();
+                                if (piece != null)
+                                {
+                                    if (target == Dialect.OpenAi) { var d = piece["choices"] == null ? null : (string)piece["choices"].FirstOrDefault().At("delta").At("content"); if (d != null) answer.Append(d); }
+                                    else if ((string)piece["type"] == "content_block_delta") { var d = (string)piece["delta"].At("text"); if (d != null) answer.Append(d); }
+                                    if (target == Dialect.Anthropic && (string)piece["type"] == "message_stop") await citeNow().ConfigureAwait(false);
+                                }
+                            }
                             if (ev.IsDone)
                             {
                                 sawDone = true;
+                                await citeNow().ConfigureAwait(false);
                                 if (o2a != null) { foreach (var s in o2a.Finish()) await output.WriteAsync(s, token).ConfigureAwait(false); }
                                 else if (a2o == null) await output.WriteAsync(SseWriter.Done, token).ConfigureAwait(false);
                                 break;
@@ -667,6 +840,7 @@ namespace Fairlead.Core.Gateway
                         if (!sawDone && error == null)
                         {
                             // The upstream closed without its terminator: finish the caller's stream cleanly.
+                            await citeNow().ConfigureAwait(false);
                             if (o2a != null) foreach (var s in o2a.Finish()) await output.WriteAsync(s, token).ConfigureAwait(false);
                             else if (a2o != null) foreach (var s in a2o.Finish()) await output.WriteAsync(s, token).ConfigureAwait(false);
                             else if (target == Dialect.OpenAi) await output.WriteAsync(SseWriter.Done, token).ConfigureAwait(false);
@@ -695,6 +869,7 @@ namespace Fairlead.Core.Gateway
                 }
             });
             AddHeaders(http, record, winner);
+            if (bearing != null) http.Headers["X-Fairlead-Bearing"] = "sources=" + bearing.Hits.Count + ";citations=at-end";
             return http;
         }
 

@@ -265,6 +265,52 @@ export const RequestRecord = z.object({
 export type RequestRecord = z.infer<typeof RequestRecord>;
 export const RequestList = z.array(RequestRecord);
 
+// The durable request log (logs/fairlead-requests-<date>.jsonl), read back by GET /api/requestlog.
+export const RequestLogEntry = z.object({
+  id: z.string(),
+  time: z.string(),
+  client: s,
+  clientId: s,
+  keyPrefix: s,
+  label: s,
+  endpoint: z.string(),
+  dialect: z.string(),
+  requestedModel: z.string(),
+  route: s,
+  servedBy: s,
+  fallbackVia: s,
+  local: z.boolean(),
+  stream: z.boolean(),
+  status: z.number(),
+  error: s,
+  firstByteMs: n,
+  totalMs: z.number(),
+  inputTokens: n,
+  outputTokens: n,
+  cost: n,
+  failover: z.boolean(),
+  attempts: z.number(),
+}).passthrough();
+export type RequestLogEntry = z.infer<typeof RequestLogEntry>;
+export const RequestLogEntries = z.array(RequestLogEntry);
+
+export const RequestLogGroup = z.object({ name: z.string(), requests: z.number(), failed: z.number(), inputTokens: z.number(), outputTokens: z.number(), cost: n, p50Ms: n, p95Ms: n }).passthrough();
+export type RequestLogGroup = z.infer<typeof RequestLogGroup>;
+export const RequestLogSummary = z.object({
+  requests: z.number(),
+  failed: z.number(),
+  inputTokens: z.number(),
+  outputTokens: z.number(),
+  cost: n,
+  from: s,
+  to: s,
+  byClient: z.array(RequestLogGroup),
+  byLabel: z.array(RequestLogGroup),
+  byModel: z.array(RequestLogGroup),
+  byRoute: z.array(RequestLogGroup),
+}).passthrough();
+export type RequestLogSummary = z.infer<typeof RequestLogSummary>;
+
 export const ProviderHealth = z.object({
   connectivity: Connectivity,
   providers: z.array(z.object({
