@@ -57,21 +57,42 @@ namespace Fairlead.Core.Providers
         private readonly CancellationTokenSource _cts;
         private readonly int _idleMs;
 
-        internal UpstreamResponse(HttpResponseMessage message, CancellationTokenSource cts, int idleMs, TimeSpan headersAfter)
+        private readonly DateTime? _deadline;
+
+        internal UpstreamResponse(HttpResponseMessage message, CancellationTokenSource cts, int idleMs, TimeSpan headersAfter, DateTime? deadline = null)
         {
             _message = message;
             _cts = cts;
             _idleMs = idleMs;
             HeadersAfter = headersAfter;
+            _deadline = deadline;
         }
+
+        /// <summary>True when the optional total-time cap (FAIRLEAD_MAX_REQUEST_SECONDS) is what ended this response.</summary>
+        public bool CapReached { get { return _deadline.HasValue && DateTime.UtcNow >= _deadline.Value; } }
 
         public int Status { get { return (int)_message.StatusCode; } }
         public TimeSpan HeadersAfter { get; private set; }
         public CancellationToken Token { get { return _cts.Token; } }
 
+        /// <summary>The body as bytes (audio from a speech request).</summary>
+        public async Task<byte[]> ReadBytesAsync()
+        {
+            return await _message.Content.ReadAsByteArrayAsync().ConfigureAwait(false);
+        }
+
+        /// <summary>The upstream's Content-Type, or null when it sent none.</summary>
+        public string ContentType
+        {
+            get { return _message.Content != null && _message.Content.Headers.ContentType != null ? _message.Content.Headers.ContentType.ToString() : null; }
+        }
+
         public async Task<string> ReadTextAsync()
         {
-            return await _message.Content.ReadAsStringAsync().ConfigureAwait(false);
+            var read = _message.Content.ReadAsStringAsync();
+            // With a total-time cap, a body that stalls past it is abandoned (the read itself cannot be cancelled).
+            if (_deadline.HasValue && !read.IsCompleted) await Protocol.CancellableRead.Wait(read, _cts.Token).ConfigureAwait(false);
+            return await read.ConfigureAwait(false);
         }
 
         public async Task<Stream> OpenStreamAsync()
@@ -82,7 +103,9 @@ namespace Fairlead.Core.Providers
         /// <summary>Restarts the idle timer: a stream that goes quiet for the provider timeout is cut.</summary>
         public void Touch()
         {
-            try { _cts.CancelAfter(_idleMs); } catch (ObjectDisposedException) { }
+            var ms = _idleMs;
+            if (_deadline.HasValue) ms = Math.Min(ms, (int)Math.Max(1, Math.Min(int.MaxValue, (_deadline.Value - DateTime.UtcNow).TotalMilliseconds)));
+            try { _cts.CancelAfter(ms); } catch (ObjectDisposedException) { }
         }
 
         public void Cancel()
@@ -174,6 +197,9 @@ namespace Fairlead.Core.Providers
             return p.Kind == ProviderKind.Ollama ? b + "/v1" : b;
         }
 
+        /// <summary>The most seconds one request may take from start to last byte, however busy the stream is. 0 = no cap, the default (FAIRLEAD_MAX_REQUEST_SECONDS).</summary>
+        public int TotalCapSeconds { get; set; }
+
         public static Uri EndpointUri(ProviderConfig p, string operation)
         {
             if (p.Kind == ProviderKind.Responses)
@@ -198,6 +224,8 @@ namespace Fairlead.Core.Providers
             {
                 case "chat": return new Uri(baseUrl + "/chat/completions");
                 case "embeddings": return new Uri(baseUrl + "/embeddings");
+                case "speech": return new Uri(baseUrl + "/audio/speech");
+                case "transcriptions": return new Uri(baseUrl + "/audio/transcriptions");
                 case "models": return new Uri(p.Kind == ProviderKind.Ollama ? p.BaseUrl.TrimEnd('/') + "/api/tags" : baseUrl + "/models");
                 default: throw new NotSupportedException("'" + operation + "' is not a known operation.");
             }
@@ -207,16 +235,24 @@ namespace Fairlead.Core.Providers
         /// Sends one request and returns once the response headers are in. Non-2xx answers, network failures and
         /// timeouts all surface as <see cref="UpstreamException"/> with a <see cref="FailureKind"/>.
         /// </summary>
-        public async Task<UpstreamResponse> SendAsync(ProviderConfig p, string operation, JObject body, CancellationToken token, IDictionary<string, string> passHeaders = null)
+        public async Task<UpstreamResponse> SendAsync(ProviderConfig p, string operation, JObject body, CancellationToken token, IDictionary<string, string> passHeaders = null, Protocol.RawUpload upload = null)
         {
             if (p.Kind == ProviderKind.Responses) return await SendResponsesAsync(p, operation, body, token).ConfigureAwait(false);
             var timeoutMs = Math.Max(5, p.TimeoutSeconds) * 1000;
+            var capMs = TotalCapSeconds > 0 ? TotalCapSeconds * 1000 : 0;
             var cts = CancellationTokenSource.CreateLinkedTokenSource(token);
-            cts.CancelAfter(timeoutMs);
+            cts.CancelAfter(capMs > 0 ? Math.Min(timeoutMs, capMs) : timeoutMs);
+            var started = DateTime.UtcNow;
             var request = new HttpRequestMessage(HttpMethod.Post, EndpointUri(p, operation))
             {
                 Content = new StringContent(body.ToString(Formatting.None), Encoding.UTF8, "application/json"),
             };
+            if (upload != null)
+            {
+                // An audio upload goes on as it came in (multipart, file bytes untouched), only the model name changed.
+                request.Content = new ByteArrayContent(upload.ToBytes());
+                request.Content.Headers.TryAddWithoutValidation("Content-Type", upload.ContentType);
+            }
             ApplyAuth(request, p);
             if (passHeaders != null)
             {
@@ -233,7 +269,7 @@ namespace Fairlead.Core.Providers
             {
                 cts.Dispose();
                 if (token.IsCancellationRequested) throw;
-                throw new UpstreamException(FailureKind.Timeout, p.Id + " did not answer within " + p.TimeoutSeconds + " s.", null, null, ex);
+                throw new UpstreamException(FailureKind.Timeout, p.Id + (capMs > 0 && capMs < timeoutMs ? " did not answer within the " + TotalCapSeconds + " s total limit." : " did not answer within " + p.TimeoutSeconds + " s."), null, null, ex);
             }
             catch (HttpRequestException ex)
             {
@@ -245,7 +281,7 @@ namespace Fairlead.Core.Providers
                 request.Dispose();
             }
             var status = (int)response.StatusCode;
-            if (status >= 200 && status < 300) return new UpstreamResponse(response, cts, timeoutMs, sw.Elapsed);
+            if (status >= 200 && status < 300) return new UpstreamResponse(response, cts, timeoutMs, sw.Elapsed, capMs > 0 ? (DateTime?)started.AddMilliseconds(capMs) : null);
             string text;
             try { text = await response.Content.ReadAsStringAsync().ConfigureAwait(false); }
             catch (Exception) { text = string.Empty; }

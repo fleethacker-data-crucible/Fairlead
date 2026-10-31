@@ -271,18 +271,89 @@ namespace Fairlead.Core.Tests
         }
 
         [Fact]
-        public async Task OptingInWithoutAFolderOrWithStreamingIsAClearError()
+        public async Task OptingInWithoutAFolderIsAClearError()
         {
             var seen = new List<JObject>();
             var off = Start(Local(seen, "x"), null, out var key1);
             var r1 = await Ask(off, key1, "/v1/chat/completions", "leave days", true);
             Assert.Equal(HttpStatusCode.BadRequest, r1.StatusCode);
             Assert.Contains("FAIRLEAD_BEARING_DIR", await r1.Content.ReadAsStringAsync());
-
-            var on = Start(Local(seen, "x"), _docs, out var key2);
-            var r2 = await Ask(on, key2, "/v1/chat/completions", "How many days of leave do contractors get?", true, stream: true);
+            var r2 = await Ask(off, key1, "/v1/chat/completions", "leave days", true, stream: true);
             Assert.Equal(HttpStatusCode.BadRequest, r2.StatusCode);
-            Assert.Contains("stream", await r2.Content.ReadAsStringAsync());
+            Assert.Empty(seen);
+        }
+
+        private static FakeUpstream LocalStream(List<JObject> seen, params string[] pieces)
+        {
+            var events = pieces.Select(FakeUpstream.OpenAiChunk).Concat(new[] { FakeUpstream.OpenAiFinish(), "data: [DONE]\n\n" }).ToArray();
+            return new FakeUpstream().On("ollama.test", (r, b) => { seen.Add(b); return FakeUpstream.Sse(events); });
+        }
+
+        private static List<JObject> DataEvents(string wire)
+        {
+            return wire.Split(new[] { "\n\n" }, StringSplitOptions.RemoveEmptyEntries)
+                .SelectMany(e => e.Split('\n')).Where(l => l.StartsWith("data: {", StringComparison.Ordinal)).Select(l => JObject.Parse(l.Substring(6))).ToList();
+        }
+
+        [Fact]
+        public async Task StreamingCitesAfterTheText_OpenAiClient()
+        {
+            var seen = new List<JObject>();
+            var host = Start(LocalStream(seen, "Contractors receive \"10 days of ", "paid leave per year\" ", "[1]."), _docs, out var key);
+            var r = await Ask(host, key, "/v1/chat/completions", "How many days of leave do contractors get?", true, stream: true);
+            var wire = await r.Content.ReadAsStringAsync();
+            Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+            Assert.Equal("ollama/tiny", r.Headers.GetValues("X-Fairlead-Target").Single());
+            Assert.Equal("sources=1;citations=at-end", r.Headers.GetValues(BearingService.OptInHeader).Single());
+            Assert.EndsWith("data: [DONE]\n\n", wire);
+            var events = DataEvents(wire);
+            var text = string.Concat(events.Where(e => e["choices"] != null && ((JArray)e["choices"]!).Count > 0).Select(e => (string?)e["choices"]![0]!["delta"]!["content"]));
+            Assert.Equal("Contractors receive \"10 days of paid leave per year\" [1].", text);
+            var last = events.Last();
+            Assert.Empty((JArray)last["choices"]!);
+            var c = Assert.Single((JArray)last["fairlead_citations"]!);
+            Assert.Equal("policies/leave-policy.md", (string?)c["source"]);
+            Assert.Equal("lines 1-5", (string?)c["location"]);
+            Assert.True((bool?)c["verified"]);
+            Assert.Equal("10 days of paid leave per year", (string?)c["quote"]);
+            Assert.Equal(1, (int?)last["fairlead_bearing"]!["cited"]);
+            Assert.True(wire.LastIndexOf("fairlead_citations", StringComparison.Ordinal) < wire.LastIndexOf("[DONE]", StringComparison.Ordinal));
+            Assert.Equal(true, (bool?)Assert.Single(seen)["stream"]);
+            Assert.Contains("[1] policies/leave-policy.md", (string?)seen[0]["messages"]![0]!["content"]);
+        }
+
+        [Fact]
+        public async Task StreamingCitesAfterTheText_AnthropicClient()
+        {
+            var seen = new List<JObject>();
+            var host = Start(LocalStream(seen, "Contractors get \"10 days of paid leave per year\" [1]."), _docs, out var key);
+            var r = await Ask(host, key, "/v1/messages", "How many days of leave do contractors get?", true, stream: true);
+            var wire = await r.Content.ReadAsStringAsync();
+            Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+            var cite = wire.IndexOf("event: fairlead_citations", StringComparison.Ordinal);
+            Assert.True(cite > 0, wire);
+            Assert.True(cite < wire.IndexOf("event: message_stop", StringComparison.Ordinal));
+            Assert.True(wire.IndexOf("event: content_block_delta", StringComparison.Ordinal) < cite);
+            var payload = DataEvents(wire).Single(e => (string?)e["type"] == "fairlead_citations");
+            Assert.Equal("policies/leave-policy.md", (string?)payload["fairlead_citations"]![0]!["source"]);
+            Assert.True((bool?)payload["fairlead_citations"]![0]!["verified"]);
+        }
+
+        [Fact]
+        public async Task StreamingWithNothingFoundStillStreamsAndCallsNoModel()
+        {
+            var seen = new List<JObject>();
+            var host = Start(LocalStream(seen, "invented"), _docs, out var key);
+            var r = await Ask(host, key, "/v1/chat/completions", "What is the capital of Australia?", true, stream: true);
+            var wire = await r.Content.ReadAsStringAsync();
+            Assert.Equal("text/event-stream", r.Content.Headers.ContentType!.MediaType);
+            Assert.Contains("found nothing", wire);
+            Assert.EndsWith("data: [DONE]\n\n", wire);
+            Assert.Empty((JArray)DataEvents(wire).Last()["fairlead_citations"]!);
+            var a = await Ask(host, key, "/v1/messages", "What is the capital of Australia?", true, stream: true);
+            var awire = await a.Content.ReadAsStringAsync();
+            Assert.Contains("event: fairlead_citations", awire);
+            Assert.Contains("event: message_stop", awire);
             Assert.Empty(seen);
         }
 

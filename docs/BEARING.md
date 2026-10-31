@@ -13,15 +13,14 @@ $env:FAIRLEAD_BEARING_DIR = "C:\Users\me\Documents\policies"   # or a line in co
 ```
 
 Per request, send `X-Fairlead-Bearing: cite` (and, optionally, `X-Fairlead-Bearing-Top: 1..8`, default 4) on
-`/v1/chat/completions` or `/v1/messages`, with `"stream": false`:
+`/v1/chat/completions` or `/v1/messages`, with `"stream": false` or `true`:
 
 ```powershell
 curl http://127.0.0.1:8776/v1/chat/completions -H "Authorization: Bearer fl-..." -H "X-Fairlead-Bearing: cite" `
   -H "Content-Type: application/json" -d '{"model":"local","messages":[{"role":"user","content":"How many days of leave do contractors get?"}]}'
 ```
 
-Without the header the request is untouched. With the header but no folder, or with streaming, the answer is a 400
-that says what to change.
+Without the header the request is untouched. With the header but no folder the answer is a 400 that says what to change.
 
 ## What happens
 
@@ -46,8 +45,11 @@ that says what to change.
 Bearing never leaves the machine on its own and stores no document text in the request log; the log records the route
 (`bearing` for an answer given without a model) like any other request.
 
+## Streaming
+
+With `"stream": true` the answer streams as usual and the citations follow once it is complete, as one last event: for an OpenAI client a chunk with `"choices": []` carrying `fairlead_citations` and `fairlead_bearing` (before `[DONE]`), for an Anthropic client an `event: fairlead_citations` (before `message_stop`). The `Sources:` text is not appended to a stream; read the event. The response header says `X-Fairlead-Bearing: sources=N;citations=at-end`. When nothing in the folder matches, a streaming caller gets the one-sentence answer as a short stream with an empty citations event.
+
 ## Limits
 
-- Streaming is not supported yet: the sources are checked once the whole answer is in.
 - Plain-text formats only (no PDF, Word or HTML). Matching is by words, not meaning.
 - The model's `[n]` markers are checked against what was retrieved, not for whether the claim is true.

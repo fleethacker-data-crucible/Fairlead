@@ -52,7 +52,8 @@ encrypted with Windows DPAPI for the user who started Fairlead. The CLI decrypts
 | `explain <prompt> [--model] [--route] [--client] [--private] [--tools]` | `POST /api/explain` |
 | `chat <prompt> [--model] [--route] [--system] [--max-tokens] [--tools] [--private]` | `POST /api/playground` |
 | `clients [list]` | `GET /api/config` |
-| `clients add <name> [--routes a,b]` (prints the key once) | `POST /api/clients` |
+| `clients add <name> [--routes a,b] [--rate N]` (prints the key once) | `POST /api/clients` |
+| `clients rate <id\|name> <N\|off>` | `POST /api/clients/{id}/rate-limit` |
 | `clients remove <id\|name> --yes` | `DELETE /api/clients/{id}` |
 | `kedge [auto\|on\|off]` | `POST /api/kedge` |
 | `settings [show]`, `settings set key=value ...` | `POST /api/settings` |
@@ -69,6 +70,7 @@ encrypted with Windows DPAPI for the user who started Fairlead. The CLI decrypts
 | `requests [--limit N]`, `request <id>` | `GET /api/requests[/{id}]` |
 | `bearing [status]`, `bearing search <question> [--limit N]` | `GET /api/bearing[/search]` |
 | `requestlog [--since 24h] [--client N] [--label L] [--model M] [--route R] [--status S] [--limit N] [--summary]` | `GET /api/requestlog[/summary]` |
+| `commands [--json]` | none (offline): every command with usage, routes and whether it needs `--yes` |
 | `metrics` | `GET /api/metrics` |
 | `logs [--level info\|warn\|error]` | `GET /api/logs` |
 | `live [--count N]` | `GET /api/live` (server-sent events) |
