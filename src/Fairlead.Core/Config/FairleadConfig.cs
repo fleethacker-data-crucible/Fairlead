@@ -158,6 +158,8 @@ namespace Fairlead.Core.Config
         public DateTimeOffset Created { get; set; }
         /// <summary>Routes this key may use; empty = all.</summary>
         public List<string> Routes { get; set; }
+        /// <summary>Most requests this key may make in a minute (chat and embeddings); over it the answer is 429 with Retry-After. Null or 0 = no limit, the default.</summary>
+        public int? RateLimitPerMinute { get; set; }
 
         public ClientKey()
         {

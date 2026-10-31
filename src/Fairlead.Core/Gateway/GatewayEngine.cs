@@ -117,6 +117,25 @@ namespace Fairlead.Core.Gateway
 
         // ---------- requests ----------
 
+        private readonly ClientRateLimiter _limits = new ClientRateLimiter();
+
+        /// <summary>The per-key request limit: null when the request may go on, else the 429 (in the caller's dialect, with Retry-After).</summary>
+        private HttpResponse RateLimited(ClientKey client, Dialect dialect, RequestRecord record, System.Diagnostics.Stopwatch sw)
+        {
+            if (client == null || !client.RateLimitPerMinute.HasValue || client.RateLimitPerMinute.Value <= 0) return null;
+            int retry;
+            if (_limits.TryAcquire(client.Id, client.RateLimitPerMinute.Value, DateTime.UtcNow, out retry)) return null;
+            var response = Fail(record, sw, dialect, 429, "Client key '" + client.Name + "' is limited to " + client.RateLimitPerMinute.Value + " requests a minute. Try again in " + retry + " s.");
+            response.Headers["Retry-After"] = retry.ToString();
+            return response;
+        }
+
+        /// <summary>Forgets a client key's request window (its limit changed or it was revoked).</summary>
+        public void ForgetClient(string clientId)
+        {
+            _limits.Forget(clientId);
+        }
+
         /// <summary>Handles POST /v1/chat/completions (OpenAI) and POST /v1/messages (Anthropic).</summary>
         public async Task<HttpResponse> HandleChatAsync(HttpRequest request, Dialect dialect)
         {
@@ -128,6 +147,8 @@ namespace Fairlead.Core.Gateway
             if (!Authenticate(request, out client, out authError)) return Fail(record, sw, dialect, 401, authError);
             record.Client = (client == null ? null : client.Name);
             RequestLog.Identify(record, client, request.Header(LabelHeader));
+            var limited = RateLimited(client, dialect, record, sw);
+            if (limited != null) return limited;
             JObject body;
             try { body = JObject.Parse(request.BodyText); }
             catch (JsonException ex) { return Fail(record, sw, dialect, 400, "Body is not valid JSON: " + ex.Message); }
@@ -216,6 +237,8 @@ namespace Fairlead.Core.Gateway
             if (!Authenticate(request, out client, out authError)) return Fail(record, sw, Dialect.OpenAi, 401, authError);
             record.Client = (client == null ? null : client.Name);
             RequestLog.Identify(record, client, request.Header(LabelHeader));
+            var limited = RateLimited(client, Dialect.OpenAi, record, sw);
+            if (limited != null) return limited;
             JObject body;
             try { body = JObject.Parse(request.BodyText); }
             catch (JsonException ex) { return Fail(record, sw, Dialect.OpenAi, 400, "Body is not valid JSON: " + ex.Message); }

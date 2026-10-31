@@ -185,11 +185,29 @@ namespace Fairlead.Core.Host
             });
 
             Admin.Post("/api/clients", CreateClient);
+            Admin.Post("/api/clients/{id}/rate-limit", r =>
+            {
+                var id = r.RouteValues["id"];
+                var rate = Json.Read<int?>(Json.Body(r), "requestsPerMinute");
+                if (rate.HasValue && (rate.Value < 0 || rate.Value > 1000000)) throw new BadRequestException("requestsPerMinute is a whole number of requests a minute (0 or empty for no limit).");
+                var found = false;
+                Config.Update(c =>
+                {
+                    var k = c.Clients.FirstOrDefault(x => x.Id == id);
+                    if (k == null) return;
+                    found = true;
+                    k.RateLimitPerMinute = rate.HasValue && rate.Value > 0 ? rate : null;
+                });
+                if (!found) throw new NotFoundException("No client key " + id + ".");
+                Engine.ForgetClient(id);
+                return Task.FromResult(Json.Ok(new { id = id, rateLimitPerMinute = rate.HasValue && rate.Value > 0 ? rate : null }));
+            });
             Admin.Delete("/api/clients/{id}", r =>
             {
                 var id = r.RouteValues["id"];
                 var removed = false;
                 Config.Update(c => removed = c.Clients.RemoveAll(k => k.Id == id) > 0);
+                Engine.ForgetClient(id);
                 if (!removed) throw new NotFoundException("No client key " + id + ".");
                 return Task.FromResult(Json.Ok(new { removed = id }));
             });
@@ -364,7 +382,7 @@ namespace Fairlead.Core.Host
                 c.AutoFallbackRoute,
                 kedge = c.Kedge,
                 c.RequireClientKey,
-                clients = c.Clients.Select(k => new { k.Id, k.Name, k.Prefix, k.Created, k.Routes }),
+                clients = c.Clients.Select(k => new { k.Id, k.Name, k.Prefix, k.Created, k.Routes, k.RateLimitPerMinute }),
                 c.Network,
                 c.Privacy,
                 c.CorsOrigins,
@@ -593,6 +611,8 @@ namespace Fairlead.Core.Host
             var name = (Json.Read<string>(body, "name") ?? string.Empty).Trim();
             if (name.Length == 0 || name.Length > 60) throw new BadRequestException("Give the key a name of 1 to 60 characters (the tool that will use it).");
             var routes = Json.Read<List<string>>(body, "routes") ?? new List<string>();
+            var rate = Json.Read<int?>(body, "rateLimitPerMinute");
+            if (rate.HasValue && (rate.Value < 0 || rate.Value > 1000000)) throw new BadRequestException("rateLimitPerMinute is a whole number of requests a minute (0 or empty for no limit).");
             var key = GatewayEngine.NewClientKey();
             var client = new ClientKey
             {
@@ -601,6 +621,7 @@ namespace Fairlead.Core.Host
                 Prefix = key.Substring(0, 7),
                 Hash = GatewayEngine.HashKey(key),
                 Routes = routes.Where(x => !string.IsNullOrWhiteSpace(x)).ToList(),
+                RateLimitPerMinute = rate.HasValue && rate.Value > 0 ? rate : null,
             };
             Config.Update(c =>
             {
@@ -609,7 +630,7 @@ namespace Fairlead.Core.Host
                 c.Clients.Add(client);
             });
             // The only time the key leaves Fairlead.
-            return Task.FromResult(Json.Ok(new { client = new { client.Id, client.Name, client.Prefix, client.Created, client.Routes }, key = key }));
+            return Task.FromResult(Json.Ok(new { client = new { client.Id, client.Name, client.Prefix, client.Created, client.Routes, client.RateLimitPerMinute }, key = key }));
         }
 
         private async Task<HttpResponse> Playground(HttpRequest r)
