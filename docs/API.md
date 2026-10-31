@@ -17,7 +17,7 @@ machine a key is optional when `requireClientKey` is off. Other machines always 
 | `POST /v1/messages` | Anthropic messages, routed the same way |
 | `POST /v1/messages/count_tokens` | Anthropic token estimate |
 | `POST /v1/embeddings` | OpenAI embeddings |
-| `GET /v1/models`, `GET /v1/models/{id}` | routes, then targets |
+| `GET /v1/models`, `GET /v1/models/{id}` | routes, then targets. A provider/model id works in the path as is (`/v1/models/ollama/tiny`) or with the slash encoded. `context_window` is added when a provider reported it or the operator entered it (a route shows the smallest window among its targets); it is left out, never guessed, when unknown |
 | `GET /v1/health` | `{ ok, kedge, internet }`, no auth |
 
 Request headers: `X-Fairlead-Route: <route>` forces a route; `X-Fairlead-Privacy: local` keeps the request on local
