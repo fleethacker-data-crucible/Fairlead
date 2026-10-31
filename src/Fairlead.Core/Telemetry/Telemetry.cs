@@ -32,6 +32,11 @@ namespace Fairlead.Core.Telemetry
         public string Id { get; set; }
         public DateTimeOffset Time { get; set; }
         public string Client { get; set; }
+        /// <summary>Id and visible prefix (never the hash) of the client key that made the call; empty without a key.</summary>
+        public string ClientId { get; set; }
+        public string KeyPrefix { get; set; }
+        /// <summary>Optional caller label from the X-Fairlead-Label header (a tool or job name), cleaned and capped.</summary>
+        public string Label { get; set; }
         public string Dialect { get; set; }
         public string Endpoint { get; set; }
         public string RequestedModel { get; set; }
@@ -97,7 +102,7 @@ namespace Fairlead.Core.Telemetry
         private readonly object _lock = new object();
         private readonly LinkedList<RequestRecord> _recent = new LinkedList<RequestRecord>();
         private readonly ConcurrentDictionary<string, TargetStats> _targets = new ConcurrentDictionary<string, TargetStats>(StringComparer.OrdinalIgnoreCase);
-        private readonly string _file;
+        private readonly string _logDirectory;
         private readonly int _capacity;
         private long _total;
         private long _failed;
@@ -115,12 +120,15 @@ namespace Fairlead.Core.Telemetry
                 try
                 {
                     Directory.CreateDirectory(logDirectory);
-                    _file = Path.Combine(logDirectory, "fairlead-requests-" + DateTimeOffset.UtcNow.ToString("yyyyMMdd") + ".jsonl");
+                    _logDirectory = logDirectory;
                 }
-                catch (IOException) { _file = null; }
-                catch (UnauthorizedAccessException) { _file = null; }
+                catch (IOException) { _logDirectory = null; }
+                catch (UnauthorizedAccessException) { _logDirectory = null; }
             }
         }
+
+        /// <summary>The folder the daily request logs are written to; null when it could not be created.</summary>
+        public string LogDirectory { get { return _logDirectory; } }
 
         public DateTimeOffset StartedAt { get; private set; }
 
@@ -140,7 +148,7 @@ namespace Fairlead.Core.Telemetry
                 if (r.Local && r.Status < 400) _local++;
                 if (r.Kedge) _kedge++;
                 if (r.Sensitive) _sensitive++;
-                if (_file != null)
+                if (_logDirectory != null)
                 {
                     try
                     {
@@ -149,11 +157,12 @@ namespace Fairlead.Core.Telemetry
                         var answer = r.ResponsePreview;
                         r.PromptPreview = null;
                         r.ResponsePreview = null;
-                        File.AppendAllText(_file, JsonConvert.SerializeObject(r, Formatting.None, Host.Json.Settings) + "\n", new UTF8Encoding(false));
+                        File.AppendAllText(RequestLog.FileFor(_logDirectory, r.Time), JsonConvert.SerializeObject(r, Formatting.None, Host.Json.Settings) + "\n", new UTF8Encoding(false));
                         r.PromptPreview = preview;
                         r.ResponsePreview = answer;
                     }
                     catch (IOException) { }
+                    catch (UnauthorizedAccessException) { }
                 }
             }
             _live.Publish("done", () => Host.Json.Serialize(LiveDone(r)));

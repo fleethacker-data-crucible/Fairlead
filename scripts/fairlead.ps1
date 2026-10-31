@@ -13,7 +13,7 @@ param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Argv)
 
 $ErrorActionPreference = 'Stop'
 $script:Root = Split-Path $PSScriptRoot -Parent
-$script:Flags = @('json', 'yes', 'private', 'tools', 'clear-key', 'key-stdin', 'console', 'no-tray', 'no-browser', 'open', 'replace', 'remove')
+$script:Flags = @('json', 'yes', 'private', 'tools', 'clear-key', 'key-stdin', 'console', 'no-tray', 'no-browser', 'open', 'replace', 'remove', 'summary')
 
 # ---------- arguments ----------
 
@@ -266,6 +266,8 @@ Health and activity
   breakers reset [provider]           POST /api/breakers/reset
   requests [--limit N]                GET /api/requests
   request <id>                        GET /api/requests/{id}
+  requestlog [--since 24h] [--client N] [--label L] [--model M] [--route R] [--status ok|error|4xx|5xx|CODE] [--limit N] [--summary]
+                                      GET /api/requestlog[/summary]: the durable who/what/which-model log (no prompts)
   metrics                             GET /api/metrics
   logs [--level info|warn|error]      GET /api/logs
   live [--count N]                    stream request events as they happen   GET /api/live
@@ -669,6 +671,23 @@ function Invoke-Fairlead([string[]]$List) {
         'requests' {
             $r = Invoke-Api GET ('/api/requests?limit=' + [int](Opt 'limit' 20))
             Out-Result $r { param($v) $v | Select-Object @{ n = 'time'; e = { ([DateTime]$_.time).ToLocalTime().ToString('HH:mm:ss') } }, id, client, requestedModel, route, target, status, totalMs, failover, kedge | Format-Table -AutoSize | Out-String -Width 200 }
+        }
+        'requestlog' {
+            $qs = New-Object System.Collections.ArrayList
+            foreach ($k in @('since', 'until', 'client', 'label', 'model', 'route', 'status', 'limit')) { $v = Opt $k; if ($v) { [void]$qs.Add($k + '=' + (Esc ([string]$v))) } }
+            $suffix = ''; if ($qs.Count) { $suffix = '?' + ($qs -join '&') }
+            if (Opt 'summary') {
+                $r = Invoke-Api GET ('/api/requestlog/summary' + $suffix)
+                Out-Result $r { param($v)
+                    'Requests ' + $v.requests + ' (' + $v.failed + ' failed), tokens in ' + $v.inputTokens + ' out ' + $v.outputTokens
+                    ''
+                    'By client'; $v.byClient | Select-Object name, requests, failed, inputTokens, outputTokens, p50Ms, p95Ms | Format-Table -AutoSize | Out-String -Width 200
+                    'By model'; $v.byModel | Select-Object name, requests, failed, inputTokens, outputTokens, p50Ms, p95Ms | Format-Table -AutoSize | Out-String -Width 200
+                }
+            } else {
+                $r = Invoke-Api GET ('/api/requestlog' + $suffix)
+                Out-Result $r { param($v) @($v) | Select-Object @{ n = 'time'; e = { ([DateTime]$_.time).ToLocalTime().ToString('MM-dd HH:mm:ss') } }, client, label, endpoint, route, servedBy, status, totalMs, inputTokens, outputTokens | Format-Table -AutoSize | Out-String -Width 220 }
+            }
         }
         'request' { Out-Result (Invoke-Api GET ('/api/requests/' + (Esc (Word 1 'request id')))) { param($v) $v | ConvertTo-Json -Depth 6 } }
         'metrics' { Out-Result (Invoke-Api GET '/api/metrics') { param($v) $v | ConvertTo-Json -Depth 6 } }
