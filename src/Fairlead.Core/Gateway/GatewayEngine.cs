@@ -675,6 +675,7 @@ namespace Fairlead.Core.Gateway
                 catch (Exception ex)
                 {
                     if (!(ex is IOException || ex is OperationCanceledException || ex is System.Net.Http.HttpRequestException)) throw;
+                    if (response.CapReached) return Fail(record, sw, dialect, 504, winner.Ref + " did not finish within the " + _upstream.TotalCapSeconds + " s total limit (FAIRLEAD_MAX_REQUEST_SECONDS).");
                     return Fail(record, sw, dialect, 502, winner.Ref + " dropped the connection while answering.");
                 }
                 var target = UpstreamClient.DialectOf(winner.Provider.Kind);
@@ -751,6 +752,7 @@ namespace Fairlead.Core.Gateway
                                 if (!(ex is IOException || ex is OperationCanceledException || ex is ObjectDisposedException)) throw;
                                 // The idle timer is Fairlead's own: say so, instead of blaming the upstream for a limit Fairlead applied.
                                 error = token.IsCancellationRequested ? "Fairlead is stopping."
+                                    : response.CapReached ? winner.Ref + " was still answering after the " + _upstream.TotalCapSeconds + " s total limit (FAIRLEAD_MAX_REQUEST_SECONDS), so Fairlead ended the stream."
                                     : response.Token.IsCancellationRequested ? winner.Ref + " sent nothing for " + winner.Provider.TimeoutSeconds + " s, so Fairlead ended the stream (the provider's timeout is an idle limit; keep-alives and data reset it)."
                                     : winner.Ref + " stopped sending (" + ex.GetType().Name + ").";
                                 break;
