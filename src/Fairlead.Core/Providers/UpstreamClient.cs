@@ -69,6 +69,18 @@ namespace Fairlead.Core.Providers
         public TimeSpan HeadersAfter { get; private set; }
         public CancellationToken Token { get { return _cts.Token; } }
 
+        /// <summary>The body as bytes (audio from a speech request).</summary>
+        public async Task<byte[]> ReadBytesAsync()
+        {
+            return await _message.Content.ReadAsByteArrayAsync().ConfigureAwait(false);
+        }
+
+        /// <summary>The upstream's Content-Type, or null when it sent none.</summary>
+        public string ContentType
+        {
+            get { return _message.Content != null && _message.Content.Headers.ContentType != null ? _message.Content.Headers.ContentType.ToString() : null; }
+        }
+
         public async Task<string> ReadTextAsync()
         {
             return await _message.Content.ReadAsStringAsync().ConfigureAwait(false);
@@ -198,6 +210,8 @@ namespace Fairlead.Core.Providers
             {
                 case "chat": return new Uri(baseUrl + "/chat/completions");
                 case "embeddings": return new Uri(baseUrl + "/embeddings");
+                case "speech": return new Uri(baseUrl + "/audio/speech");
+                case "transcriptions": return new Uri(baseUrl + "/audio/transcriptions");
                 case "models": return new Uri(p.Kind == ProviderKind.Ollama ? p.BaseUrl.TrimEnd('/') + "/api/tags" : baseUrl + "/models");
                 default: throw new NotSupportedException("'" + operation + "' is not a known operation.");
             }
@@ -207,7 +221,7 @@ namespace Fairlead.Core.Providers
         /// Sends one request and returns once the response headers are in. Non-2xx answers, network failures and
         /// timeouts all surface as <see cref="UpstreamException"/> with a <see cref="FailureKind"/>.
         /// </summary>
-        public async Task<UpstreamResponse> SendAsync(ProviderConfig p, string operation, JObject body, CancellationToken token, IDictionary<string, string> passHeaders = null)
+        public async Task<UpstreamResponse> SendAsync(ProviderConfig p, string operation, JObject body, CancellationToken token, IDictionary<string, string> passHeaders = null, Protocol.RawUpload upload = null)
         {
             if (p.Kind == ProviderKind.Responses) return await SendResponsesAsync(p, operation, body, token).ConfigureAwait(false);
             var timeoutMs = Math.Max(5, p.TimeoutSeconds) * 1000;
@@ -217,6 +231,12 @@ namespace Fairlead.Core.Providers
             {
                 Content = new StringContent(body.ToString(Formatting.None), Encoding.UTF8, "application/json"),
             };
+            if (upload != null)
+            {
+                // An audio upload goes on as it came in (multipart, file bytes untouched), only the model name changed.
+                request.Content = new ByteArrayContent(upload.ToBytes());
+                request.Content.Headers.TryAddWithoutValidation("Content-Type", upload.ContentType);
+            }
             ApplyAuth(request, p);
             if (passHeaders != null)
             {

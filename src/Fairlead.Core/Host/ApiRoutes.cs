@@ -37,6 +37,8 @@ namespace Fairlead.Core.Host
             Gateway.Post("/v1/chat/completions", r => Engine.HandleChatAsync(r, Dialect.OpenAi));
             Gateway.Post("/v1/messages", r => Engine.HandleChatAsync(r, Dialect.Anthropic));
             Gateway.Post("/v1/embeddings", r => Engine.HandleEmbeddingsAsync(r));
+            Gateway.Post("/v1/audio/speech", r => Engine.HandleAudioAsync(r, "speech"));
+            Gateway.Post("/v1/audio/transcriptions", r => Engine.HandleAudioAsync(r, "transcriptions"));
             Gateway.Post("/v1/messages/count_tokens", CountTokens);
             Gateway.Get("/v1/models", ListModels);
             Gateway.Get("/v1/models/{id}", GetModel);
