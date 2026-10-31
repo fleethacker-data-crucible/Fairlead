@@ -266,6 +266,8 @@ Health and activity
   breakers reset [provider]           POST /api/breakers/reset
   requests [--limit N]                GET /api/requests
   request <id>                        GET /api/requests/{id}
+  bearing [status]                    GET /api/bearing: cited answers (off unless FAIRLEAD_BEARING_DIR is set)
+  bearing search <question> [--limit N]  GET /api/bearing/search: what a question would retrieve
   metrics                             GET /api/metrics
   logs [--level info|warn|error]      GET /api/logs
   live [--count N]                    stream request events as they happen   GET /api/live
@@ -669,6 +671,15 @@ function Invoke-Fairlead([string[]]$List) {
         'requests' {
             $r = Invoke-Api GET ('/api/requests?limit=' + [int](Opt 'limit' 20))
             Out-Result $r { param($v) $v | Select-Object @{ n = 'time'; e = { ([DateTime]$_.time).ToLocalTime().ToString('HH:mm:ss') } }, id, client, requestedModel, route, target, status, totalMs, failover, kedge | Format-Table -AutoSize | Out-String -Width 200 }
+        }
+        'bearing' {
+            if ((Word 1) -eq 'search') {
+                $q = Word 2 'question'
+                $r = Invoke-Api GET ('/api/bearing/search?q=' + (Esc $q) + '&limit=' + [int](Opt 'limit' 4))
+                Out-Result $r { param($v) @($v) | Select-Object score, source, location, heading | Format-Table -AutoSize | Out-String -Width 200 }
+            } else {
+                Out-Result (Invoke-Api GET '/api/bearing') { param($v) if ($v.enabled) { 'Bearing is on: ' + $v.folder + ' (' + $v.files + ' files, ' + $v.passages + ' passages). Opt in per request with ' + $v.optIn } else { 'Bearing is off. Set FAIRLEAD_BEARING_DIR to a folder of documents and restart Fairlead.' } }
+            }
         }
         'request' { Out-Result (Invoke-Api GET ('/api/requests/' + (Esc (Word 1 'request id')))) { param($v) $v | ConvertTo-Json -Depth 6 } }
         'metrics' { Out-Result (Invoke-Api GET '/api/metrics') { param($v) $v | ConvertTo-Json -Depth 6 } }

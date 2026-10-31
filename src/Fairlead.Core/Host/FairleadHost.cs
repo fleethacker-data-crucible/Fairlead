@@ -113,6 +113,7 @@ namespace Fairlead.Core.Host
             Health = new HealthMonitor(Config, Upstream, Breakers, Log);
             Metrics = new Metrics(Settings.LogDirectory);
             Engine = new GatewayEngine(Config, Upstream, Health, Breakers, Metrics, Log);
+            Engine.CitedAnswers = new Fairlead.Core.Bearing.BearingService(Settings.BearingDirectory);
             SessionToken = string.IsNullOrEmpty(options.SessionToken) ? NewToken() : options.SessionToken;
             CliToken = NewToken();
             Admin = new Router();

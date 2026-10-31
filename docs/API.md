@@ -100,6 +100,8 @@ config view, unless noted.
 | `POST /api/breakers/reset` | `{ provider? }`; every breaker when omitted |
 | `GET /api/requests?limit=N` | recent requests with their decision trace and attempts (newest first, up to 1000) |
 | `GET /api/requests/{id}` | one request |
+| `GET /api/bearing` | cited answers: whether `FAIRLEAD_BEARING_DIR` is set, files and passages indexed (see [BEARING.md](BEARING.md)) |
+| `GET /api/bearing/search?q=&limit=` | the passages a question would retrieve, with file, lines, score and link (no model is called) |
 | `GET /api/metrics` | totals, last hour, per-target stats |
 | `GET /api/logs?level=` | recent diagnostics |
 | `GET /api/live` | server-sent events (`start`, `attempt`, `firstByte`, `done`) for each request as it happens (engines with the live routing view) |
