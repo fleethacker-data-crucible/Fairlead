@@ -205,6 +205,12 @@ namespace Fairlead.Core.Host
                 await Health.ProbeOnceAsync(CancellationToken.None).ConfigureAwait(false);
                 return Json.Ok(new { connectivity = Health.Connectivity, providers = Health.Providers() });
             });
+            Admin.Get("/api/cache", r => Task.FromResult(Json.Ok(Engine.Cache == null ? (object)new { enabled = false } : Engine.Cache.Status())));
+            Admin.Post("/api/cache/clear", r =>
+            {
+                var removed = Engine.Cache == null ? 0 : Engine.Cache.Clear();
+                return Task.FromResult(Json.Ok(new { cleared = removed }));
+            });
             Admin.Post("/api/breakers/reset", r =>
             {
                 var key = Json.Read<string>(Json.Body(r), "provider");

@@ -21,6 +21,10 @@ namespace Fairlead.Core.Config
         /// <summary>logs\ under the app root: runtime files and JSONL logs (never prompts or keys).</summary>
         public string LogDirectory { get; set; }
 
+        /// <summary>Response cache (FAIRLEAD_RESPONSE_CACHE_SECONDS lifetime, FAIRLEAD_RESPONSE_CACHE_ENTRIES size). 0 seconds = off, the default.</summary>
+        public int ResponseCacheSeconds { get; set; }
+        public int ResponseCacheEntries { get; set; }
+
         /// <summary>Folder of documents for cited answers (Bearing). Empty = off. Set by FAIRLEAD_BEARING_DIR; never in fairlead.json.</summary>
         public string BearingDirectory { get; set; }
         public string WebRootDirectory { get; set; }
@@ -53,6 +57,9 @@ namespace Fairlead.Core.Config
             s.DataDirectory = data;
             s.LogDirectory = Env("FAIRLEAD_LOG_DIR") ?? Path.Combine(rootDirectory, "logs");
             s.WebRootDirectory = Env("FAIRLEAD_WEBROOT");
+            int cacheValue;
+            if (int.TryParse(Env("FAIRLEAD_RESPONSE_CACHE_SECONDS"), out cacheValue) && cacheValue > 0) s.ResponseCacheSeconds = cacheValue;
+            if (int.TryParse(Env("FAIRLEAD_RESPONSE_CACHE_ENTRIES"), out cacheValue) && cacheValue > 0) s.ResponseCacheEntries = cacheValue;
             s.BearingDirectory = Env("FAIRLEAD_BEARING_DIR");
             int port;
             var portText = Env("FAIRLEAD_PORT");
