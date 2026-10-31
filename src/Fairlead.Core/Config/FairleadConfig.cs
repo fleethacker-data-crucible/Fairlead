@@ -278,6 +278,10 @@ namespace Fairlead.Core.Config
         public static FairleadConfig CreateDefault()
         {
             var c = new FairleadConfig();
+            // Fleet tools that call the router from a browser page (Scrimshaw's editor serves on 8775). Only the first-run
+            // list; an existing fairlead.json keeps the origins it has, and Settings > Browser origins can remove these.
+            c.CorsOrigins.Add("http://localhost:8775");
+            c.CorsOrigins.Add("http://127.0.0.1:8775");
             c.Providers.Add(ProviderPresets.Create("ollama"));
             c.Routes.Add(new RouteConfig { Id = "auto", Description = "Chooses smart, fast or local per request with the routing rules.", Strategy = RouteStrategy.Auto });
             c.Routes.Add(new RouteConfig { Id = "smart", Description = "Strongest available model: long context, tools, reasoning.", Strategy = RouteStrategy.Failover });
