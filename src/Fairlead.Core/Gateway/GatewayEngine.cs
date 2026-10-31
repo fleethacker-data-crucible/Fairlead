@@ -473,6 +473,8 @@ namespace Fairlead.Core.Gateway
                 outgoing["model"] = c.Model;
                 if (target == Dialect.OpenAi && outgoing.Value<bool?>("stream") == true && c.Provider.StreamUsage && outgoing["stream_options"] == null)
                     outgoing["stream_options"] = new JObject { { "include_usage", true } };
+                if (target == Dialect.OpenAi && string.Equals(c.Provider.Preset, "openai", StringComparison.OrdinalIgnoreCase))
+                    Translate.AdaptForOpenAi(outgoing, c.Model);
             }
             else if (dialect == Dialect.Anthropic)
             {
