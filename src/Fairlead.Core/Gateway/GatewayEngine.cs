@@ -27,6 +27,8 @@ namespace Fairlead.Core.Gateway
     {
         public const string RouteHeader = "X-Fairlead-Route";
         public const string PrivacyHeader = "X-Fairlead-Privacy";
+        /// <summary>Optional free-text caller label (a tool or job name) kept in the request log next to the client key's name.</summary>
+        public const string LabelHeader = "X-Fairlead-Label";
         private readonly ConfigStore _config;
         private readonly UpstreamClient _upstream;
         private readonly HealthMonitor _health;
@@ -118,8 +120,10 @@ namespace Fairlead.Core.Gateway
             var sw = System.Diagnostics.Stopwatch.StartNew();
             ClientKey client;
             string authError;
+            record.Label = RequestLog.CleanLabel(request.Header(LabelHeader));
             if (!Authenticate(request, out client, out authError)) return Fail(record, sw, dialect, 401, authError);
             record.Client = (client == null ? null : client.Name);
+            RequestLog.Identify(record, client, request.Header(LabelHeader));
             JObject body;
             try { body = JObject.Parse(request.BodyText); }
             catch (JsonException ex) { return Fail(record, sw, dialect, 400, "Body is not valid JSON: " + ex.Message); }
@@ -171,8 +175,10 @@ namespace Fairlead.Core.Gateway
             var sw = System.Diagnostics.Stopwatch.StartNew();
             ClientKey client;
             string authError;
+            record.Label = RequestLog.CleanLabel(request.Header(LabelHeader));
             if (!Authenticate(request, out client, out authError)) return Fail(record, sw, Dialect.OpenAi, 401, authError);
             record.Client = (client == null ? null : client.Name);
+            RequestLog.Identify(record, client, request.Header(LabelHeader));
             JObject body;
             try { body = JObject.Parse(request.BodyText); }
             catch (JsonException ex) { return Fail(record, sw, Dialect.OpenAi, 400, "Body is not valid JSON: " + ex.Message); }

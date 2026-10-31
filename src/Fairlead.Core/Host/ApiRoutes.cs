@@ -9,12 +9,28 @@ using Fairlead.Core.Protocol;
 using Fairlead.Core.Providers;
 using Fairlead.Core.Resilience;
 using Fairlead.Core.Serialization;
+using Fairlead.Core.Telemetry;
 
 namespace Fairlead.Core.Host
 {
     public sealed partial class FairleadHost
     {
         // ---------- gateway (/v1, client keys) ----------
+
+        /// <summary>The durable request log (who, what, which model), filtered by the query string. Never holds prompt or response text.</summary>
+        private List<RequestLogEntry> RequestLogEntries(HttpRequest r)
+        {
+            var q = r.QueryValues;
+            Func<string, string> get = k => { string v; return q.TryGetValue(k, out v) ? v : null; };
+            var query = new RequestLogQuery { Client = get("client"), Label = get("label"), Target = get("model"), Route = get("route"), Status = get("status") };
+            int limit;
+            if (int.TryParse(get("limit"), out limit)) query.Limit = limit;
+            var now = DateTimeOffset.UtcNow;
+            query.Since = RequestLog.ParseSince(get("since"), now);
+            query.Until = RequestLog.ParseSince(get("until"), now);
+            if (!string.IsNullOrWhiteSpace(get("since")) && !query.Since.HasValue) throw new BadRequestException("'since' is a span such as 90m, 24h or 7d, or a date and time.");
+            return RequestLog.Read(Metrics.LogDirectory, query);
+        }
 
         private void RegisterGatewayRoutes()
         {
@@ -209,6 +225,8 @@ namespace Fairlead.Core.Host
                 if (rec == null) throw new NotFoundException("That request is no longer in the activity log.");
                 return Task.FromResult(Json.Ok(rec));
             });
+            Admin.Get("/api/requestlog", r => Task.FromResult(Json.Ok(RequestLogEntries(r))));
+            Admin.Get("/api/requestlog/summary", r => Task.FromResult(Json.Ok(RequestLog.Summarize(RequestLogEntries(r)))));
             Admin.Get("/api/metrics", r => Task.FromResult(Json.Ok(Metrics.Summary())));
             Admin.Get("/api/live", r => Task.FromResult(LiveStream()));
             Admin.Get("/api/logs", r =>
