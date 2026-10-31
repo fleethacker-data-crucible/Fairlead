@@ -41,6 +41,9 @@ namespace Fairlead.Core.Routing
         /// <summary>Set when nothing can serve the request; the gateway answers 503 with it.</summary>
         public string Error { get; set; }
         public int ErrorStatus { get; set; }
+        /// <summary>Targets left out only because the prompt does not fit their context window.</summary>
+        public int ContextRejected { get; set; }
+        public int LargestWindow { get; set; }
 
         public RoutePlan()
         {
@@ -134,6 +137,12 @@ namespace Fairlead.Core.Routing
                 plan.Error = plan.LocalOnly
                     ? "No local model can take this request" + (plan.Kedge ? " and the cloud is unreachable (Kedge mode)" : string.Empty) + ". Start Ollama or another local server, or add a target to the 'local' route."
                     : "Route '" + route.Id + "' has no target that can take this request. Add one in Fairlead's Routes page.";
+                // A prompt longer than every window is the caller's to fix (400), not an outage (503).
+                if (plan.ContextRejected > 0)
+                {
+                    plan.ErrorStatus = 400;
+                    plan.Error = "The prompt (about " + (profile.EstimatedTokens + (profile.MaxOutputTokens ?? 0)) + " tokens with the reply) is longer than the context window of every model this route can use (largest: " + plan.LargestWindow + " tokens). Shorten the prompt or ask for a route with a larger window.";
+                }
             }
             else
             {
@@ -256,7 +265,12 @@ namespace Fairlead.Core.Routing
                 if (operation == "embeddings" && provider.Kind == ProviderKind.Responses) { plan.Decision.Add("Skip " + target + ": a Responses gateway serves chat only."); continue; }
                 var info = provider.FindModel(model) ?? HealthModels(health, provider.Id).FirstOrDefault(m => string.Equals(m.Id, model, StringComparison.OrdinalIgnoreCase));
                 var why = Unfit(info, profile, operation);
-                if (why != null) { plan.Decision.Add("Skip " + target + ": " + why + "."); continue; }
+                if (why != null)
+                {
+                    plan.Decision.Add("Skip " + target + ": " + why + ".");
+                    if (why.StartsWith("needs ~", StringComparison.Ordinal)) { plan.ContextRejected++; plan.LargestWindow = Math.Max(plan.LargestWindow, info.ContextWindow ?? 0); }
+                    continue;
+                }
                 list.Add(Park(new Candidate { Provider = provider, Model = model, Info = info }, health, breakers, now));
             }
             return list;
