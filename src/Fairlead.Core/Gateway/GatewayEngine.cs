@@ -117,6 +117,20 @@ namespace Fairlead.Core.Gateway
 
         // ---------- requests ----------
 
+        /// <summary>An anthropic-beta header value fit to forward: feature names (letters, digits, - _ . , :) and spaces, at most 400 characters; null otherwise.</summary>
+        public static string CleanBeta(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return null;
+            var v = value.Trim();
+            if (v.Length > 400) return null;
+            foreach (var ch in v)
+            {
+                var ok = (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '-' || ch == '_' || ch == '.' || ch == ',' || ch == ':' || ch == ' ';
+                if (!ok) return null;
+            }
+            return v;
+        }
+
         /// <summary>Handles POST /v1/chat/completions (OpenAI) and POST /v1/messages (Anthropic).</summary>
         public async Task<HttpResponse> HandleChatAsync(HttpRequest request, Dialect dialect)
         {
@@ -147,6 +161,8 @@ namespace Fairlead.Core.Gateway
             var profile = RequestProfile.From(body, dialect, cfg.Privacy.DetectSecrets);
             profile.ClientName = (client == null ? null : client.Name);
             profile.RouteOverride = request.Header(RouteHeader);
+            var beta = CleanBeta(request.Header("anthropic-beta"));
+            if (beta != null) profile.PassHeaders["anthropic-beta"] = beta;
             // Excerpts of the user's own documents are in the prompt: they stay on this machine unless privacy routing is switched off.
             if (bearing != null) profile.MarkSensitive("documents");
             if (string.Equals(request.Header(PrivacyHeader), "local", StringComparison.OrdinalIgnoreCase)) profile.MarkSensitive("header");
@@ -290,7 +306,7 @@ namespace Fairlead.Core.Gateway
                 var primaryCts = CancellationTokenSource.CreateLinkedTokenSource(aborted);
                 var primaryRetries = new RetryCount();
                 PublishAttemptBegin(record, first, false);
-                Task<UpstreamResponse> primary = SendAsync(first, body, dialect, operation, primaryCts.Token, primaryRetries);
+                Task<UpstreamResponse> primary = SendAsync(first, body, dialect, operation, primaryCts.Token, primaryRetries, profile.PassHeaders);
                 cancels[primary] = primaryCts;
                 retries[primary] = primaryRetries;
                 var primaryStarted = sw.ElapsedMilliseconds;
@@ -314,7 +330,7 @@ namespace Fairlead.Core.Gateway
                             var backupCts = CancellationTokenSource.CreateLinkedTokenSource(aborted);
                             var backupRetries = new RetryCount();
                             PublishAttemptBegin(record, second, true);
-                            backup = SendAsync(second, body, dialect, operation, backupCts.Token, backupRetries);
+                            backup = SendAsync(second, body, dialect, operation, backupCts.Token, backupRetries, profile.PassHeaders);
                             cancels[backup] = backupCts;
                             retries[backup] = backupRetries;
                             backupStarted = sw.ElapsedMilliseconds;
@@ -469,7 +485,7 @@ namespace Fairlead.Core.Gateway
         }
 
         /// <summary>Sends to one target, retrying transient failures as many times as the provider allows before giving up on it.</summary>
-        private async Task<UpstreamResponse> SendWithRetriesAsync(Candidate c, string operation, JObject outgoing, CancellationToken aborted, RetryCount count)
+        private async Task<UpstreamResponse> SendWithRetriesAsync(Candidate c, string operation, JObject outgoing, CancellationToken aborted, RetryCount count, IDictionary<string, string> pass = null)
         {
             var p = c.Provider;
             var max = Math.Max(0, p.Retries ?? 0);
@@ -480,7 +496,7 @@ namespace Fairlead.Core.Gateway
                 int delay;
                 try
                 {
-                    return await _upstream.SendAsync(p, operation, outgoing, aborted).ConfigureAwait(false);
+                    return await _upstream.SendAsync(p, operation, outgoing, aborted, pass).ConfigureAwait(false);
                 }
                 catch (UpstreamException ex)
                 {
@@ -501,7 +517,7 @@ namespace Fairlead.Core.Gateway
             }
         }
 
-        private Task<UpstreamResponse> SendAsync(Candidate c, JObject body, Dialect dialect, string operation, CancellationToken aborted, RetryCount count)
+        private Task<UpstreamResponse> SendAsync(Candidate c, JObject body, Dialect dialect, string operation, CancellationToken aborted, RetryCount count, IDictionary<string, string> pass = null)
         {
             var target = UpstreamClient.DialectOf(c.Provider.Kind);
             JObject outgoing;
@@ -525,7 +541,8 @@ namespace Fairlead.Core.Gateway
             {
                 outgoing = Translate.OpenAiToAnthropicRequest(body, c.Model);
             }
-            return SendWithRetriesAsync(c, operation, outgoing, aborted, count);
+            // anthropic-beta means something to Anthropic only; any other provider never sees it.
+            return SendWithRetriesAsync(c, operation, outgoing, aborted, count, c.Provider.Kind == ProviderKind.Anthropic && pass != null && pass.Count > 0 ? pass : null);
         }
 
         // ---------- responses ----------
