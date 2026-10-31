@@ -57,6 +57,35 @@ namespace Fairlead.Core.Protocol
     {
         // ---------- requests ----------
 
+        /// <summary>
+        /// OpenAI's own API takes max_completion_tokens and rejects max_tokens on its newer models, and its reasoning
+        /// models (o1, o3, o4, gpt-5 and later, except gpt-5-chat) accept only the default temperature and top_p.
+        /// Applied to a copy of an OpenAI-format body that is headed for the "openai" preset; other providers get the
+        /// body unchanged.
+        /// </summary>
+        public static void AdaptForOpenAi(JObject body, string model)
+        {
+            var max = body["max_tokens"];
+            if (max != null)
+            {
+                body.Remove("max_tokens");
+                if (body["max_completion_tokens"] == null) body["max_completion_tokens"] = max;
+            }
+            if (IsOpenAiReasoningModel(model))
+            {
+                body.Remove("temperature");
+                body.Remove("top_p");
+            }
+        }
+
+        public static bool IsOpenAiReasoningModel(string model)
+        {
+            var m = (model ?? "").ToLowerInvariant();
+            if (m.StartsWith("gpt-5-chat", StringComparison.Ordinal)) return false;
+            if (m.StartsWith("gpt-5", StringComparison.Ordinal)) return true;
+            return m.Length > 1 && m[0] == 'o' && m[1] >= '0' && m[1] <= '9';
+        }
+
         public static JObject AnthropicToOpenAiRequest(JObject a, string model, bool maxCompletionTokens, bool streamUsage)
         {
             var o = new JObject { { "model", model } };

@@ -194,7 +194,22 @@ namespace Fairlead.Core.Bearing
         /// </summary>
         public void Apply(JObject output, Dialect dialect)
         {
-            var answer = AnswerText(output, dialect);
+            Check(AnswerText(output, dialect));
+            output["fairlead_citations"] = CitationsJson;
+            output["fairlead_bearing"] = BearingJson;
+            if (Citations.Count > 0) AppendSources(output, dialect);
+        }
+
+        /// <summary>The citations as the response carries them, set by <see cref="Check"/>.</summary>
+        public JArray CitationsJson { get; private set; }
+        public JObject BearingJson { get; private set; }
+
+        /// <summary>
+        /// Checks an answer (all of its text) against the sources: fills <see cref="Citations"/>, <see cref="CitationsJson"/> and
+        /// <see cref="BearingJson"/>. Used directly when the answer was streamed and only its text is at hand.
+        /// </summary>
+        public void Check(string answer)
+        {
             var cited = new SortedDictionary<int, BearingCitation>();
             var unknown = new List<int>();
             foreach (Match m in Marker.Matches(answer))
@@ -222,7 +237,7 @@ namespace Fairlead.Core.Bearing
             var citations = new JArray();
             foreach (var c in Citations)
                 citations.Add(new JObject { { "n", c.Number }, { "source", c.Source }, { "location", c.Location }, { "heading", c.Heading }, { "quote", c.Quote }, { "verified", c.Verified }, { "link", c.Link } });
-            output["fairlead_citations"] = citations;
+            CitationsJson = citations;
             var summary = Summary();
             summary["cited"] = Citations.Count;
             summary["verified"] = Citations.Count(c => c.Verified);
@@ -232,8 +247,7 @@ namespace Fairlead.Core.Bearing
                 foreach (var u in unknown) bad.Add(new JValue(u));
                 summary["unknownSources"] = bad;
             }
-            output["fairlead_bearing"] = summary;
-            if (Citations.Count > 0) AppendSources(output, dialect);
+            BearingJson = summary;
         }
 
         private JObject Summary()

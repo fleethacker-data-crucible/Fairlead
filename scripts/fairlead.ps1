@@ -201,7 +201,7 @@ function Get-Route($Config, [string]$Id) {
 
 # ---------- commands ----------
 
-function Show-Help {
+function Get-HelpText {
 @'
 fairlead <command> [options]          every command maps to one admin API route (docs\API.md)
 
@@ -211,6 +211,7 @@ Engine
   startup on|off                      start Fairlead at Windows sign-in (Register-FairleadStartup.ps1)
   status                              engine, connectivity, providers, metrics   GET /api/status
   api                                 list every admin API route         GET /api
+  commands [--json]                   list every command with its usage, routes and whether it needs --yes
 
 Providers
   providers [list]                    GET /api/config
@@ -280,6 +281,53 @@ Health and activity
 Options for every command: --json (the value as JSON), --url U (loopback only).
 Use FAIRLEAD_URL and FAIRLEAD_SESSION for a different local engine. Never put a session token on the command line.
 '@
+}
+
+function Show-Help { Write-Output (Get-HelpText) }
+
+# The command list is read from the help text, so `commands` and `help` cannot disagree.
+function Get-CommandList {
+    $group = ''
+    $items = New-Object System.Collections.ArrayList
+    $cur = $null
+    foreach ($raw in ((Get-HelpText) -split "`n")) {
+        $line = $raw.TrimEnd("`r")
+        if ($line -match '^[A-Z]' -and $line -notmatch '^(Options|Use) ') { $group = $line.Trim(); $cur = $null; continue }
+        if ($line -match '^  \S') {
+            $cur = @{ group = $group; text = $line.Trim() }
+            [void]$items.Add($cur)
+            continue
+        }
+        if ($cur -and $line -match '^    +\S') { $cur.text = $cur.text + ' ' + $line.Trim() }
+    }
+    $result = @()
+    foreach ($i in $items) {
+        $parts = @($i.text -split '\s{2,}')
+        $usage = $parts[0]
+        $routes = @()
+        foreach ($m in [regex]::Matches($i.text, '\b(GET|POST|PUT|DELETE) (/api[^\s,|]*)')) { $routes += ($m.Groups[1].Value + ' ' + $m.Groups[2].Value) }
+        $description = ''
+        if ($parts.Count -gt 1) { $description = (($parts[1..($parts.Count - 1)] -join ' ') -replace '\b(GET|POST|PUT|DELETE) /api\S*', '').Trim() }
+        $result += [ordered]@{
+            name        = ($usage -split ' ')[0]
+            usage       = $usage
+            group       = $i.group
+            description = $description
+            routes      = [string[]]$routes
+            destructive = ($i.text -match '--yes')
+        }
+    }
+    return , $result
+}
+
+function Show-Commands {
+    $list = Get-CommandList
+    if (Opt 'json') {
+        $doc = [ordered]@{ schemaVersion = 1; tool = 'fairlead'; globalOptions = [string[]]@('--json', '--url'); commands = $list }
+        ConvertTo-Json -InputObject $doc -Depth 6
+        return
+    }
+    $list | ForEach-Object { New-Object psobject -Property @{ command = $_.name; group = $_.group; usage = $_.usage } } | Format-Table command, group, usage -AutoSize | Out-String -Width 200 | Write-Output
 }
 
 function Invoke-Providers {
@@ -678,6 +726,7 @@ function Invoke-Fairlead([string[]]$List) {
                 if ($empty.Count) { 'Routes with no targets (requests fall back to local): ' + ($empty -join ', ') }
             }
         }
+        'commands' { Show-Commands }
         'api' { Out-Result (Invoke-Api GET '/api') { param($v) $v.routes } }
         'health' { Out-Result (Invoke-Api GET '/api/health/providers') }
         'config' { Out-Result (Get-Config) { param($v) $v | ConvertTo-Json -Depth 10 } }
