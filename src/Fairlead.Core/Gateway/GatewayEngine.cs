@@ -138,7 +138,6 @@ namespace Fairlead.Core.Gateway
             if (BearingService.Requested(request.Header(BearingService.OptInHeader)))
             {
                 if (CitedAnswers == null || !CitedAnswers.Enabled) return Fail(record, sw, dialect, 400, "Cited answers are not set up: set FAIRLEAD_BEARING_DIR to a folder of documents and restart Fairlead.");
-                if (body["stream"] != null && body["stream"].Type == JTokenType.Boolean && (bool)body["stream"]) return Fail(record, sw, dialect, 400, "Cited answers need \"stream\": false; the sources are checked once the whole answer is in.");
                 string bearingError;
                 bearing = CitedAnswers.Prepare(body, dialect, BearingService.TopFrom(request.Header(BearingService.TopHeader)), out bearingError);
                 if (bearing == null) return Fail(record, sw, dialect, 400, bearingError);
@@ -180,7 +179,7 @@ namespace Fairlead.Core.Gateway
             if (!profile.Stream) PublishFirstByte(record, winner.Ref, (int)sw.ElapsedMilliseconds);
             if (!winner.Local && _health != null) _health.ReportCloudSuccess();
 
-            if (profile.Stream) return StreamResponse(response, winner, dialect, profile, record, sw);
+            if (profile.Stream) return StreamResponse(response, winner, dialect, profile, record, sw, bearing);
             return await BufferedResponse(response, winner, dialect, profile, record, sw, bearing).ConfigureAwait(false);
         }
 
@@ -196,6 +195,42 @@ namespace Fairlead.Core.Gateway
             _metrics.Record(record);
             var output = bearing.NoSourcesAnswer();
             var model = (string)body["model"] ?? "bearing";
+            if (body["stream"] != null && body["stream"].Type == JTokenType.Boolean && (bool)body["stream"])
+            {
+                // A streaming caller gets a stream: the one sentence, the end of the answer and the (empty) citations event.
+                var streamed = HttpResponse.EventStream(async (sink, token) =>
+                {
+                    var chunk = new JObject { { "id", "chatcmpl-bearing" }, { "object", "chat.completion.chunk" }, { "model", model } };
+                    chunk["choices"] = new JArray { new JObject { { "index", 0 }, { "delta", new JObject { { "role", "assistant" }, { "content", BearingRun.NoSourcesText } } }, { "finish_reason", null } } };
+                    var finish = new JObject { { "id", "chatcmpl-bearing" }, { "object", "chat.completion.chunk" }, { "model", model } };
+                    finish["choices"] = new JArray { new JObject { { "index", 0 }, { "delta", new JObject() }, { "finish_reason", "stop" } } };
+                    var payload = new JObject { { "fairlead_citations", output["fairlead_citations"].DeepClone() }, { "fairlead_bearing", output["fairlead_bearing"].DeepClone() } };
+                    if (dialect == Dialect.Anthropic)
+                    {
+                        var o2a = new OpenAiToAnthropicStream(model);
+                        foreach (var s in o2a.Feed(chunk)) await sink.WriteAsync(s, token).ConfigureAwait(false);
+                        foreach (var s in o2a.Feed(finish)) await sink.WriteAsync(s, token).ConfigureAwait(false);
+                        payload["type"] = "fairlead_citations";
+                        await sink.WriteAsync(SseWriter.Named("fairlead_citations", payload), token).ConfigureAwait(false);
+                        foreach (var s in o2a.Finish()) await sink.WriteAsync(s, token).ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        await sink.WriteAsync(SseWriter.Data(chunk), token).ConfigureAwait(false);
+                        await sink.WriteAsync(SseWriter.Data(finish), token).ConfigureAwait(false);
+                        payload["id"] = "chatcmpl-bearing";
+                        payload["object"] = "chat.completion.chunk";
+                        payload["model"] = model;
+                        payload["choices"] = new JArray();
+                        await sink.WriteAsync(SseWriter.Data(payload), token).ConfigureAwait(false);
+                        await sink.WriteAsync(SseWriter.Done, token).ConfigureAwait(false);
+                    }
+                });
+                streamed.Headers["X-Fairlead-Request-Id"] = record.Id;
+                streamed.Headers["X-Fairlead-Route"] = "bearing";
+                streamed.Headers["X-Fairlead-Bearing"] = "sources=0";
+                return streamed;
+            }
             var text = dialect == Dialect.Anthropic ? Translate.OpenAiToAnthropicResponse(output, model) : output;
             if (dialect == Dialect.Anthropic) { text["fairlead_citations"] = output["fairlead_citations"]; text["fairlead_bearing"] = output["fairlead_bearing"]; }
             var http = HttpResponse.Json(200, text.ToString(Formatting.None));
@@ -562,7 +597,7 @@ namespace Fairlead.Core.Gateway
             }
         }
 
-        private HttpResponse StreamResponse(UpstreamResponse response, Candidate winner, Dialect dialect, RequestProfile profile, RequestRecord record, System.Diagnostics.Stopwatch sw)
+        private HttpResponse StreamResponse(UpstreamResponse response, Candidate winner, Dialect dialect, RequestProfile profile, RequestRecord record, System.Diagnostics.Stopwatch sw, BearingRun bearing = null)
         {
             var target = UpstreamClient.DialectOf(winner.Provider.Kind);
             var modelName = profile.RequestedModel.Length > 0 ? profile.RequestedModel : winner.Ref;
@@ -575,6 +610,30 @@ namespace Fairlead.Core.Gateway
                 var a2o = target == Dialect.Anthropic && dialect == Dialect.OpenAi ? new AnthropicToOpenAiStream(modelName, true) : null;
                 var sawDone = false;
                 var firstEvent = false;
+                var answer = new StringBuilder();
+                var cited = false;
+                // Cited answers, streamed: the text goes through as it comes, and once it is complete the citations follow as
+                // one last event (a chunk with no choices for an OpenAI client, a named event for an Anthropic client).
+                Func<Task> citeNow = async () =>
+                {
+                    if (bearing == null || cited) return;
+                    cited = true;
+                    bearing.Check(answer.ToString());
+                    var payload = new JObject { { "fairlead_citations", bearing.CitationsJson }, { "fairlead_bearing", bearing.BearingJson } };
+                    if (dialect == Dialect.Anthropic)
+                    {
+                        payload["type"] = "fairlead_citations";
+                        await output.WriteAsync(SseWriter.Named("fairlead_citations", payload), token).ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        payload["id"] = "chatcmpl-bearing";
+                        payload["object"] = "chat.completion.chunk";
+                        payload["model"] = modelName;
+                        payload["choices"] = new JArray();
+                        await output.WriteAsync(SseWriter.Data(payload), token).ConfigureAwait(false);
+                    }
+                };
                 try
                 {
                     using (response)
@@ -602,9 +661,20 @@ namespace Fairlead.Core.Gateway
                                 await output.WriteAsync(SseWriter.KeepAlive, token).ConfigureAwait(false);
                                 continue;
                             }
+                            if (bearing != null && !ev.IsDone)
+                            {
+                                var piece = ev.Json();
+                                if (piece != null)
+                                {
+                                    if (target == Dialect.OpenAi) { var d = piece["choices"] == null ? null : (string)piece["choices"].FirstOrDefault().At("delta").At("content"); if (d != null) answer.Append(d); }
+                                    else if ((string)piece["type"] == "content_block_delta") { var d = (string)piece["delta"].At("text"); if (d != null) answer.Append(d); }
+                                    if (target == Dialect.Anthropic && (string)piece["type"] == "message_stop") await citeNow().ConfigureAwait(false);
+                                }
+                            }
                             if (ev.IsDone)
                             {
                                 sawDone = true;
+                                await citeNow().ConfigureAwait(false);
                                 if (o2a != null) { foreach (var s in o2a.Finish()) await output.WriteAsync(s, token).ConfigureAwait(false); }
                                 else if (a2o == null) await output.WriteAsync(SseWriter.Done, token).ConfigureAwait(false);
                                 break;
@@ -636,6 +706,7 @@ namespace Fairlead.Core.Gateway
                         if (!sawDone && error == null)
                         {
                             // The upstream closed without its terminator: finish the caller's stream cleanly.
+                            await citeNow().ConfigureAwait(false);
                             if (o2a != null) foreach (var s in o2a.Finish()) await output.WriteAsync(s, token).ConfigureAwait(false);
                             else if (a2o != null) foreach (var s in a2o.Finish()) await output.WriteAsync(s, token).ConfigureAwait(false);
                             else if (target == Dialect.OpenAi) await output.WriteAsync(SseWriter.Done, token).ConfigureAwait(false);
@@ -664,6 +735,7 @@ namespace Fairlead.Core.Gateway
                 }
             });
             AddHeaders(http, record, winner);
+            if (bearing != null) http.Headers["X-Fairlead-Bearing"] = "sources=" + bearing.Hits.Count + ";citations=at-end";
             return http;
         }
 
