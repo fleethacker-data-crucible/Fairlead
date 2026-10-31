@@ -119,6 +119,24 @@ namespace Fairlead.Core.Gateway
 
         private readonly ClientRateLimiter _limits = new ClientRateLimiter();
 
+        /// <summary>The daily token budget: null when the request may go on, else the 429 (Retry-After is the time to midnight UTC).</summary>
+        private HttpResponse OverBudget(ClientKey client, Dialect dialect, RequestRecord record, System.Diagnostics.Stopwatch sw)
+        {
+            if (client == null || !client.DailyTokenLimit.HasValue || client.DailyTokenLimit.Value <= 0) return null;
+            var used = _metrics.Usage.Used(client.Id, DateTime.UtcNow);
+            if (used < client.DailyTokenLimit.Value) return null;
+            var retry = ClientUsage.SecondsToReset(DateTime.UtcNow);
+            var response = Fail(record, sw, dialect, 429, "Client key '" + client.Name + "' has used its daily budget (" + used + " of " + client.DailyTokenLimit.Value + " tokens). It starts again at 00:00 UTC.");
+            response.Headers["Retry-After"] = retry.ToString();
+            return response;
+        }
+
+        /// <summary>True when the key has passed its soft daily limit: smart requests are served by the fast route.</summary>
+        private bool PastSoftLimit(ClientKey client)
+        {
+            return client != null && client.DailyTokenSoftLimit.HasValue && client.DailyTokenSoftLimit.Value > 0 && _metrics.Usage.Used(client.Id, DateTime.UtcNow) >= client.DailyTokenSoftLimit.Value;
+        }
+
         /// <summary>The per-key request limit: null when the request may go on, else the 429 (in the caller's dialect, with Retry-After).</summary>
         private HttpResponse RateLimited(ClientKey client, Dialect dialect, RequestRecord record, System.Diagnostics.Stopwatch sw)
         {
@@ -149,6 +167,8 @@ namespace Fairlead.Core.Gateway
             RequestLog.Identify(record, client, request.Header(LabelHeader));
             var limited = RateLimited(client, dialect, record, sw);
             if (limited != null) return limited;
+            var over = OverBudget(client, dialect, record, sw);
+            if (over != null) return over;
             JObject body;
             try { body = JObject.Parse(request.BodyText); }
             catch (JsonException ex) { return Fail(record, sw, dialect, 400, "Body is not valid JSON: " + ex.Message); }
@@ -178,6 +198,13 @@ namespace Fairlead.Core.Gateway
             if (cfg.LogContent) record.PromptPreview = Preview(profile.LastUserText);
 
             var plan = _planner.Plan(cfg, profile, _health, _breakers, _metrics, client);
+            if (plan.Error == null && string.Equals(plan.Route, "smart", StringComparison.OrdinalIgnoreCase) && cfg.FindRoute("fast") != null && PastSoftLimit(client))
+            {
+                // Over the soft daily limit: the same request, on the cheaper route.
+                profile.RouteOverride = "fast";
+                plan = _planner.Plan(cfg, profile, _health, _breakers, _metrics, client);
+                plan.Decision.Insert(0, "Key '" + client.Name + "' is past its soft daily limit of " + client.DailyTokenSoftLimit.Value + " tokens: 'smart' became 'fast'.");
+            }
             record.Route = plan.Route;
             record.Decision = plan.Decision;
             record.Kedge = plan.Kedge;
@@ -239,6 +266,8 @@ namespace Fairlead.Core.Gateway
             RequestLog.Identify(record, client, request.Header(LabelHeader));
             var limited = RateLimited(client, Dialect.OpenAi, record, sw);
             if (limited != null) return limited;
+            var overEmb = OverBudget(client, Dialect.OpenAi, record, sw);
+            if (overEmb != null) return overEmb;
             JObject body;
             try { body = JObject.Parse(request.BodyText); }
             catch (JsonException ex) { return Fail(record, sw, Dialect.OpenAi, 400, "Body is not valid JSON: " + ex.Message); }

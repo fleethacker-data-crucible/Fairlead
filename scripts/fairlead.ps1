@@ -240,6 +240,8 @@ Routes and routing
 Clients
   clients [list]
   clients add <name> [--routes a,b] [--rate N]   prints the key once; --rate limits requests a minute   POST /api/clients
+  clients budget <id|name> [--daily N|off] [--soft N|off]   daily token limit (429 over it) and a soft limit (smart becomes fast)   POST /api/clients/{id}/budget
+  clients usage                       tokens used today by each key   GET /api/clients/usage
   clients rate <id|name> <N|off>      limit a key to N requests a minute (off = no limit)   POST /api/clients/{id}/rate-limit
   clients remove <id|name> --yes      DELETE /api/clients/{id}
 
@@ -448,13 +450,33 @@ function Invoke-Clients {
     switch ($sub) {
         'list' {
             $c = Get-Config
-            Out-Result $c.clients { param($v) if (@($v).Count -eq 0) { 'No client keys. Create one: fairlead clients add <name>' } else { $v | Select-Object id, name, prefix, created, @{ n = 'routes'; e = { if (@($_.routes).Count) { $_.routes -join ', ' } else { '(all)' } } }, @{ n = 'perMinute'; e = { if ($_.rateLimitPerMinute) { $_.rateLimitPerMinute } else { '(none)' } } } | Format-Table -AutoSize | Out-String -Width 200 } }
+            Out-Result $c.clients { param($v) if (@($v).Count -eq 0) { 'No client keys. Create one: fairlead clients add <name>' } else { $v | Select-Object id, name, prefix, created, @{ n = 'routes'; e = { if (@($_.routes).Count) { $_.routes -join ', ' } else { '(all)' } } }, @{ n = 'perMinute'; e = { if ($_.rateLimitPerMinute) { $_.rateLimitPerMinute } else { '(none)' } } }, @{ n = 'dailyTokens'; e = { if ($_.dailyTokenLimit) { $_.dailyTokenLimit } else { '(none)' } } } | Format-Table -AutoSize | Out-String -Width 200 } }
         }
         'add' {
             $payload = @{ name = (Word 2 'client name'); routes = @(Split-List (Opt 'routes')) }
             if (Opt 'rate') { $payload.rateLimitPerMinute = [int](Opt 'rate') }
             $r = Invoke-Api POST '/api/clients' $payload
             Out-Result $r { param($v) 'Client key for ' + (Word 2) + ' (shown once; Fairlead keeps only its hash):'; $v.key }
+        }
+        'usage' {
+            Out-Result (Invoke-Api GET '/api/clients/usage') { param($v) @($v) | Select-Object name, usedToday, dailyTokenLimit, dailyTokenSoftLimit | Format-Table -AutoSize | Out-String -Width 200 }
+        }
+        'budget' {
+            $which = Word 2 'client id or name'
+            $k = @((Get-Config).clients | Where-Object { $_.id -eq $which -or $_.name -eq $which })
+            if ($k.Count -eq 0) { throw "No client key $which." }
+            if ($k.Count -gt 1) { throw "Several client keys are named $which; give the id." }
+            $payload = @{}
+            foreach ($pair in @(@('daily', 'dailyTokens'), @('soft', 'softDailyTokens'))) {
+                $v = Opt $pair[0]
+                if ($null -eq $v) { continue }
+                $n = 0
+                if ($v -ne 'off') { if (-not [long]::TryParse([string]$v, [ref]$n) -or $n -lt 1) { throw ('--' + $pair[0] + ' is a whole number of tokens, or off.') } }
+                $payload[$pair[1]] = $n
+            }
+            if ($payload.Count -eq 0) { throw 'Give --daily N and/or --soft N (or off).' }
+            $r = Invoke-Api POST ('/api/clients/' + (Esc $k[0].id) + '/budget') $payload
+            Out-Result $r { param($v) $k[0].name + ': daily limit ' + $(if ($v.dailyTokenLimit) { $v.dailyTokenLimit } else { 'none' }) + ', soft limit ' + $(if ($v.dailyTokenSoftLimit) { $v.dailyTokenSoftLimit } else { 'none' }) + '.' }
         }
         'rate' {
             $which = Word 2 'client id or name'

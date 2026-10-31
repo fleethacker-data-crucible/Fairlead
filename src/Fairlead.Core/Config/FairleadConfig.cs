@@ -160,6 +160,10 @@ namespace Fairlead.Core.Config
         public List<string> Routes { get; set; }
         /// <summary>Most requests this key may make in a minute (chat and embeddings); over it the answer is 429 with Retry-After. Null or 0 = no limit, the default.</summary>
         public int? RateLimitPerMinute { get; set; }
+        /// <summary>Most tokens (input plus output) this key may use in a UTC day; over it the answer is 429 until midnight. Null or 0 = no limit, the default.</summary>
+        public long? DailyTokenLimit { get; set; }
+        /// <summary>Tokens a day after which requests that would use the smart route use the fast route instead. Null or 0 = never downgrade.</summary>
+        public long? DailyTokenSoftLimit { get; set; }
 
         public ClientKey()
         {
