@@ -60,7 +60,7 @@ Any OpenAI SDK: `base_url="http://127.0.0.1:8776/v1"`, `api_key="fl-..."`, `mode
 Everything the admin page does also works from the command line and over HTTP:
 
 ```powershell
-.airlead.cmd status                       # or: help, routes set, providers test, clients add, kedge on, chat ...
+.\fairlead.cmd status                       # or: help, routes set, providers test, clients add, kedge on, chat ...
 ```
 
 ## Privacy and data

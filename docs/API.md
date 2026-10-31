@@ -100,7 +100,7 @@ config view, unless noted.
 | `POST /api/breakers/reset` | `{ provider? }`; every breaker when omitted |
 | `GET /api/requests?limit=N` | recent requests with their decision trace and attempts (newest first, up to 1000) |
 | `GET /api/requests/{id}` | one request |
-| `GET /api/requestlog?since=&until=&client=&label=&model=&route=&status=&limit=` | the durable request log read from `logsairlead-requests-<date>.jsonl` (survives restarts): who (client key name, id and visible prefix, optional `X-Fairlead-Label`), what (endpoint, route, status, tokens, latency) and which model served it. `since` is `90m`, `24h`, `7d` or a date; `status` is `ok`, `error`, `4xx`, `5xx` or a code; newest first, default 100, up to 5000. Never holds prompt or response text |
+| `GET /api/requestlog?since=&until=&client=&label=&model=&route=&status=&limit=` | the durable request log read from `logs\fairlead-requests-<date>.jsonl` (survives restarts): who (client key name, id and visible prefix, optional `X-Fairlead-Label`), what (endpoint, route, status, tokens, latency) and which model served it. `since` is `90m`, `24h`, `7d` or a date; `status` is `ok`, `error`, `4xx`, `5xx` or a code; newest first, default 100, up to 5000. Never holds prompt or response text |
 | `GET /api/requestlog/summary` | the same filters, totalled per client, label, serving model and route (requests, failures, tokens, cost when priced, p50/p95 latency) |
 | `GET /api/metrics` | totals, last hour, per-target stats |
 | `GET /api/logs?level=` | recent diagnostics |
