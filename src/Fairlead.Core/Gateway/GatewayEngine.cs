@@ -6,6 +6,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Fairlead.Core.Bearing;
 using Fairlead.Core.Config;
 using Fairlead.Core.Host;
 using Fairlead.Core.Protocol;
@@ -48,6 +49,9 @@ namespace Fairlead.Core.Gateway
         }
 
         public RoutePlanner Planner { get { return _planner; } }
+
+        /// <summary>Cited answers; null or not enabled unless FAIRLEAD_BEARING_DIR names a folder. Only requests that send X-Fairlead-Bearing: cite use it.</summary>
+        public BearingService CitedAnswers { get; set; }
 
         // ---------- client keys ----------
 
@@ -130,9 +134,21 @@ namespace Fairlead.Core.Gateway
             if (!(body["messages"] is JArray)) return Fail(record, sw, dialect, 400, "'messages' must be an array.");
 
             var cfg = _config.Current;
+            BearingRun bearing = null;
+            if (BearingService.Requested(request.Header(BearingService.OptInHeader)))
+            {
+                if (CitedAnswers == null || !CitedAnswers.Enabled) return Fail(record, sw, dialect, 400, "Cited answers are not set up: set FAIRLEAD_BEARING_DIR to a folder of documents and restart Fairlead.");
+                if (body["stream"] != null && body["stream"].Type == JTokenType.Boolean && (bool)body["stream"]) return Fail(record, sw, dialect, 400, "Cited answers need \"stream\": false; the sources are checked once the whole answer is in.");
+                string bearingError;
+                bearing = CitedAnswers.Prepare(body, dialect, BearingService.TopFrom(request.Header(BearingService.TopHeader)), out bearingError);
+                if (bearing == null) return Fail(record, sw, dialect, 400, bearingError);
+                if (bearing.NoSources) return BearingNoSources(record, sw, dialect, bearing, body);
+            }
             var profile = RequestProfile.From(body, dialect, cfg.Privacy.DetectSecrets);
             profile.ClientName = (client == null ? null : client.Name);
             profile.RouteOverride = request.Header(RouteHeader);
+            // Excerpts of the user's own documents are in the prompt: they stay on this machine unless privacy routing is switched off.
+            if (bearing != null) profile.MarkSensitive("documents");
             if (string.Equals(request.Header(PrivacyHeader), "local", StringComparison.OrdinalIgnoreCase)) profile.MarkSensitive("header");
             record.RequestedModel = profile.RequestedModel;
             record.Stream = profile.Stream;
@@ -165,7 +181,28 @@ namespace Fairlead.Core.Gateway
             if (!winner.Local && _health != null) _health.ReportCloudSuccess();
 
             if (profile.Stream) return StreamResponse(response, winner, dialect, profile, record, sw);
-            return await BufferedResponse(response, winner, dialect, profile, record, sw).ConfigureAwait(false);
+            return await BufferedResponse(response, winner, dialect, profile, record, sw, bearing).ConfigureAwait(false);
+        }
+
+        /// <summary>A cited-answer request nothing in the documents matched: answered here, no model called.</summary>
+        private HttpResponse BearingNoSources(RequestRecord record, System.Diagnostics.Stopwatch sw, Dialect dialect, BearingRun bearing, JObject body)
+        {
+            record.Route = "bearing";
+            record.Target = "bearing/none";
+            record.Local = true;
+            record.Status = 200;
+            record.Decision.Add("Bearing: no passage in the documents matched the question; answered without calling a model.");
+            record.TotalMs = (int)sw.ElapsedMilliseconds;
+            _metrics.Record(record);
+            var output = bearing.NoSourcesAnswer();
+            var model = (string)body["model"] ?? "bearing";
+            var text = dialect == Dialect.Anthropic ? Translate.OpenAiToAnthropicResponse(output, model) : output;
+            if (dialect == Dialect.Anthropic) { text["fairlead_citations"] = output["fairlead_citations"]; text["fairlead_bearing"] = output["fairlead_bearing"]; }
+            var http = HttpResponse.Json(200, text.ToString(Formatting.None));
+            http.Headers["X-Fairlead-Request-Id"] = record.Id;
+            http.Headers["X-Fairlead-Route"] = "bearing";
+            http.Headers["X-Fairlead-Bearing"] = "sources=0";
+            return http;
         }
 
         /// <summary>POST /v1/embeddings: OpenAI dialect only, routed like chat.</summary>
@@ -493,7 +530,7 @@ namespace Fairlead.Core.Gateway
 
         // ---------- responses ----------
 
-        private async Task<HttpResponse> BufferedResponse(UpstreamResponse response, Candidate winner, Dialect dialect, RequestProfile profile, RequestRecord record, System.Diagnostics.Stopwatch sw)
+        private async Task<HttpResponse> BufferedResponse(UpstreamResponse response, Candidate winner, Dialect dialect, RequestProfile profile, RequestRecord record, System.Diagnostics.Stopwatch sw, BearingRun bearing = null)
         {
             using (response)
             {
@@ -513,12 +550,14 @@ namespace Fairlead.Core.Gateway
                 if (target == dialect) output = parsed;
                 else if (dialect == Dialect.Anthropic) output = Translate.OpenAiToAnthropicResponse(parsed, profile.RequestedModel.Length > 0 ? profile.RequestedModel : winner.Ref);
                 else output = Translate.AnthropicToOpenAiResponse(parsed, profile.RequestedModel.Length > 0 ? profile.RequestedModel : winner.Ref);
+                if (bearing != null) bearing.Apply(output, dialect);
                 Finish(record, sw, 200, usage, winner);
                 if (_config.Current.LogContent)
                     record.ResponsePreview = Preview(target == Dialect.Anthropic ? Translate.BlocksText(parsed["content"]) : Translate.ContentText(parsed["choices"].At(0).At("message").At("content")));
                 _metrics.Record(record);
                 var http = HttpResponse.Json(200, output.ToString(Formatting.None));
                 AddHeaders(http, record, winner);
+                if (bearing != null) http.Headers["X-Fairlead-Bearing"] = "sources=" + bearing.Hits.Count + ";cited=" + bearing.Citations.Count;
                 return http;
             }
         }

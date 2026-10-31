@@ -258,7 +258,7 @@ Describe 'The fairlead CLI against a real host' {
     }
 
     It 'runs every read-only command, in tables and as JSON' {
-        foreach ($c in @(@('help'), @('config'), @('presets'), @('providers'), @('routes'), @('routing'), @('clients'), @('settings'), @('kedge'), @('gateway'), @('lazarette'), @('health'), @('breakers'), @('requests'), @('requestlog'), @('requestlog', '--summary'), @('requestlog', 'prune', '--days', '7', '--dry-run'), @('metrics'), @('logs', '--level', 'info'))) {
+        foreach ($c in @(@('help'), @('config'), @('presets'), @('providers'), @('routes'), @('routing'), @('clients'), @('settings'), @('kedge'), @('gateway'), @('lazarette'), @('health'), @('breakers'), @('requests'), @('requestlog'), @('requestlog', '--summary'), @('requestlog', 'prune', '--days', '7', '--dry-run'), @('bearing'), @('metrics'), @('logs', '--level', 'info'))) {
             $r = Invoke-Cli @c
             $r.Code | Should -Be 0 -Because (($c -join ' ') + ': ' + $r.Out)
             if ($c[0] -ne 'help') { { Invoke-CliJson @c } | Should -Not -Throw -Because ($c -join ' ') }
