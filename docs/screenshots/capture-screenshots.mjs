@@ -1,4 +1,4 @@
-// Screenshots of the Fairlead admin UI from the built web/dist, with the admin API answered by an
+﻿// Screenshots of the Fairlead admin UI from the built web/dist, with the admin API answered by an
 // in-page mock that returns the engine's own response shapes (src/Fairlead.Core/Host/ApiRoutes.cs).
 // Synthetic data only: no engine, no model server, no key, no network. The page is loaded from
 // http://127.0.0.1:8776 so the status bar shows the registry address; Playwright answers every
@@ -132,7 +132,7 @@ const QUICK = ["Model 'auto' is a Fairlead route.", "Auto: rule 'quick-chat' mat
 // The README machine: two local models and one cloud provider whose key comes from an environment variable.
 function readmeState() {
   const ollama = provider('ollama', 'Ollama', 'ollama', 'http://127.0.0.1:11434', true, [LLAMA, QWEN]);
-  const anthropic = provider('anthropic', 'Anthropic', 'anthropic', 'https://api.anthropic.com', false, [model('claude-sonnet-4-5', 200000)], { apiKeyEnv: 'ANTHROPIC_API_KEY', keySource: 'env' });
+  const anthropic = provider('anthropic', 'Anthropic', 'anthropic', 'https://api.github.com', false, [model('claude-sonnet-4-5', 200000)], { apiKeyEnv: 'ANTHROPIC_API_KEY', keySource: 'env' });
   const smart = 'anthropic/claude-sonnet-4-5', fast = 'ollama/llama3.2:1b', big = 'ollama/qwen2.5:14b';
   const att = (target, ms) => [{ target, outcome: 'ok', status: 200, ms, error: null }];
   const requests = [

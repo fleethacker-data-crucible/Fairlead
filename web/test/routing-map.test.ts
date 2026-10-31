@@ -1,4 +1,4 @@
-import assert from 'node:assert/strict';
+﻿import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { parseSse } from '../src/lib/live';
 import { NO_KEY, buildGraph, describe, layout, prune, reduce, routeTone, seenFrom, viaOf, type Flight } from '../src/lib/routing-map';
@@ -10,7 +10,7 @@ function config(targets: { smart?: string[]; fast?: string[]; local?: string[] }
     setupComplete: true,
     providers: [
       { id: 'ollama', name: 'Ollama', kind: 'ollama', preset: 'ollama', baseUrl: 'http://127.0.0.1:11434', local: true, enabled: true, apiKeyEnv: null, timeoutSeconds: 600, headers: {}, streamUsage: true, models: [], discovered: [], keySource: 'none', keyHint: null, managed: false, path: null, retries: null },
-      { id: 'anthropic', name: 'Anthropic', kind: 'anthropic', preset: 'anthropic', baseUrl: 'https://api.anthropic.com', local: false, enabled: true, apiKeyEnv: 'K', timeoutSeconds: 120, headers: {}, streamUsage: true, models: [], discovered: [], keySource: 'env', keyHint: null, managed: false, path: null, retries: null },
+      { id: 'anthropic', name: 'Anthropic', kind: 'anthropic', preset: 'anthropic', baseUrl: 'https://api.github.com', local: false, enabled: true, apiKeyEnv: 'K', timeoutSeconds: 120, headers: {}, streamUsage: true, models: [], discovered: [], keySource: 'env', keyHint: null, managed: false, path: null, retries: null },
     ],
     routes: [route('auto', 'auto', []), route('smart', 'failover', targets.smart ?? []), route('fast', 'fastest', targets.fast ?? []), route('local', 'failover', targets.local ?? [], false)],
     rules: [{ name: 'quick', route: 'fast', enabled: true, when: { maxTokens: 1500 } }],
@@ -44,7 +44,7 @@ test('one lead per configured provider, local first, not a fixed two', () => {
 
 test('empty routes are flagged on the fairlead, saying where their requests really go', () => {
   const g = buildGraph(config(), status());
-  assert.deepEqual(g.problems.map((p) => p.short), ['smart → no targets, falling back to local', 'fast → no targets, falling back to local', 'local → no targets, using any local model']);
+  assert.deepEqual(g.problems.map((p) => p.short), ['smart â†’ no targets, falling back to local', 'fast â†’ no targets, falling back to local', 'local â†’ no targets, using any local model']);
   assert.equal(g.problems[0]!.tone, 'err');
   assert.match(g.problems[0]!.text, /whatever model Fairlead finds on a local server/);
   const withLocal = buildGraph(config({ local: ['ollama/qwen'] }), status());
@@ -91,7 +91,7 @@ test('a failover request: attempt fails, re-leads to the next target, then finis
   assert.equal(f.phase, 'done');
   assert.deepEqual(f.attempts.map((a) => a.state), ['failed', 'ok']);
   assert.equal(f.attempts[1]!.via, 'local', 'the fallback lead survives the done event');
-  assert.equal(describe(f), 'claude-code → auto → smart → fallback local → anthropic/sonnet failed (server) → ollama/qwen · 900 ms');
+  assert.equal(describe(f), 'claude-code â†’ auto â†’ smart â†’ fallback local â†’ anthropic/sonnet failed (server) â†’ ollama/qwen Â· 900 ms');
   assert.deepEqual(prune(fs, 6 + 7000), []);
 });
 

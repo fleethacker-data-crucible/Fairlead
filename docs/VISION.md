@@ -1,4 +1,4 @@
-# Vision: the Fleet's intelligence router
+﻿# Vision: the Fleet's intelligence router
 
 Status: direction recorded 2026-10-26. Docs only; no code, defaults or config have changed yet. Fairlead 0.1 (the
 model router described in the [README](../README.md) and [Architecture](ARCHITECTURE.md)) is the starting point, not
@@ -11,7 +11,7 @@ and default to Fairlead for three kinds of access:
 
 | Access | Today (in each tool) | With the router |
 | --- | --- | --- |
-| **AI / LLM endpoints** | Each tool has its own URL, model and token settings, and some hard-code an external default (for example a government AI endpoint, `https://api.openai.com/v1/chat/completions`) | Tools call Fairlead's OpenAI/Anthropic API on loopback with a route (`auto`, `smart`, `fast`, `local`). Fairlead 0.1 already does this part. |
+| **AI / LLM endpoints** | Each tool has its own URL, model and token settings, and some hard-code an external default (for example a government AI endpoint, `https://api.github.com/v1/chat/completions`) | Tools call Fairlead's OpenAI/Anthropic API on loopback with a route (`auto`, `smart`, `fast`, `local`). Fairlead 0.1 already does this part. |
 | **Git repositories** | Tools call GitHub/GitLab REST and GraphQL themselves, with hard-coded hosts (`https://api.github.com`, a government GitLab host) and their own tokens | Tools reach repositories through Fairlead, which knows the hosts, holds the credentials and applies policy (new scope) |
 | **Databases** | Not wired yet; Semaphore models data sources and names their secrets by Lazarette vault item | Tools get connections through Fairlead instead of carrying connection details (new scope) |
 
@@ -49,17 +49,17 @@ These are the consumers found on 2026-10-26 across the Fleet tools in scope. Lin
 
 | Tool | Uses today | Where | Settings |
 | --- | --- | --- | --- |
-| Halyard | AI: OpenAI-compatible, **default `https://api.openai.com/v1/chat/completions`**; Databricks profile (no default) | `src/Halyard.Core/Llm/LlmClient.cs:39`; `Config/HalyardSettings.cs:135-145` | `HALYARD_LLM_PROFILE`, `LLM_URL`/`OPENAI_BASE_URL`, `LLM_MODEL`, `LLM_TOKEN`/`OPENAI_API_KEY`, `DATABRICKS_*`; vault `HALYARD_LAZARETTE_ITEM_Llm`/`_Databricks` |
+| Halyard | AI: OpenAI-compatible, **default `https://api.github.com/v1/chat/completions`**; Databricks profile (no default) | `src/Halyard.Core/Llm/LlmClient.cs:39`; `Config/HalyardSettings.cs:135-145` | `HALYARD_LLM_PROFILE`, `LLM_URL`/`OPENAI_BASE_URL`, `LLM_MODEL`, `LLM_TOKEN`/`OPENAI_API_KEY`, `DATABRICKS_*`; vault `HALYARD_LAZARETTE_ITEM_Llm`/`_Databricks` |
 | Halyard | Git: GitHub REST + GraphQL, **default `https://api.github.com`**; GitLab REST (no default) | `src/Halyard.Core/Providers/ProviderSettings.cs:44`; `HalyardSettings.cs:99-116` | `HALYARD_PROVIDER`, `GITHUB_API_URL`, `GITHUB_TOKEN`/`GH_TOKEN`, `GITLAB_URL`, `GITLAB_TOKEN`, `HALYARD_SOURCE_REPO`, `HALYARD_SANDBOX_REPO` |
 | Gangplank | AI: OpenAI-compatible (openai, azure, databricks, ollama), **default: the government AI endpoint**, always allowlisted | `Core/Intelligence.ps1:17` (allowlist `:43-58`) | `GANGPLANK_AI_URL`/`LLM_URL`/`OPENAI_BASE_URL`, `GANGPLANK_AI_MODEL`, `GANGPLANK_AI_ALLOWED_HOSTS`, `GANGPLANK_AI_TOKEN`/`GENAI_TOKEN`/`LLM_TOKEN`/`OPENAI_API_KEY`; vault `genapi` |
 | Gangplank | Git: GitHub REST, **default `https://api.github.com`**; GitLab REST, **default: the government GitLab host**; archive sync, commits-API push | `Providers/GitProviderBase.ps1:67`, `:71`; `Core/Workspace.ps1:12` | `GITHUB_TOKEN`, `GITLAB_TOKEN`, `GANGPLANK_GITLAB_ALLOWED_HOSTS`; vault entries `github` and the GitLab vault entry |
 | Bowerbird | AI: OpenAI-compatible, default local phoenix-lai `http://127.0.0.1:1234/v1/chat/completions`; Grok profile (no default) | `Private/BowerbirdLlm.ps1:10` | `LLM_URL`, `BOWERBIRD_AI_ENDPOINT_URL`, `BOWERBIRD_GROK_URL`, `LLM_TOKEN`, `AI_ENDPOINT_TOKEN`/`GENAI_TOKEN`, `DATABRICKS_TOKEN`; vault `ai-endpoint-api`, `grok-api` |
 | PacketRat | AI: OpenAI-compatible, default local phoenix-lai `http://127.0.0.1:1234/v1/chat/completions`; Grok profile (no default) | `Private/PacketRatLlm.ps1:12` | `LLM_URL`, `PACKETRAT_AI_ENDPOINT_URL`, `PACKETRAT_GROK_URL`, `PACKETRAT_LLM_PROFILE`, `LLM_TOKEN`, `AI_ENDPOINT_TOKEN`/`GENAI_TOKEN`, `DATABRICKS_TOKEN`; Lazarette items `ai-endpoint-api`, `grok-api` are looked up by `Private/LazaretteBridge.ps1`, but PacketRat does not connect to Lazarette today (reported 2026-10-26; cause not found yet) |
-| Eight Bells | AI: OpenAI-compatible, entered by hand, no default, in memory only | `Start-EightBells.ps1:131` | UI Settings → "AI provider · Manual" (endpoint, model, key) |
+| Eight Bells | AI: OpenAI-compatible, entered by hand, no default, in memory only | `Start-EightBells.ps1:131` | UI Settings â†’ "AI provider Â· Manual" (endpoint, model, key) |
 | Lazarette | AI: Stark assistant, OpenAI-compatible, default placeholder `https://ai.example.com` | `lib/core/Config.ps1:131-133`; `lib/server/Stark.ps1:77` | `StarkBaseUrl`, `StarkModel`, `StarkKeyItem`; also the credential store other tools (and the router) read |
 | Semaphore | AI: OpenAI-compatible and contract providers, caller-supplied, no default | `src/core/intelligence/remote.ts:23-32` | `RemoteSettings.url`/`.model`/`.token` |
 | Semaphore | Databases: data-source catalog (postgres, oracle, access, tsql, ansi; Athena, Redshift, Azure SQL, Foundry), secrets by vault item, no driver code yet | `src/core/catalog.ts:5-23` | `vaultItem` per source |
-| Shellback | AI: local rules by default; optional remote OpenAI-compatible or contract provider from the browser; loopback adapter | `src/storage/intel-settings.ts:20`; `tools/intel-adapter.mjs:24-28` | UI Program → Intelligence, `SHELLBACK_INTEL_HOST`; adapter `INTEL_UPSTREAM_URL`, `INTEL_API_KEY`, `INTEL_MODEL` |
+| Shellback | AI: local rules by default; optional remote OpenAI-compatible or contract provider from the browser; loopback adapter | `src/storage/intel-settings.ts:20`; `tools/intel-adapter.mjs:24-28` | UI Program â†’ Intelligence, `SHELLBACK_INTEL_HOST`; adapter `INTEL_UPSTREAM_URL`, `INTEL_API_KEY`, `INTEL_MODEL` |
 
 No AI, git or database access was found in Capstan, Scrimshaw, SnapShackle or Halyard-Ballast (the sandbox
 repository Halyard writes to; it has no code). The only network calls in those tools are loopback, or in Scrimshaw
@@ -81,7 +81,7 @@ These are deliberately undecided.
    over loopback?
 4. **Tool-facing API.** Fairlead speaks OpenAI and Anthropic for models today. What is the contract for git and data
    requests? Is it one API or separate endpoints? Are they versioned?
-5. **Tool identity.** Do Fleet tools use Fairlead client keys (`fl-…`) like external tools? How is a tool's key
+5. **Tool identity.** Do Fleet tools use Fairlead client keys (`fl-â€¦`) like external tools? How is a tool's key
    provisioned without putting it in the tool's config?
 6. **Credential source of truth.** Fairlead 0.1 stores provider keys with DPAPI in its own config. Should they move
    to Lazarette, to Windows Credential Manager, or should both be supported?
