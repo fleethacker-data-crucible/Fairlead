@@ -19,7 +19,7 @@ machine a key is optional when `requireClientKey` is off. Other machines always 
 | `POST /v1/embeddings` | OpenAI embeddings |
 | `POST /v1/audio/speech` | OpenAI speech: JSON `{ model, input, voice, ... }` in, audio out (the upstream's content type). Same client keys, routes, privacy header, failover and request log as chat (the request log never holds the text). Only OpenAI-compatible providers serve it; Anthropic, Ollama and Responses targets are skipped, so a private request has no target unless a local OpenAI-compatible server (for example a speech server on this machine) is on the route. `model` is a route, a `provider/model` or a served model name, as for chat |
 | `POST /v1/audio/transcriptions` | OpenAI transcription: `multipart/form-data` (`file`, `model`, optional fields) in, JSON or text out. The file bytes are forwarded untouched; only `model` is rewritten to the target model. Same rules as speech |
-| `GET /v1/models`, `GET /v1/models/{id}` | routes, then targets |
+| `GET /v1/models`, `GET /v1/models/{id}` | routes, then targets. An id that can serve audio carries `"audio": ["speech"]` and/or `["transcription"]`: a provider/model whose name says so (tts, speech, whisper, transcribe, stt) on an OpenAI-compatible provider, and a route with such a target. `GET /v1/models?capability=audio` lists only those |
 | `GET /v1/health` | `{ ok, kedge, internet }`, no auth |
 
 Request headers: `X-Fairlead-Route: <route>` forces a route; `X-Fairlead-Privacy: local` keeps the request on local
