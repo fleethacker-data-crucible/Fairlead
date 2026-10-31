@@ -69,6 +69,7 @@ encrypted with Windows DPAPI for the user who started Fairlead. The CLI decrypts
 | `requests [--limit N]`, `request <id>` | `GET /api/requests[/{id}]` |
 | `bearing [status]`, `bearing search <question> [--limit N]` | `GET /api/bearing[/search]` |
 | `requestlog [--since 24h] [--client N] [--label L] [--model M] [--route R] [--status S] [--limit N] [--summary]` | `GET /api/requestlog[/summary]` |
+| `commands [--json]` | none (offline): every command with usage, routes and whether it needs `--yes` |
 | `metrics` | `GET /api/metrics` |
 | `logs [--level info\|warn\|error]` | `GET /api/logs` |
 | `live [--count N]` | `GET /api/live` (server-sent events) |
