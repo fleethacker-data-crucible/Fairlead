@@ -36,6 +36,8 @@ namespace Fairlead.Core.Gateway
         private readonly Metrics _metrics;
         private readonly Diagnostics _log;
         private readonly RoutePlanner _planner = new RoutePlanner();
+        /// <summary>The multipart body of an audio-transcription request, by the placeholder body that travels through route planning.</summary>
+        private readonly System.Runtime.CompilerServices.ConditionalWeakTable<JObject, RawUpload> _uploads = new System.Runtime.CompilerServices.ConditionalWeakTable<JObject, RawUpload>();
 
         public GatewayEngine(ConfigStore config, UpstreamClient upstream, HealthMonitor health, BreakerBoard breakers, Metrics metrics, Diagnostics log)
         {
@@ -203,6 +205,74 @@ namespace Fairlead.Core.Gateway
                 try { record.InputTokens = (int?)JObject.Parse(text)["usage"].At("prompt_tokens"); } catch (JsonException) { }
                 _metrics.Record(record);
                 var http = HttpResponse.Json(200, text);
+                AddHeaders(http, record, outcome.Winner);
+                return http;
+            }
+        }
+
+        /// <summary>
+        /// POST /v1/audio/speech (JSON in, audio out) and POST /v1/audio/transcriptions (multipart in, JSON or text out): the same
+        /// keys, routes, privacy rules, failover and request log as chat. Only OpenAI-compatible providers can serve them.
+        /// </summary>
+        public async Task<HttpResponse> HandleAudioAsync(HttpRequest request, string operation)
+        {
+            var record = new RequestRecord { Id = request.RequestId, Dialect = "openai", Endpoint = request.Path };
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            ClientKey client;
+            string authError;
+            record.Label = RequestLog.CleanLabel(request.Header(LabelHeader));
+            if (!Authenticate(request, out client, out authError)) return Fail(record, sw, Dialect.OpenAi, 401, authError);
+            record.Client = (client == null ? null : client.Name);
+            RequestLog.Identify(record, client, request.Header(LabelHeader));
+            var cfg = _config.Current;
+            JObject body;
+            string spoken = null;
+            if (operation == "speech")
+            {
+                try { body = JObject.Parse(request.BodyText); }
+                catch (JsonException ex) { return Fail(record, sw, Dialect.OpenAi, 400, "Body is not valid JSON: " + ex.Message); }
+                spoken = (string)body["input"];
+                if (string.IsNullOrEmpty(spoken)) return Fail(record, sw, Dialect.OpenAi, 400, "'input' (the text to speak) is required.");
+                record.EstimatedTokens = spoken.Length / 4;
+            }
+            else
+            {
+                string uploadError;
+                var upload = RawUpload.Parse(request.Body, request.Header("Content-Type"), out uploadError);
+                if (upload == null) return Fail(record, sw, Dialect.OpenAi, 400, uploadError);
+                if (!upload.HasFile) return Fail(record, sw, Dialect.OpenAi, 400, "The audio is missing: send it as the 'file' field.");
+                body = new JObject { { "model", upload.Field("model") ?? string.Empty } };
+                _uploads.Add(body, upload);
+            }
+            var profile = new RequestProfile { Dialect = Dialect.OpenAi, RequestedModel = (string)body["model"] ?? string.Empty, ClientName = (client == null ? null : client.Name), RouteOverride = request.Header(RouteHeader) };
+            if (string.Equals(request.Header(PrivacyHeader), "local", StringComparison.OrdinalIgnoreCase)) profile.MarkSensitive("header");
+            if (spoken != null && cfg.Privacy.DetectSecrets) foreach (var reason in SecretScanner.Scan(spoken)) profile.MarkSensitive(reason);
+            record.RequestedModel = profile.RequestedModel;
+            record.Sensitive = profile.Sensitive;
+            var plan = _planner.Plan(cfg, profile, _health, _breakers, _metrics, client, operation);
+            record.Route = plan.Route;
+            record.Decision = plan.Decision;
+            record.Kedge = plan.Kedge;
+            PublishStart(record, plan, client);
+            if (plan.Error != null) return Fail(record, sw, Dialect.OpenAi, plan.ErrorStatus, plan.Error);
+            var outcome = await TryCandidatesAsync(plan, body, Dialect.OpenAi, profile, record, sw, request.Aborted, operation).ConfigureAwait(false);
+            if (outcome.Error != null) return Fail(record, sw, Dialect.OpenAi, outcome.ErrorStatus, outcome.Error);
+            using (var response = outcome.Response)
+            {
+                byte[] bytes;
+                try { bytes = await response.ReadBytesAsync().ConfigureAwait(false); }
+                catch (Exception ex)
+                {
+                    if (!(ex is IOException || ex is OperationCanceledException || ex is System.Net.Http.HttpRequestException)) throw;
+                    return Fail(record, sw, Dialect.OpenAi, 502, outcome.Winner.Ref + " dropped the connection while answering.");
+                }
+                record.Target = outcome.Winner.Ref;
+                record.Local = outcome.Winner.Local;
+                record.Failover = record.Attempts.Count(a => a.Outcome != "skipped" && a.Outcome != "lost-race") > 1;
+                record.Status = 200;
+                record.TotalMs = (int)sw.ElapsedMilliseconds;
+                _metrics.Record(record);
+                var http = HttpResponse.Bytes(200, bytes, response.ContentType ?? (operation == "speech" ? "audio/mpeg" : "application/json"));
                 AddHeaders(http, record, outcome.Winner);
                 return http;
             }
@@ -432,7 +502,7 @@ namespace Fairlead.Core.Gateway
         }
 
         /// <summary>Sends to one target, retrying transient failures as many times as the provider allows before giving up on it.</summary>
-        private async Task<UpstreamResponse> SendWithRetriesAsync(Candidate c, string operation, JObject outgoing, CancellationToken aborted, RetryCount count)
+        private async Task<UpstreamResponse> SendWithRetriesAsync(Candidate c, string operation, JObject outgoing, CancellationToken aborted, RetryCount count, RawUpload upload = null)
         {
             var p = c.Provider;
             var max = Math.Max(0, p.Retries ?? 0);
@@ -443,7 +513,7 @@ namespace Fairlead.Core.Gateway
                 int delay;
                 try
                 {
-                    return await _upstream.SendAsync(p, operation, outgoing, aborted).ConfigureAwait(false);
+                    return await _upstream.SendAsync(p, operation, outgoing, aborted, null, upload).ConfigureAwait(false);
                 }
                 catch (UpstreamException ex)
                 {
@@ -468,7 +538,13 @@ namespace Fairlead.Core.Gateway
         {
             var target = UpstreamClient.DialectOf(c.Provider.Kind);
             JObject outgoing;
-            if (operation == "embeddings")
+            if (operation == "transcriptions")
+            {
+                RawUpload original;
+                if (!_uploads.TryGetValue(body, out original)) throw new InvalidOperationException("No upload for this transcription request.");
+                return SendWithRetriesAsync(c, operation, new JObject(), aborted, count, original.WithField("model", c.Model));
+            }
+            if (operation == "embeddings" || operation == "speech")
             {
                 outgoing = (JObject)body.DeepClone();
                 outgoing["model"] = c.Model;

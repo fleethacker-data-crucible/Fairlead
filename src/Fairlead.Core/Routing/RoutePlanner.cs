@@ -263,6 +263,7 @@ namespace Fairlead.Core.Routing
                 if (plan.LocalOnly && !provider.Local) continue;
                 if (operation == "embeddings" && provider.Kind == ProviderKind.Anthropic) { plan.Decision.Add("Skip " + target + ": Anthropic has no embeddings endpoint."); continue; }
                 if (operation == "embeddings" && provider.Kind == ProviderKind.Responses) { plan.Decision.Add("Skip " + target + ": a Responses gateway serves chat only."); continue; }
+                if (IsAudio(operation) && provider.Kind != ProviderKind.OpenAi) { plan.Decision.Add("Skip " + target + ": only OpenAI-compatible providers serve audio."); continue; }
                 var info = provider.FindModel(model) ?? HealthModels(health, provider.Id).FirstOrDefault(m => string.Equals(m.Id, model, StringComparison.OrdinalIgnoreCase));
                 var why = Unfit(info, profile, operation);
                 if (why != null)
@@ -277,10 +278,16 @@ namespace Fairlead.Core.Routing
         }
 
         /// <summary>Why a model cannot take the request, from what is known about it; unknown capabilities never exclude.</summary>
+        /// <summary>Speech out and speech in: operations only OpenAI-compatible providers serve.</summary>
+        public static bool IsAudio(string operation)
+        {
+            return operation == "speech" || operation == "transcriptions";
+        }
+
         public static string Unfit(ModelInfo info, RequestProfile profile, string operation)
         {
             if (info == null) return null;
-            if (operation == "embeddings") return null;
+            if (operation == "embeddings" || IsAudio(operation)) return null;
             if (info.Embedding) return "embedding model";
             if (profile.HasTools && info.Tools == false) return "no tool support";
             if (profile.HasImages && info.Vision == false) return "no image input";
@@ -343,7 +350,7 @@ namespace Fairlead.Core.Routing
 
         private static Candidate AutoLocal(FairleadConfig cfg, RequestProfile profile, HealthMonitor health, BreakerBoard breakers, string operation, DateTimeOffset now)
         {
-            if (health == null) return null;
+            if (health == null || IsAudio(operation)) return null;
             foreach (var p in cfg.Providers.Where(x => x.Enabled && x.Local))
             {
                 var h = health.Provider(p.Id);
