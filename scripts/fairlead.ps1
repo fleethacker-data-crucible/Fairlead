@@ -240,7 +240,8 @@ Routes and routing
 
 Clients
   clients [list]
-  clients add <name> [--routes a,b]   prints the key once                POST /api/clients
+  clients add <name> [--routes a,b] [--rate N]   prints the key once; --rate limits requests a minute   POST /api/clients
+  clients rate <id|name> <N|off>      limit a key to N requests a minute (off = no limit)   POST /api/clients/{id}/rate-limit
   clients remove <id|name> --yes      DELETE /api/clients/{id}
 
 Settings and Kedge mode
@@ -495,11 +496,24 @@ function Invoke-Clients {
     switch ($sub) {
         'list' {
             $c = Get-Config
-            Out-Result $c.clients { param($v) if (@($v).Count -eq 0) { 'No client keys. Create one: fairlead clients add <name>' } else { $v | Select-Object id, name, prefix, created, @{ n = 'routes'; e = { if (@($_.routes).Count) { $_.routes -join ', ' } else { '(all)' } } } | Format-Table -AutoSize | Out-String -Width 200 } }
+            Out-Result $c.clients { param($v) if (@($v).Count -eq 0) { 'No client keys. Create one: fairlead clients add <name>' } else { $v | Select-Object id, name, prefix, created, @{ n = 'routes'; e = { if (@($_.routes).Count) { $_.routes -join ', ' } else { '(all)' } } }, @{ n = 'perMinute'; e = { if ($_.rateLimitPerMinute) { $_.rateLimitPerMinute } else { '(none)' } } } | Format-Table -AutoSize | Out-String -Width 200 } }
         }
         'add' {
-            $r = Invoke-Api POST '/api/clients' @{ name = (Word 2 'client name'); routes = @(Split-List (Opt 'routes')) }
+            $payload = @{ name = (Word 2 'client name'); routes = @(Split-List (Opt 'routes')) }
+            if (Opt 'rate') { $payload.rateLimitPerMinute = [int](Opt 'rate') }
+            $r = Invoke-Api POST '/api/clients' $payload
             Out-Result $r { param($v) 'Client key for ' + (Word 2) + ' (shown once; Fairlead keeps only its hash):'; $v.key }
+        }
+        'rate' {
+            $which = Word 2 'client id or name'
+            $k = @((Get-Config).clients | Where-Object { $_.id -eq $which -or $_.name -eq $which })
+            if ($k.Count -eq 0) { throw "No client key $which." }
+            if ($k.Count -gt 1) { throw "Several client keys are named $which; give the id." }
+            $value = Word 3 'requests a minute, or off'
+            $n = 0
+            if ($value -ne 'off') { if (-not [int]::TryParse($value, [ref]$n) -or $n -lt 1) { throw 'Give a whole number of requests a minute, or off.' } }
+            $r = Invoke-Api POST ('/api/clients/' + (Esc $k[0].id) + '/rate-limit') @{ requestsPerMinute = $n }
+            Out-Result $r { param($v) if ($v.rateLimitPerMinute) { $k[0].name + ' is limited to ' + $v.rateLimitPerMinute + ' requests a minute.' } else { $k[0].name + ' has no request limit.' } }
         }
         'remove' {
             $which = Word 2 'client id or name'
