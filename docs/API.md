@@ -17,7 +17,9 @@ machine a key is optional when `requireClientKey` is off. Other machines always 
 | `POST /v1/messages` | Anthropic messages, routed the same way |
 | `POST /v1/messages/count_tokens` | Anthropic token estimate |
 | `POST /v1/embeddings` | OpenAI embeddings |
-| `GET /v1/models`, `GET /v1/models/{id}` | routes, then targets. A provider/model id works in the path as is (`/v1/models/ollama/tiny`) or with the slash encoded. `context_window` is added when a provider reported it or the operator entered it (a route shows the smallest window among its targets); it is left out, never guessed, when unknown |
+| `POST /v1/audio/speech` | OpenAI speech: JSON `{ model, input, voice, ... }` in, audio out (the upstream's content type). Same client keys, routes, privacy header, failover and request log as chat (the request log never holds the text). Only OpenAI-compatible providers serve it; Anthropic, Ollama and Responses targets are skipped, so a private request has no target unless a local OpenAI-compatible server (for example a speech server on this machine) is on the route. `model` is a route, a `provider/model` or a served model name, as for chat |
+| `POST /v1/audio/transcriptions` | OpenAI transcription: `multipart/form-data` (`file`, `model`, optional fields) in, JSON or text out. The file bytes are forwarded untouched; only `model` is rewritten to the target model. Same rules as speech |
+| `GET /v1/models`, `GET /v1/models/{id}` | routes, then targets. An id that can serve audio carries `"audio": ["speech"]` and/or `["transcription"]`: a provider/model whose name says so (tts, speech, whisper, transcribe, stt) on an OpenAI-compatible provider, and a route with such a target. `GET /v1/models?capability=audio` lists only those A provider/model id works in the path as is (`/v1/models/ollama/tiny`) or with the slash encoded. `context_window` is added when a provider reported it or the operator entered it (a route shows the smallest window among its targets); it is left out, never guessed, when unknown |
 | `GET /v1/health` | `{ ok, kedge, internet }`, no auth |
 
 Request headers: `X-Fairlead-Route: <route>` forces a route; `X-Fairlead-Privacy: local` keeps the request on local
@@ -102,7 +104,7 @@ config view, unless noted.
 | `GET /api/requests/{id}` | one request |
 | `GET /api/bearing` | cited answers: whether `FAIRLEAD_BEARING_DIR` is set, files and passages indexed (see [BEARING.md](BEARING.md)) |
 | `GET /api/bearing/search?q=&limit=` | the passages a question would retrieve, with file, lines, score and link (no model is called) |
-| `GET /api/requestlog?since=&until=&client=&label=&model=&route=&status=&limit=` | the durable request log read from `logsairlead-requests-<date>.jsonl` (survives restarts): who (client key name, id and visible prefix, optional `X-Fairlead-Label`), what (endpoint, route, status, tokens, latency) and which model served it. `since` is `90m`, `24h`, `7d` or a date; `status` is `ok`, `error`, `4xx`, `5xx` or a code; newest first, default 100, up to 5000. Never holds prompt or response text |
+| `GET /api/requestlog?since=&until=&client=&label=&model=&route=&status=&limit=` | the durable request log read from `logs\fairlead-requests-<date>.jsonl` (survives restarts): who (client key name, id and visible prefix, optional `X-Fairlead-Label`), what (endpoint, route, status, tokens, latency) and which model served it. `since` is `90m`, `24h`, `7d` or a date; `status` is `ok`, `error`, `4xx`, `5xx` or a code; newest first, default 100, up to 5000. Never holds prompt or response text |
 | `GET /api/requestlog/summary` | the same filters, totalled per client, label, serving model and route (requests, failures, tokens, cost when priced, p50/p95 latency) |
 | `GET /api/metrics` | totals, last hour, per-target stats |
 | `GET /api/logs?level=` | recent diagnostics |

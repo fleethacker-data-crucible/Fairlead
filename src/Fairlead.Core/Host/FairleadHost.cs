@@ -104,6 +104,7 @@ namespace Fairlead.Core.Host
             Config = options.Config != null ? new ConfigStore(options.Config) : new ConfigStore(Settings.ConfigPath);
             GatewayValues = options.GatewayStore ?? new GatewayStore(options.Config != null ? null : Settings.DataDirectory);
             Upstream = new UpstreamClient(options.UpstreamHandler);
+            Upstream.TotalCapSeconds = Settings.MaxRequestSeconds;
             Lazarette = new LazaretteLink(Settings.DataDirectory, Upstream, LazaretteNames, options.LazaretteDataDirectory == null ? null : (Func<string>)(() => options.LazaretteDataDirectory), options.Protect, options.Unprotect);
             Lazarette.HoldHours = Config.Current.LazaretteHoldHours;
             Upstream.VaultLookup = Lazarette.Value;

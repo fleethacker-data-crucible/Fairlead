@@ -35,6 +35,50 @@ namespace Fairlead.Core.Tests
         }
 
         [Fact]
+        public void OpenAiBodyForOpenAiUsesMaxCompletionTokensAndDropsTemperatureOnReasoningModels()
+        {
+            var o = JObject.Parse(@"{""model"":""x"",""max_tokens"":700,""temperature"":0.2,""top_p"":0.9,""messages"":[]}");
+            Translate.AdaptForOpenAi(o, "gpt-5-mini");
+            Assert.Null(o["max_tokens"]);
+            Assert.Equal(700, (int)o["max_completion_tokens"]!);
+            Assert.Null(o["temperature"]);
+            Assert.Null(o["top_p"]);
+
+            var chat = JObject.Parse(@"{""max_tokens"":300,""temperature"":0.2,""top_p"":0.9}");
+            Translate.AdaptForOpenAi(chat, "gpt-4.1-mini");
+            Assert.Equal(300, (int)chat["max_completion_tokens"]!);
+            Assert.Equal(0.2, (double)chat["temperature"]!, 3); // non-reasoning models keep their sampling settings
+            Assert.NotNull(chat["top_p"]);
+
+            var both = JObject.Parse(@"{""max_tokens"":1,""max_completion_tokens"":2}");
+            Translate.AdaptForOpenAi(both, "gpt-4o");
+            Assert.Null(both["max_tokens"]);
+            Assert.Equal(2, (int)both["max_completion_tokens"]!); // an explicit max_completion_tokens wins
+
+            var none = JObject.Parse(@"{""messages"":[]}");
+            Translate.AdaptForOpenAi(none, "o4-mini");
+            Assert.Null(none["max_completion_tokens"]);
+        }
+
+        [Theory]
+        [InlineData("gpt-5", true)]
+        [InlineData("gpt-5-mini", true)]
+        [InlineData("GPT-5.4-2026-03-05", true)]
+        [InlineData("o1", true)]
+        [InlineData("o3-mini", true)]
+        [InlineData("o4-mini-2025-04-16", true)]
+        [InlineData("gpt-5-chat-latest", false)]
+        [InlineData("gpt-4o", false)]
+        [InlineData("gpt-4.1", false)]
+        [InlineData("omni-moderation", false)]
+        [InlineData("", false)]
+        [InlineData(null, false)]
+        public void ReasoningModelsAreRecognized(string? model, bool expected)
+        {
+            Assert.Equal(expected, Translate.IsOpenAiReasoningModel(model!));
+        }
+
+        [Fact]
         public void OpenAiRequestBecomesAnthropicWithMergedTurnsAndDefaults()
         {
             var o = JObject.Parse(@"{
