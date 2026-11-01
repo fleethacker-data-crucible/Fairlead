@@ -24,6 +24,9 @@ namespace Fairlead.Core.Config
         /// <summary>Request-log retention (FAIRLEAD_LOG_MAX_DAYS, FAIRLEAD_LOG_MAX_MB). 0 = keep everything, the default.</summary>
         public int LogMaxAgeDays { get; set; }
         public int LogMaxMegabytes { get; set; }
+        /// <summary>Response cache (FAIRLEAD_RESPONSE_CACHE_SECONDS lifetime, FAIRLEAD_RESPONSE_CACHE_ENTRIES size). 0 seconds = off, the default.</summary>
+        public int ResponseCacheSeconds { get; set; }
+        public int ResponseCacheEntries { get; set; }
         /// <summary>The most seconds one request may take, however busy its stream (FAIRLEAD_MAX_REQUEST_SECONDS). 0 = no cap, the default; the provider timeout stays an idle limit.</summary>
         public int MaxRequestSeconds { get; set; }
 
@@ -62,6 +65,9 @@ namespace Fairlead.Core.Config
             int retain;
             if (int.TryParse(Env("FAIRLEAD_LOG_MAX_DAYS"), out retain) && retain > 0) s.LogMaxAgeDays = retain;
             if (int.TryParse(Env("FAIRLEAD_LOG_MAX_MB"), out retain) && retain > 0) s.LogMaxMegabytes = retain;
+            int cacheValue;
+            if (int.TryParse(Env("FAIRLEAD_RESPONSE_CACHE_SECONDS"), out cacheValue) && cacheValue > 0) s.ResponseCacheSeconds = cacheValue;
+            if (int.TryParse(Env("FAIRLEAD_RESPONSE_CACHE_ENTRIES"), out cacheValue) && cacheValue > 0) s.ResponseCacheEntries = cacheValue;
             int cap;
             if (int.TryParse(Env("FAIRLEAD_MAX_REQUEST_SECONDS"), out cap) && cap > 0) s.MaxRequestSeconds = cap;
             s.BearingDirectory = Env("FAIRLEAD_BEARING_DIR");

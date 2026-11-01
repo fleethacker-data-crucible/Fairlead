@@ -115,6 +115,7 @@ namespace Fairlead.Core.Host
             Metrics = new Metrics(Settings.LogDirectory);
             Metrics.Retain(Settings.LogMaxAgeDays, Settings.LogMaxMegabytes);
             Engine = new GatewayEngine(Config, Upstream, Health, Breakers, Metrics, Log);
+            Engine.Cache = new ResponseCache(Settings.ResponseCacheSeconds, Settings.ResponseCacheEntries);
             Engine.CitedAnswers = new Fairlead.Core.Bearing.BearingService(Settings.BearingDirectory);
             SessionToken = string.IsNullOrEmpty(options.SessionToken) ? NewToken() : options.SessionToken;
             CliToken = NewToken();
