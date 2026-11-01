@@ -35,6 +35,14 @@ export async function createClient(name: string, routes: string[]): Promise<{ ke
   return r;
 }
 
+/** Makes a key for one app and saves it to Windows Credential Manager (Fairlead/<app>); the key is never returned. */
+export async function installClient(app: string, routes: string[]): Promise<{ installed: string }> {
+  const r = await api<{ installed: string }>('/api/clients', { method: 'POST', json: { installFor: app, routes } });
+  invalidate('/api/config');
+  invalidate('/api/status');
+  return r;
+}
+
 export async function deleteClient(id: string): Promise<void> {
   await del(`/api/clients/${encodeURIComponent(id)}`);
   invalidate('/api/config');
