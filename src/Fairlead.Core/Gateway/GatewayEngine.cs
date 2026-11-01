@@ -52,6 +52,9 @@ namespace Fairlead.Core.Gateway
 
         public RoutePlanner Planner { get { return _planner; } }
 
+        /// <summary>Exact-match answers for temperature-0 non-streaming chat requests. Off (never stores or serves) unless FAIRLEAD_RESPONSE_CACHE_SECONDS is set.</summary>
+        public ResponseCache Cache { get; set; }
+
         /// <summary>Cited answers; null or not enabled unless FAIRLEAD_BEARING_DIR names a folder. Only requests that send X-Fairlead-Bearing: cite use it.</summary>
         public BearingService CitedAnswers { get; set; }
 
@@ -214,6 +217,28 @@ namespace Fairlead.Core.Gateway
             record.Sensitive = profile.Sensitive;
             if (cfg.LogContent) record.PromptPreview = Preview(profile.LastUserText);
 
+            string cacheKey = null;
+            if (Cache != null && Cache.Enabled && bearing == null && !profile.Stream && !profile.Sensitive && ResponseCache.IsDeterministic(body))
+            {
+                cacheKey = ResponseCache.KeyFor(client == null ? null : client.Id, dialect, request.Header(RouteHeader), body);
+                CachedAnswer hit;
+                if (Cache.TryGet(cacheKey, DateTime.UtcNow, out hit))
+                {
+                    record.Route = hit.Route;
+                    record.Target = "cache";
+                    record.Local = hit.Local;
+                    record.Status = 200;
+                    record.Decision.Add("Response cache hit (temperature 0, same request as before, answered by " + hit.Target + " " + (int)(DateTime.UtcNow - hit.StoredUtc).TotalSeconds + " s ago); no model was called.");
+                    record.TotalMs = (int)sw.ElapsedMilliseconds;
+                    _metrics.Record(record);
+                    var cached = HttpResponse.Json(200, hit.Body);
+                    cached.Headers["X-Fairlead-Cache"] = "hit";
+                    cached.Headers["X-Fairlead-Route"] = hit.Route ?? string.Empty;
+                    cached.Headers["X-Fairlead-Target"] = hit.Target;
+                    cached.Headers["X-Fairlead-Request-Id"] = record.Id;
+                    return cached;
+                }
+            }
             var plan = _planner.Plan(cfg, profile, _health, _breakers, _metrics, client);
             if (plan.Error == null && string.Equals(plan.Route, "smart", StringComparison.OrdinalIgnoreCase) && cfg.FindRoute("fast") != null && PastSoftLimit(client))
             {
@@ -246,7 +271,7 @@ namespace Fairlead.Core.Gateway
             if (!winner.Local && _health != null) _health.ReportCloudSuccess();
 
             if (profile.Stream) return StreamResponse(response, winner, dialect, profile, record, sw, bearing);
-            return await BufferedResponse(response, winner, dialect, profile, record, sw, bearing).ConfigureAwait(false);
+            return await BufferedResponse(response, winner, dialect, profile, record, sw, bearing, cacheKey).ConfigureAwait(false);
         }
 
         /// <summary>A cited-answer request nothing in the documents matched: answered here, no model called.</summary>
@@ -712,7 +737,7 @@ namespace Fairlead.Core.Gateway
 
         // ---------- responses ----------
 
-        private async Task<HttpResponse> BufferedResponse(UpstreamResponse response, Candidate winner, Dialect dialect, RequestProfile profile, RequestRecord record, System.Diagnostics.Stopwatch sw, BearingRun bearing = null)
+        private async Task<HttpResponse> BufferedResponse(UpstreamResponse response, Candidate winner, Dialect dialect, RequestProfile profile, RequestRecord record, System.Diagnostics.Stopwatch sw, BearingRun bearing = null, string cacheKey = null)
         {
             using (response)
             {
@@ -738,8 +763,14 @@ namespace Fairlead.Core.Gateway
                 if (_config.Current.LogContent)
                     record.ResponsePreview = Preview(target == Dialect.Anthropic ? Translate.BlocksText(parsed["content"]) : Translate.ContentText(parsed["choices"].At(0).At("message").At("content")));
                 _metrics.Record(record);
-                var http = HttpResponse.Json(200, output.ToString(Formatting.None));
+                var body200 = output.ToString(Formatting.None);
+                var http = HttpResponse.Json(200, body200);
                 AddHeaders(http, record, winner);
+                if (cacheKey != null)
+                {
+                    Cache.Put(cacheKey, new CachedAnswer { Body = body200, Route = record.Route, Target = winner.Ref, Local = winner.Local, StoredUtc = DateTime.UtcNow });
+                    http.Headers["X-Fairlead-Cache"] = "miss";
+                }
                 if (bearing != null) http.Headers["X-Fairlead-Bearing"] = "sources=" + bearing.Hits.Count + ";cited=" + bearing.Citations.Count;
                 return http;
             }

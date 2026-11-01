@@ -268,6 +268,8 @@ Health and activity
   health                              providers, models, breakers        GET /api/health/providers
   probe                               check network and providers now    POST /api/probe
   breakers reset [provider]           POST /api/breakers/reset
+  cache [status]                      response cache (off unless FAIRLEAD_RESPONSE_CACHE_SECONDS is set)   GET /api/cache
+  cache clear --yes                   forget every cached answer   POST /api/cache/clear
   requests [--limit N]                GET /api/requests
   request <id>                        GET /api/requests/{id}
   bearing [status]                    GET /api/bearing: cited answers (off unless FAIRLEAD_BEARING_DIR is set)
@@ -753,6 +755,14 @@ function Invoke-Fairlead([string[]]$List) {
                 Out-Result $r { param($v) 'Reset breakers: ' + $v.reset }
             } else {
                 Out-Result (Invoke-Api GET '/api/health/providers').breakers { param($v) if (@($v).Count -eq 0) { 'No breakers have tripped.' } else { $v | Format-Table -AutoSize | Out-String -Width 200 } }
+            }
+        }
+        'cache' {
+            if ((Word 1) -eq 'clear') {
+                Confirm-Action 'Forget every cached answer'
+                Out-Result (Invoke-Api POST '/api/cache/clear' @{}) { param($v) 'Cleared ' + $v.cleared + ' cached answer(s).' }
+            } else {
+                Out-Result (Invoke-Api GET '/api/cache') { param($v) if ($v.enabled) { 'Response cache on: ' + $v.entries + ' of ' + $v.maxEntries + ' entries, kept ' + $v.ttlSeconds + ' s, ' + $v.hits + ' hits, ' + $v.misses + ' misses.' } else { 'Response cache is off. Set FAIRLEAD_RESPONSE_CACHE_SECONDS to turn it on.' } }
             }
         }
         'requests' {

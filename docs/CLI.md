@@ -67,6 +67,7 @@ encrypted with Windows DPAPI for the user who started Fairlead. The CLI decrypts
 | `lazarette [status]`, `pair <code>`, `unpair --yes`, `refresh` | `/api/lazarette...` |
 | `health` | `GET /api/health/providers` |
 | `probe` | `POST /api/probe` |
+| `cache [status]`, `cache clear --yes` | `GET /api/cache`, `POST /api/cache/clear` |
 | `breakers`, `breakers reset [provider]` | `GET /api/health/providers`, `POST /api/breakers/reset` |
 | `requests [--limit N]`, `request <id>` | `GET /api/requests[/{id}]` |
 | `bearing [status]`, `bearing search <question> [--limit N]` | `GET /api/bearing[/search]` |

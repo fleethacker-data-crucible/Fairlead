@@ -101,6 +101,8 @@ config view, unless noted.
 |---|---|
 | `GET /api/health/providers` | connectivity, per-provider probes and models, circuit breakers |
 | `POST /api/probe` | probe the network and providers now |
+| `GET /api/cache` | the response cache: enabled, lifetime, entries, hits and misses (off unless `FAIRLEAD_RESPONSE_CACHE_SECONDS` is set) |
+| `POST /api/cache/clear` | forget every cached answer |
 | `POST /api/breakers/reset` | `{ provider? }`; every breaker when omitted |
 | `GET /api/requests?limit=N` | recent requests with their decision trace and attempts (newest first, up to 1000) |
 | `GET /api/requests/{id}` | one request |
