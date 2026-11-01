@@ -113,6 +113,7 @@ namespace Fairlead.Core.Host
             Breakers = new BreakerBoard();
             Health = new HealthMonitor(Config, Upstream, Breakers, Log);
             Metrics = new Metrics(Settings.LogDirectory);
+            Metrics.Retain(Settings.LogMaxAgeDays, Settings.LogMaxMegabytes);
             Engine = new GatewayEngine(Config, Upstream, Health, Breakers, Metrics, Log);
             Engine.Cache = new ResponseCache(Settings.ResponseCacheSeconds, Settings.ResponseCacheEntries);
             Engine.CitedAnswers = new Fairlead.Core.Bearing.BearingService(Settings.BearingDirectory);

@@ -25,7 +25,7 @@ exception; every other lifecycle rule applies (runtime file, single instance, St
 | Process settings (port, bind, auto-stop, data folder, env-var keys) | `config\fairlead.env` (copy `fairlead.env.example`) |
 | Runtime file (pid, port, gateway URL; never the session token) | `logs\fairlead-server-<pid>.json` |
 | Engine log (redacted JSONL) | `logs\fairlead-<time>-<pid>.jsonl` |
-| Request log (no prompt text, ever; read it with `fairlead requestlog` or `GET /api/requestlog`; a caller may add `X-Fairlead-Label: my-job`) | `logs\fairlead-requests-<date>.jsonl` |
+| Request log (kept forever unless `FAIRLEAD_LOG_MAX_DAYS` / `FAIRLEAD_LOG_MAX_MB` are set in `config\fairlead.env`; `fairlead requestlog prune` does it on demand; no prompt text, ever; read it with `fairlead requestlog` or `GET /api/requestlog`; a caller may add `X-Fairlead-Label: my-job`) | `logs\fairlead-requests-<date>.jsonl` |
 
 `fairlead.json` moves between machines only for routes and rules: DPAPI keys can be read only by the Windows user
 that saved them, so re-enter keys on a new machine (or use environment variables).

@@ -21,6 +21,9 @@ namespace Fairlead.Core.Config
         /// <summary>logs\ under the app root: runtime files and JSONL logs (never prompts or keys).</summary>
         public string LogDirectory { get; set; }
 
+        /// <summary>Request-log retention (FAIRLEAD_LOG_MAX_DAYS, FAIRLEAD_LOG_MAX_MB). 0 = keep everything, the default.</summary>
+        public int LogMaxAgeDays { get; set; }
+        public int LogMaxMegabytes { get; set; }
         /// <summary>Response cache (FAIRLEAD_RESPONSE_CACHE_SECONDS lifetime, FAIRLEAD_RESPONSE_CACHE_ENTRIES size). 0 seconds = off, the default.</summary>
         public int ResponseCacheSeconds { get; set; }
         public int ResponseCacheEntries { get; set; }
@@ -59,6 +62,9 @@ namespace Fairlead.Core.Config
             s.DataDirectory = data;
             s.LogDirectory = Env("FAIRLEAD_LOG_DIR") ?? Path.Combine(rootDirectory, "logs");
             s.WebRootDirectory = Env("FAIRLEAD_WEBROOT");
+            int retain;
+            if (int.TryParse(Env("FAIRLEAD_LOG_MAX_DAYS"), out retain) && retain > 0) s.LogMaxAgeDays = retain;
+            if (int.TryParse(Env("FAIRLEAD_LOG_MAX_MB"), out retain) && retain > 0) s.LogMaxMegabytes = retain;
             int cacheValue;
             if (int.TryParse(Env("FAIRLEAD_RESPONSE_CACHE_SECONDS"), out cacheValue) && cacheValue > 0) s.ResponseCacheSeconds = cacheValue;
             if (int.TryParse(Env("FAIRLEAD_RESPONSE_CACHE_ENTRIES"), out cacheValue) && cacheValue > 0) s.ResponseCacheEntries = cacheValue;
