@@ -32,3 +32,13 @@ test('missing values are a dash, never a zero', () => {
   assert.equal(ms(2500), '2.50 s');
   assert.equal(usd(0.004), '$0.0040');
 });
+
+test('install-for-an-app names: the Fleet tools and any name the server accepts', async () => {
+  const { FLEET_APPS, credentialTarget, isValidAppName } = await import('../src/lib/apps');
+  assert.ok(FLEET_APPS.every((a) => isValidAppName(a)));
+  assert.deepEqual([...FLEET_APPS], ['PacketRat', 'Bowerbird', 'Gangplank', 'Halyard', 'Semaphore', 'SnapShackle', 'Bosun', 'TalkForge']);
+  assert.equal(isValidAppName('my-tool-2'), true);
+  for (const bad of ['', '9app', 'has space', '../x', 'a'.repeat(41), '-lead']) assert.equal(isValidAppName(bad), false, bad);
+  assert.equal(isValidAppName('a'.repeat(40)), true);
+  assert.equal(credentialTarget('PacketRat'), 'Fairlead/PacketRat');
+});

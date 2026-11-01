@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { LuKeyRound, LuTrash2 } from 'react-icons/lu';
-import { Button, ConfirmDialog, CopyButton, Empty, Field, Input, Notice, Page, Pill, Section, Tabs, useToast } from '../components/ui';
+import { Button, ConfirmDialog, CopyButton, Empty, Field, Input, Notice, Page, Pill, Section, Select, Tabs, useToast } from '../components/ui';
 import { describeError } from '../lib/api';
-import { createClient, deleteClient, useConfig } from '../lib/config';
+import { credentialTarget, FLEET_APPS, isValidAppName } from '../lib/apps';
+import { createClient, deleteClient, installClient, useConfig } from '../lib/config';
 import { ago } from '../lib/format';
 import type { Status } from '../lib/schemas';
 import { snippets } from '../lib/snippets';
@@ -15,6 +16,10 @@ export function ClientsPage({ status }: { status: Status | undefined }) {
   const [routes, setRoutes] = useState('');
   const [fresh, setFresh] = useState<{ name: string; key: string } | null>(null);
   const [remove, setRemove] = useState<{ id: string; name: string } | null>(null);
+  const [app, setApp] = useState<string>(FLEET_APPS[0]);
+  const [custom, setCustom] = useState('');
+  const [installed, setInstalled] = useState<string | null>(null);
+  const appName = app === '' ? custom.trim() : app;
   const [tool, setTool] = useLocalState('clients-tool', 'claude-code');
   const base = status?.gatewayUrl ?? 'http://127.0.0.1:8776/v1';
   const list = snippets(base, fresh?.key ?? '');
@@ -29,11 +34,32 @@ export function ClientsPage({ status }: { status: Status | undefined }) {
     } catch (e) { toast.push('err', describeError(e)); }
   };
 
+  const install = async () => {
+    try {
+      const r = await installClient(appName, []);
+      setInstalled(r.installed);
+      if (app === '') setCustom('');
+    } catch (e) { setInstalled(null); toast.push('err', describeError(e)); }
+  };
+
   return (
     <Page title="Clients" lede="One key per tool or team. The key tells Fairlead who is calling; the Activity page and the rules can tell them apart.">
       {config.data && !config.data.requireClientKey ? <Notice tone="warn">Keys are optional right now (Settings): any program on this machine can use the gateway. Callers from other machines always need a key.</Notice> : null}
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)]">
         <div className="flex flex-col gap-5">
+          <Section title="Install for an app">
+            <div className="flex flex-col gap-3 px-4 py-4">
+              <Field label="App" hint="Fairlead makes a key for the app and saves it to Windows Credential Manager. The key is not shown.">
+                <Select value={app} onChange={(e) => { setApp(e.target.value); setInstalled(null); }}>
+                  {FLEET_APPS.map((a) => <option key={a} value={a}>{a}</option>)}
+                  <option value="">Another app…</option>
+                </Select>
+              </Field>
+              {app === '' ? <Field label="App name" hint="A letter first, then letters, digits and hyphens (up to 40)."><Input value={custom} onChange={(e) => { setCustom(e.target.value); setInstalled(null); }} /></Field> : null}
+              <div><Button variant="primary" disabled={!isValidAppName(appName)} onClick={() => void install()}><LuKeyRound size={14} />Install for this app</Button></div>
+              {installed ? <Notice tone="ok">Saved to Windows Credential Manager as <b>{installed || credentialTarget(appName)}</b>. The app reads it from there.</Notice> : null}
+            </div>
+          </Section>
           <Section title="New key">
             <div className="flex flex-col gap-3 px-4 py-4">
               <Field label="Name" hint="The tool or team: claude-code, open-webui, team-blue…"><Input value={name} onChange={(e) => setName(e.target.value)} /></Field>

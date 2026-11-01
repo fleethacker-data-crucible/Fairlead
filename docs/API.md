@@ -71,7 +71,7 @@ config view, unless noted.
 | `POST /api/routing/reset` | rules and aliases back to the defaults |
 | `POST /api/explain` | `{ prompt \| body, model?, route?, private?, client?, withTools? }`; dry run: route, decision trace, candidates |
 | `POST /api/playground` | same body, plus `system?`, `maxTokens?`; sends it through the gateway and returns `{ status, text, error, route, target, record }` |
-| `POST /api/clients` | `{ name, routes? }`; returns `{ key }` once (only its hash is kept) |
+| `POST /api/clients` | `{ name, routes?, installFor? }`; returns `{ key }` once (only its hash is kept). With `installFor: "<AppName>"` (letter first, then letters, digits and hyphens, up to 40) the key is saved to Windows Credential Manager as a generic credential with target `Fairlead/<AppName>` for this Windows user and is **not** returned: the answer is `{ client, installed: "Fairlead/<AppName>" }`. `name` defaults to the app name. If the save fails, the key is removed again and the answer is 400 with the reason |
 | `DELETE /api/clients/{id}` | |
 
 ### Settings and Kedge mode
@@ -114,3 +114,7 @@ config view, unless noted.
 | `GET /api/metrics` | totals, last hour, per-target stats |
 | `GET /api/logs?level=` | recent diagnostics |
 | `GET /api/live` | server-sent events (`start`, `attempt`, `firstByte`, `done`) for each request as it happens (engines with the live routing view) |
+
+## How a tool gets its Fairlead key
+
+Every tool calls `http://127.0.0.1:8776` with a route name, sends its client key as `Authorization: Bearer <key>` and says who it is with `X-Fairlead-Label: <AppName>`. It reads the key from Windows Credential Manager, generic credential `Fairlead/<AppName>` (for example `Fairlead/PacketRat`), saved by `POST /api/clients` with `installFor`. The key is stored as UTF-16 text, as `cmdkey /generic:Fairlead/PacketRat /pass:...` would. If the credential is missing, the tool tells the user to open Fairlead and install a key for it; it does not fall back to an environment variable or a vault item.

@@ -7,6 +7,7 @@ using System.Net.Http;
 using System.Text;
 using System.Threading.Tasks;
 using Fairlead.Core.Config;
+using Fairlead.Core.Secrets;
 using Fairlead.Core.Gateway;
 using Fairlead.Core.Host;
 using Fairlead.Core.Serialization;
@@ -318,6 +319,63 @@ namespace Fairlead.Core.Tests
             var r = await Post(host, "/v1/chat/completions", Chat("fast", "hi"), newKey);
             Assert.Equal(HttpStatusCode.OK, r.StatusCode);
             Assert.Equal("claude-code", host.Metrics.Recent(1).Single().Client);
+        }
+
+        [Fact]
+        public async Task InstallForAppSavesTheKeyToCredentialManagerAndDoesNotReturnIt()
+        {
+            var fake = new FakeUpstream().On("groq.test", (r, b) => FakeUpstream.Json(HttpStatusCode.OK, FakeUpstream.OpenAiAnswer("ok")));
+            var host = Start(fake, null, out _);
+            string? savedTarget = null, savedKey = null;
+            var old = CredentialStore.Writer;
+            CredentialStore.Writer = (target, key) => { savedTarget = target; savedKey = key; return null; };
+            try
+            {
+                var req = new HttpRequestMessage(HttpMethod.Post, host.BaseUrl + "/api/clients") { Content = new StringContent("{\"installFor\":\"PacketRat\"}", Encoding.UTF8, "application/json") };
+                req.Headers.TryAddWithoutValidation(FairleadHost.SessionHeader, host.SessionToken);
+                var resp = await _http.SendAsync(req);
+                var body = await resp.Content.ReadAsStringAsync();
+                Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+                var created = JObject.Parse(body);
+                Assert.Equal("Fairlead/PacketRat", (string?)created["installed"]);
+                Assert.Null(created["key"]);
+                Assert.Equal("PacketRat", (string?)created["client"]!["name"]);
+                Assert.Equal("Fairlead/PacketRat", savedTarget);
+                Assert.StartsWith("fl-", savedKey);
+                Assert.DoesNotContain(savedKey!, body);
+                var r = await Post(host, "/v1/chat/completions", Chat("fast", "hi"), savedKey!);
+                Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+            }
+            finally { CredentialStore.Writer = old; }
+        }
+
+        [Fact]
+        public async Task InstallForAppRefusesBadNamesAndRemovesTheClientWhenTheSaveFails()
+        {
+            var fake = new FakeUpstream().On("groq.test", (r, b) => FakeUpstream.Json(HttpStatusCode.OK, FakeUpstream.OpenAiAnswer("ok")));
+            var host = Start(fake, null, out _);
+            var old = CredentialStore.Writer;
+            var calls = 0;
+            CredentialStore.Writer = (target, key) => { calls++; return "disk full"; };
+            try
+            {
+                foreach (var bad in new[] { "../x", "9app", "has space", new string('a', 41) })
+                {
+                    var req = new HttpRequestMessage(HttpMethod.Post, host.BaseUrl + "/api/clients") { Content = new StringContent("{\"installFor\":\"" + bad + "\"}", Encoding.UTF8, "application/json") };
+                    req.Headers.TryAddWithoutValidation(FairleadHost.SessionHeader, host.SessionToken);
+                    Assert.Equal(HttpStatusCode.BadRequest, (await _http.SendAsync(req)).StatusCode);
+                }
+                Assert.Equal(0, calls);
+                Assert.Empty(host.Config.Snapshot().Clients.Where(c => c.Name != "tests"));
+                var ok = new HttpRequestMessage(HttpMethod.Post, host.BaseUrl + "/api/clients") { Content = new StringContent("{\"installFor\":\"Semaphore\"}", Encoding.UTF8, "application/json") };
+                ok.Headers.TryAddWithoutValidation(FairleadHost.SessionHeader, host.SessionToken);
+                var resp = await _http.SendAsync(ok);
+                Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
+                Assert.Contains("disk full", await resp.Content.ReadAsStringAsync());
+                Assert.Equal(1, calls);
+                Assert.DoesNotContain(host.Config.Snapshot().Clients, c => c.Name == "Semaphore");
+            }
+            finally { CredentialStore.Writer = old; }
         }
 
         public void Dispose()

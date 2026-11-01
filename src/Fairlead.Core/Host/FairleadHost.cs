@@ -32,7 +32,7 @@ namespace Fairlead.Core.Host
         public string GatewayModelPath { get; set; }
         /// <summary>The store for a model file imported in the browser; null uses the data folder (memory when Config is given).</summary>
         public GatewayStore GatewayStore { get; set; }
-        /// <summary>Lazarette's data folder (its logs\arc-server-*.json); null uses %LAZARETTE_DATA% or %LOCALAPPDATA%\Lazarette.</summary>
+        /// <summary>Lazarette's data folder (its logs\lazarette-server-*.json); null uses %LAZARETTE_DATA% or %LOCALAPPDATA%\Lazarette.</summary>
         public string LazaretteDataDirectory { get; set; }
         /// <summary>Protection for the saved Lazarette pairing; null uses DPAPI (tests pass a stand-in).</summary>
         public Func<string, string> Protect { get; set; }
