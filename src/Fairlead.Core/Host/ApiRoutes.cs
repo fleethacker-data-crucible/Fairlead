@@ -8,6 +8,7 @@ using Fairlead.Core.Gateway;
 using Fairlead.Core.Protocol;
 using Fairlead.Core.Providers;
 using Fairlead.Core.Resilience;
+using Fairlead.Core.Secrets;
 using Fairlead.Core.Serialization;
 using Fairlead.Core.Telemetry;
 
@@ -745,6 +746,14 @@ namespace Fairlead.Core.Host
         {
             var body = Json.Body(r);
             var name = (Json.Read<string>(body, "name") ?? string.Empty).Trim();
+            // "Install for this app": the key goes straight to Windows Credential Manager (target Fairlead/<App>) and is
+            // never shown. The name defaults to the app name.
+            var installFor = (Json.Read<string>(body, "installFor") ?? string.Empty).Trim();
+            if (installFor.Length > 0)
+            {
+                if (!CredentialStore.IsValidAppName(installFor)) throw new BadRequestException("App names start with a letter and use letters, digits and hyphens (up to 40 characters).");
+                if (name.Length == 0) name = installFor;
+            }
             if (name.Length == 0 || name.Length > 60) throw new BadRequestException("Give the key a name of 1 to 60 characters (the tool that will use it).");
             var routes = Json.Read<List<string>>(body, "routes") ?? new List<string>();
             var rate = Json.Read<int?>(body, "rateLimitPerMinute");
@@ -771,8 +780,21 @@ namespace Fairlead.Core.Host
                 foreach (var route in client.Routes) if (c.FindRoute(route) == null) throw new BadRequestException("Unknown route '" + route + "'.");
                 c.Clients.Add(client);
             });
+            var view = new { client.Id, client.Name, client.Prefix, client.Created, client.Routes, client.RateLimitPerMinute, client.DailyTokenLimit, client.DailyTokenSoftLimit };
+            if (installFor.Length > 0)
+            {
+                var problem = CredentialStore.Save(installFor, key);
+                if (problem != null)
+                {
+                    Config.Update(c => c.Clients.RemoveAll(k => k.Id == client.Id));
+                    Engine.ForgetClient(client.Id);
+                    throw new BadRequestException("The key was not saved for " + installFor + ": " + problem);
+                }
+                // Saved where the tool reads it; the key itself is not returned.
+                return Task.FromResult(Json.Ok(new { client = view, installed = CredentialStore.TargetFor(installFor) }));
+            }
             // The only time the key leaves Fairlead.
-            return Task.FromResult(Json.Ok(new { client = new { client.Id, client.Name, client.Prefix, client.Created, client.Routes, client.RateLimitPerMinute, client.DailyTokenLimit, client.DailyTokenSoftLimit }, key = key }));
+            return Task.FromResult(Json.Ok(new { client = view, key = key }));
         }
 
         private async Task<HttpResponse> Playground(HttpRequest r)

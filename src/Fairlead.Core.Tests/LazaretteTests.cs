@@ -78,8 +78,8 @@ namespace Fairlead.Core.Tests
             _listener.Prefixes.Add("http://127.0.0.1:" + Port + "/");
             _listener.Start();
             Directory.CreateDirectory(Path.Combine(dataDir, "logs"));
-            File.WriteAllText(Path.Combine(dataDir, "logs", "arc-server-" + System.Diagnostics.Process.GetCurrentProcess().Id + ".json"),
-                "{\"app\":\"arc\",\"pid\":" + System.Diagnostics.Process.GetCurrentProcess().Id + ",\"port\":" + Port + ",\"url\":\"http://127.0.0.1:" + Port + "/\",\"startedAt\":\"" + DateTimeOffset.UtcNow.ToString("o") + "\"}");
+            File.WriteAllText(Path.Combine(dataDir, "logs", "lazarette-server-" + System.Diagnostics.Process.GetCurrentProcess().Id + ".json"),
+                "{\"app\":\"lazarette\",\"pid\":" + System.Diagnostics.Process.GetCurrentProcess().Id + ",\"port\":" + Port + ",\"url\":\"http://127.0.0.1:" + Port + "/\",\"startedAt\":\"" + DateTimeOffset.UtcNow.ToString("o") + "\"}");
             Task.Run(Loop);
         }
 

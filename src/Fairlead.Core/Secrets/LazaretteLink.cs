@@ -52,7 +52,7 @@ namespace Fairlead.Core.Secrets
 
         /// <param name="directory">Fairlead's data folder (pairing file); null keeps the pairing in memory (tests).</param>
         /// <param name="names">The names to ask for: the gateway token variables and provider key variables.</param>
-        /// <param name="lazaretteDataDir">Where Lazarette writes logs\arc-server-*.json; null uses %LAZARETTE_DATA% or %LOCALAPPDATA%\Lazarette.</param>
+        /// <param name="lazaretteDataDir">Where Lazarette writes logs\lazarette-server-*.json; null uses %LAZARETTE_DATA% or %LOCALAPPDATA%\Lazarette.</param>
         public LazaretteLink(string directory, UpstreamClient upstream, Func<IList<string>> names, Func<string> lazaretteDataDir, Func<string, string> protect, Func<string, string> unprotect)
         {
             _dir = string.IsNullOrWhiteSpace(directory) ? null : directory;
@@ -389,14 +389,14 @@ namespace Fairlead.Core.Secrets
             if (!Directory.Exists(logs)) return 0;
             var best = 0;
             var bestStarted = DateTimeOffset.MinValue;
-            foreach (var file in Directory.GetFiles(logs, "arc-server-*.json"))
+            foreach (var file in Directory.GetFiles(logs, "lazarette-server-*.json"))
             {
                 try
                 {
                     var o = JObject.Parse(File.ReadAllText(file));
                     var pid = (int?)o.At("pid");
                     var port = (int?)o.At("port");
-                    if ((string)o.At("app") != "arc" || !pid.HasValue || !port.HasValue || port.Value < 1 || port.Value > 65535) continue;
+                    if ((string)o.At("app") != "lazarette" || !pid.HasValue || !port.HasValue || port.Value < 1 || port.Value > 65535) continue;
                     if (!ProcessAlive(pid.Value)) continue;
                     DateTimeOffset started;
                     if (!DateTimeOffset.TryParse((string)o.At("startedAt") ?? string.Empty, out started)) started = File.GetLastWriteTimeUtc(file);
