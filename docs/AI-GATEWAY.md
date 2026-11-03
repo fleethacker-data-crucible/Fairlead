@@ -140,4 +140,20 @@ How it behaves:
   when Fairlead exits.
 - Lazarette answers only the process that serves `/__fleethacker/id` on **port 8776** as `fairlead`. If Fairlead had to
   start on another port, the card says so; free 8776 and restart Fairlead.
-- Key order for a provider: a key saved in Fairlead, then Lazarette, then the environment variable.
+- Key order for a provider: a key saved in Fairlead, then Lazarette, then Lazarette Lite, then the environment variable.
+
+### Lazarette Lite (no pairing)
+
+Lazarette Lite keeps its items in Windows Credential Manager as generic credentials named
+`lazarette-lite/<service>/<user>`. Fairlead runs as the same Windows user, so it reads them directly:
+
+1. In Lite, add an item whose **service is the variable name** Fairlead asks for (`DATABRICKS_TOKEN`,
+   `OPENAI_API_KEY`, ...) and put the key in its secret. Any user name will do.
+2. In Fairlead, press **Refresh** on the Lazarette card (or wait; a key is looked up on every request, and a gateway
+   address held in Lite is read when Fairlead reloads the gateway). `GET /api/lazarette` lists the same names under
+   `lite`, with a state each: `ok`, `not-stowed`, `empty`, `ambiguous` (two items with that service and different
+   users; neither is used) or `unavailable`.
+
+There is no code to paste, nothing to share, and no lock. If both are set up for a name, the paired Lazarette answers
+first. The UI calls a key from Lite "from Lazarette". Values are held in memory for a few seconds at most; Fairlead
+never writes them anywhere.

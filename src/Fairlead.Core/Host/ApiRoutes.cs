@@ -248,6 +248,7 @@ namespace Fairlead.Core.Host
             Admin.Post("/api/lazarette/refresh", async r =>
             {
                 await Lazarette.PollAsync().ConfigureAwait(false);
+                if (Lite.Refresh(LazaretteNames())) LoadGatewayModels();
                 return Json.Ok(LazaretteView());
             });
 
@@ -472,7 +473,7 @@ namespace Fairlead.Core.Host
                         lastError = h == null ? null : h.LastError,
                         models = p.Models.Select(m => m.Id).Concat(DiscoveredModels(p.Id).Select(m => m.Id)).Distinct(StringComparer.OrdinalIgnoreCase).Count(),
                         breaker = b == null ? "closed" : b.State(DateTimeOffset.UtcNow).ToString().ToLowerInvariant(),
-                        keySource = SecretProtector.KeySource(p, Lazarette.Value),
+                        keySource = SecretProtector.KeySource(p, SecretValue),
                     };
                 }),
                 routes = cfg.Routes.Select(r => new { id = r.Id, strategy = r.Strategy, targets = r.Targets.Count }),
@@ -503,7 +504,7 @@ namespace Fairlead.Core.Host
                     p.StreamUsage,
                     models = p.Models,
                     discovered = DiscoveredModels(p.Id),
-                    keySource = SecretProtector.KeySource(p, Lazarette.Value),
+                    keySource = SecretProtector.KeySource(p, SecretValue),
                     keyHint = SecretProtector.KeyHint(p),
                     managed = p.Managed == true,
                     p.Path,
@@ -639,11 +640,11 @@ namespace Fairlead.Core.Host
                 var models = await Upstream.ListModelsAsync(p, CancellationToken.None, 10000).ConfigureAwait(false);
                 Breakers.ResetProvider(p.Id);
                 Health.Nudge();
-                return Json.Ok(new { ok = true, ms = sw.ElapsedMilliseconds, models = models, keySource = SecretProtector.KeySource(p, Lazarette.Value) });
+                return Json.Ok(new { ok = true, ms = sw.ElapsedMilliseconds, models = models, keySource = SecretProtector.KeySource(p, SecretValue) });
             }
             catch (UpstreamException ex)
             {
-                return Json.Ok(new { ok = false, ms = sw.ElapsedMilliseconds, error = ex.Message, kind = ex.Kind.ToString().ToLowerInvariant(), keySource = SecretProtector.KeySource(p, Lazarette.Value) });
+                return Json.Ok(new { ok = false, ms = sw.ElapsedMilliseconds, error = ex.Message, kind = ex.Kind.ToString().ToLowerInvariant(), keySource = SecretProtector.KeySource(p, SecretValue) });
             }
         }
 
@@ -860,6 +861,12 @@ namespace Fairlead.Core.Host
                 port = Port,
                 registryPort = FairleadSettings.RegistryPort,
                 names = Lazarette.Names().Select(n => new { name = n.Name, state = n.State }),
+                // Lazarette Lite needs no pairing: the same names, read straight from Credential Manager.
+                lite = new
+                {
+                    prefix = Lite.Prefix,
+                    names = Lite.Names(LazaretteNames()).Select(n => new { name = n.Name, state = n.State }),
+                },
             };
         }
 
@@ -885,7 +892,7 @@ namespace Fairlead.Core.Host
                 {
                     name = v,
                     kind = f.TokenVariables.Contains(v) ? "token" : f.BaseUrlVariables.Contains(v) ? "baseUrl" : "other",
-                    source = GatewayValues.HasValue(v) ? "stored" : Lazarette.Value(v) != null ? "lazarette" : !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(v)) ? "env" : "missing",
+                    source = GatewayValues.HasValue(v) ? "stored" : SecretValue(v) != null ? "lazarette" : !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(v)) ? "env" : "missing",
                 }),
                 errors = f.Errors,
                 warnings = f.Warnings,
