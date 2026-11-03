@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -19,6 +20,12 @@ namespace Fairlead.Core.Secrets
 
         /// <summary>Replaceable so tests never touch the real Credential Manager. Returns null when saved, else a short reason.</summary>
         public static Func<string, string, string> Writer = WriteNative;
+
+        /// <summary>Replaceable so tests never touch the real Credential Manager. Target names matching a filter such as "prefix*"; no secrets.</summary>
+        public static Func<string, IList<string>> Lister = ListNative;
+
+        /// <summary>Replaceable so tests never touch the real Credential Manager. The secret text of one generic credential, or null.</summary>
+        public static Func<string, string> Reader = ReadNative;
 
         public static bool IsValidAppName(string app)
         {
@@ -60,6 +67,77 @@ namespace Fairlead.Core.Secrets
 
         [DllImport("advapi32.dll", EntryPoint = "CredWriteW", CharSet = CharSet.Unicode, SetLastError = true)]
         private static extern bool CredWrite(ref CREDENTIAL credential, int flags);
+
+        [DllImport("advapi32.dll", EntryPoint = "CredReadW", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern bool CredRead(string target, int type, int reserved, out IntPtr credential);
+
+        [DllImport("advapi32.dll", EntryPoint = "CredEnumerateW", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern bool CredEnumerate(string filter, int flags, out int count, out IntPtr credentials);
+
+        [DllImport("advapi32.dll", SetLastError = true)]
+        private static extern void CredFree(IntPtr buffer);
+
+        private const int ERROR_NOT_FOUND = 1168;
+
+        /// <summary>Target names of the current user's generic credentials that match <paramref name="filter"/>. Throws when Credential Manager is unavailable.</summary>
+        public static IList<string> List(string filter)
+        {
+            return Lister(filter);
+        }
+
+        /// <summary>The secret of the generic credential with this exact target, or null when there is none.</summary>
+        public static string Read(string target)
+        {
+            return Reader(target);
+        }
+
+        private static IList<string> ListNative(string filter)
+        {
+            var names = new List<string>();
+            if (Environment.OSVersion.Platform != PlatformID.Win32NT) throw new InvalidOperationException("Windows Credential Manager is not available on this system.");
+            int count;
+            IntPtr list;
+            if (!CredEnumerate(filter, 0, out count, out list))
+            {
+                var err = Marshal.GetLastWin32Error();
+                if (err == ERROR_NOT_FOUND) return names;
+                throw new InvalidOperationException("Windows Credential Manager could not be listed (error " + err + ").");
+            }
+            try
+            {
+                for (var i = 0; i < count; i++)
+                {
+                    var item = Marshal.ReadIntPtr(list, i * IntPtr.Size);
+                    if (item == IntPtr.Zero) continue;
+                    var cred = (CREDENTIAL)Marshal.PtrToStructure(item, typeof(CREDENTIAL));
+                    if (cred.Type == CRED_TYPE_GENERIC && cred.TargetName != null) names.Add(cred.TargetName);
+                }
+            }
+            finally { CredFree(list); }
+            return names;
+        }
+
+        private static string ReadNative(string target)
+        {
+            if (Environment.OSVersion.Platform != PlatformID.Win32NT) return null;
+            IntPtr ptr;
+            if (!CredRead(target, CRED_TYPE_GENERIC, 0, out ptr))
+            {
+                var err = Marshal.GetLastWin32Error();
+                if (err == ERROR_NOT_FOUND) return null;
+                throw new InvalidOperationException("Windows Credential Manager could not be read (error " + err + ").");
+            }
+            try
+            {
+                var cred = (CREDENTIAL)Marshal.PtrToStructure(ptr, typeof(CREDENTIAL));
+                if (cred.CredentialBlobSize <= 0 || cred.CredentialBlob == IntPtr.Zero) return string.Empty;
+                var bytes = new byte[cred.CredentialBlobSize];
+                Marshal.Copy(cred.CredentialBlob, bytes, 0, bytes.Length);
+                try { return Encoding.Unicode.GetString(bytes); }
+                finally { Array.Clear(bytes, 0, bytes.Length); }
+            }
+            finally { CredFree(ptr); }
+        }
 
         private static string WriteNative(string target, string key)
         {

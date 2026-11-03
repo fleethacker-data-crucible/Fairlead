@@ -34,6 +34,8 @@ namespace Fairlead.Core.Host
         public GatewayStore GatewayStore { get; set; }
         /// <summary>Lazarette's data folder (its logs\lazarette-server-*.json); null uses %LAZARETTE_DATA% or %LOCALAPPDATA%\Lazarette.</summary>
         public string LazaretteDataDirectory { get; set; }
+        /// <summary>Lazarette Lite's source; null reads the real Credential Manager (and nothing at all when Config is given, as in tests).</summary>
+        public LiteVault LiteVault { get; set; }
         /// <summary>Protection for the saved Lazarette pairing; null uses DPAPI (tests pass a stand-in).</summary>
         public Func<string, string> Protect { get; set; }
         public Func<string, string> Unprotect { get; set; }
@@ -107,7 +109,9 @@ namespace Fairlead.Core.Host
             Upstream.TotalCapSeconds = Settings.MaxRequestSeconds;
             Lazarette = new LazaretteLink(Settings.DataDirectory, Upstream, LazaretteNames, options.LazaretteDataDirectory == null ? null : (Func<string>)(() => options.LazaretteDataDirectory), options.Protect, options.Unprotect);
             Lazarette.HoldHours = Config.Current.LazaretteHoldHours;
-            Upstream.VaultLookup = Lazarette.Value;
+            // A host built from a given config is a test host: it must not see the machine's real credentials.
+            Lite = options.LiteVault ?? (options.Config != null ? LiteVault.Disabled() : new LiteVault());
+            Upstream.VaultLookup = SecretValue;
             LoadGatewayModels();
             Lazarette.Changed += () => { Log.Info("LAZARETTE", "Keys from Lazarette changed (" + Lazarette.State + "); reloading the AI gateway."); LoadGatewayModels(); };
             Breakers = new BreakerBoard();
@@ -142,6 +146,14 @@ namespace Fairlead.Core.Host
         public GatewayStore GatewayValues { get; private set; }
         /// <summary>Keys held in Lazarette, the suite's vault, asked for by variable name and kept in memory only.</summary>
         public LazaretteLink Lazarette { get; private set; }
+        /// <summary>Lazarette Lite's items in Windows Credential Manager, read directly by variable name (no pairing).</summary>
+        public LiteVault Lite { get; private set; }
+
+        /// <summary>The key for a variable name: Lazarette (paired), then Lazarette Lite, else null. The process environment is the caller's last resort.</summary>
+        public string SecretValue(string name)
+        {
+            return Lazarette.Value(name) ?? Lite.Value(name);
+        }
 
         /// <summary>
         /// What to ask Lazarette for: every variable the gateway model file names that is not saved in Fairlead (its
@@ -183,7 +195,7 @@ namespace Fairlead.Core.Host
             lock (_gatewayLock)
             {
                 // Saved in Fairlead (the address), then Lazarette (tokens), then the process environment.
-                var env = GatewayValues.Environment(name => Lazarette.Value(name) ?? Environment.GetEnvironmentVariable(name));
+                var env = GatewayValues.Environment(name => SecretValue(name) ?? Environment.GetEnvironmentVariable(name));
                 var files = new List<GatewayModelFile>();
                 var source = "file";
                 var path = Options.GatewayModelPath;
