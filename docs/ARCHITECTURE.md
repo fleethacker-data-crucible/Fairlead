@@ -9,7 +9,7 @@ directly. It runs on the operator's workstation, serves an OpenAI- and Anthropic
 | Constraint | Consequence |
 |---|---|
 | Workstation runs Windows PowerShell 5.1 on .NET Framework 4.8; no installs, no admin | Runtime is PowerShell + one .NET library + static web files. No Node, Python, services or installers on the workstation. |
-| Fairlead serves other tools, not just its own page | It must outlive the browser tab. It runs as a tray app (the TechStack tray exception); `FAIRLEAD_AUTO_STOP=1` restores tab ownership. |
+| Fairlead serves other tools, not just its own page | It must outlive the browser tab. It runs as a tray app (the TechStack tray exception). Closing the browser never stops it; only Quit in the tray, End session or `scripts\Stop-Fairlead.ps1` do. |
 | Tools hard-code base URLs | The registry port 8776 should never move. If it is taken, Fairlead binds a free port and says so loudly in the console, the tray and the UI. |
 | Cloud access comes and goes (trains, conference Wi-Fi, outages) | Connectivity is watched continuously; local models take over without the tool noticing. |
 | Keys are valuable | Stored with DPAPI for the Windows user; never returned to the browser; never logged. |

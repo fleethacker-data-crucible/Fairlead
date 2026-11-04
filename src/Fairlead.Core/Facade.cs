@@ -30,7 +30,7 @@ namespace Fairlead.Core
             return GatewayModelFile.ResolvePath(rootDirectory, null);
         }
 
-        public static FairleadHost CreateHost(FairleadSettings settings, string webRoot, int preferredPort, Dictionary<string, object> launcherState, bool autoStop)
+        public static FairleadHost CreateHost(FairleadSettings settings, string webRoot, int preferredPort, Dictionary<string, object> launcherState)
         {
             return new FairleadHost(new HostOptions
             {
@@ -38,17 +38,22 @@ namespace Fairlead.Core
                 WebRoot = webRoot,
                 PreferredPort = preferredPort,
                 LauncherState = launcherState ?? new Dictionary<string, object>(),
-                AutoStop = autoStop,
             });
         }
 
-        /// <summary>One-line state for the tray tooltip (max 63 characters, the NotifyIcon limit).</summary>
+        /// <summary>One-line state for the tray tooltip (max 63 characters, the NotifyIcon limit): name and status.</summary>
         public static string TrayText(FairleadHost host)
         {
-            var c = host.Health.Connectivity;
-            var mode = c.Kedge ? "Kedge (local only)" : c.Internet == Resilience.InternetState.Down ? "offline" : "cloud + local";
-            var text = "Fairlead :" + host.Port + " - " + mode;
+            var text = "Fairlead - running on 127.0.0.1:" + host.Port;
             return text.Length > 63 ? text.Substring(0, 63) : text;
+        }
+
+        /// <summary>The disabled status line at the top of the tray menu.</summary>
+        public static string TrayStatus(FairleadHost host)
+        {
+            var c = host.Health.Connectivity;
+            var mode = c.Kedge ? "Kedge, local models only" : c.Internet == Resilience.InternetState.Down ? "offline" : "cloud + local";
+            return "Running on 127.0.0.1:" + host.Port + " (" + mode + ")";
         }
 
         public static void SetKedge(FairleadHost host, string mode)

@@ -41,18 +41,12 @@ namespace Fairlead.Core.Host
         public Func<string, string> Unprotect { get; set; }
         /// <summary>Start the health monitor (off in tests that drive health by hand).</summary>
         public bool Monitor { get; set; }
-        /// <summary>Stop when the admin tab is gone (TechStack lifecycle). Off for Fairlead by default: it serves other tools.</summary>
-        public bool AutoStop { get; set; }
-        public TimeSpan HeartbeatTimeout { get; set; }
-        public TimeSpan LeavingGrace { get; set; }
 
         public HostOptions()
         {
             Settings = new FairleadSettings();
             LauncherState = new Dictionary<string, object>();
             Monitor = true;
-            HeartbeatTimeout = TimeSpan.FromSeconds(20);
-            LeavingGrace = TimeSpan.FromSeconds(5);
         }
     }
 
@@ -89,13 +83,9 @@ namespace Fairlead.Core.Host
         public const string IntentHeader = "X-Fairlead-Intent";
         public const string Version = "0.1.0";
         private readonly ManualResetEventSlim _stopped = new ManualResetEventSlim(false);
-        private readonly object _presenceLock = new object();
         private readonly object _gatewayLock = new object();
         private HttpServer _server;
         private string _runtimeFile;
-        private DateTimeOffset? _lastHeartbeat;
-        private DateTimeOffset? _leavingAt;
-        private Timer _presenceTimer;
 
         public FairleadHost(HostOptions options)
         {
@@ -272,7 +262,6 @@ namespace Fairlead.Core.Host
             WriteCliFile(info);
             if (Options.Monitor) Health.Start();
             if (Options.Monitor) Lazarette.Start();
-            if (Options.AutoStop) _presenceTimer = new Timer(PresenceTick, null, 2000, 2000);
             Log.Info("HOST_READY", "Fairlead " + Version + " gateway " + info.GatewayUrl + ", config " + (Config.FilePath ?? "in memory"));
             return info;
         }
@@ -282,7 +271,6 @@ namespace Fairlead.Core.Host
             if (StopRequested) return;
             StopRequested = true;
             Log.Info("HOST_STOP", "Stop requested.");
-            try { if (_presenceTimer != null) _presenceTimer.Dispose(); } catch (ObjectDisposedException) { }
             try { if (_server != null) _server.Stop(); } finally { _stopped.Set(); }
             if (_runtimeFile != null)
             {
@@ -305,36 +293,6 @@ namespace Fairlead.Core.Host
             Lazarette.Dispose();
             if (_server != null) _server.Dispose();
             _stopped.Dispose();
-        }
-
-        // ---- presence (only when the tab owns the engine: FAIRLEAD_AUTO_STOP=1) ----
-
-        public void RecordPresence(bool leaving)
-        {
-            lock (_presenceLock)
-            {
-                var now = DateTimeOffset.UtcNow;
-                if (leaving) _leavingAt = now;
-                else { _lastHeartbeat = now; _leavingAt = null; }
-            }
-        }
-
-        public bool BrowserGone(DateTimeOffset now)
-        {
-            if (!Options.AutoStop) return false;
-            lock (_presenceLock)
-            {
-                if (_lastHeartbeat == null) return false;
-                if (_leavingAt != null && now - _leavingAt.Value >= Options.LeavingGrace) return true;
-                return now - _lastHeartbeat.Value >= Options.HeartbeatTimeout;
-            }
-        }
-
-        private void PresenceTick(object state)
-        {
-            if (StopRequested || !BrowserGone(DateTimeOffset.UtcNow)) return;
-            Log.Info("HOST_AUTO_STOP", "No browser heartbeat; the engine stops itself (FAIRLEAD_AUTO_STOP=1 is set).");
-            Stop();
         }
 
         private void WriteRuntimeFile(HostInfo info)

@@ -14,7 +14,15 @@
         'Initialize-FairleadEnvironment',
         'Start-Fairlead',
         'Test-FairleadModelConfig',
-        'Get-FairleadStatus'
+        'Get-FairleadStatus',
+        'Find-FairleadBrowser',
+        'Get-FairleadBrowserArguments',
+        'Open-FairleadWindow',
+        'New-FairleadOpenListener',
+        'Test-FairleadOpenRequested',
+        'Send-FairleadOpenRequest',
+        'Get-FairleadInstanceId',
+        'Get-FairleadQuitPrompt'
     )
     CmdletsToExport   = @()
     VariablesToExport = @()

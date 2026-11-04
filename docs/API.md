@@ -46,7 +46,7 @@ config view, unless noted.
 | `GET /api/commands` | every CLI command with usage, routes and `destructive`: the same versioned JSON as `fairlead commands --json` (`schemaVersion` 1), read from the CLI script's help text |
 | `GET /api/health` | | `{ ok, version }` (no auth) |
 | `GET /api/status` | | version, port, gateway URL, connectivity, providers with health, routes with target counts, metrics |
-| `POST /api/heartbeat` | `{ leaving }` | browser presence, for auto-stop |
+| `POST /api/heartbeat` | `{ leaving }` | accepted and ignored: Fairlead never stops because a tab closed |
 | `POST /api/session/stop` | header `X-Fairlead-Intent: end-session` | `{ stopping }` |
 
 ### Config, providers and models

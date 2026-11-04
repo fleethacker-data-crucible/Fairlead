@@ -34,11 +34,6 @@ namespace Fairlead.Core.Config
         public string BearingDirectory { get; set; }
         public string WebRootDirectory { get; set; }
         public int PreferredPort { get; set; }
-        /// <summary>
-        /// Off by default: Fairlead is a gateway for other tools, so closing the setup tab must not stop it
-        /// (the TechStack tray exception). FAIRLEAD_AUTO_STOP=1 makes the tab own the engine.
-        /// </summary>
-        public bool AutoStop { get; set; }
 
         public string ConfigPath { get { return Path.Combine(DataDirectory, "fairlead.json"); } }
 
@@ -77,7 +72,6 @@ namespace Fairlead.Core.Config
             // Fairlead listens on loopback only (Fleet rule). The old FAIRLEAD_BIND=lan is refused with a clear message.
             var bind = (Env("FAIRLEAD_BIND") ?? "loopback").ToLowerInvariant();
             if (bind != "loopback") throw new ArgumentException("FAIRLEAD_BIND=" + bind + " is not supported: Fairlead listens on this machine only (loopback). Remove FAIRLEAD_BIND from config\\fairlead.env.");
-            s.AutoStop = Env("FAIRLEAD_AUTO_STOP") == "1";
             return s;
         }
 

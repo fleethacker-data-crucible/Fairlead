@@ -6,7 +6,7 @@ BeforeAll {
     $script:Root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
     Import-Module (Join-Path $script:Root 'module\Fairlead\Fairlead.psd1') -Force
     $script:Saved = @{}
-    foreach ($n in @('FAIRLEAD_PORT', 'FAIRLEAD_BIND', 'FAIRLEAD_AUTO_STOP', 'FAIRLEAD_DATA_DIR', 'FAIRLEAD_LOG_DIR')) {
+    foreach ($n in @('FAIRLEAD_PORT', 'FAIRLEAD_BIND', 'FAIRLEAD_DATA_DIR', 'FAIRLEAD_LOG_DIR')) {
         $script:Saved[$n] = [Environment]::GetEnvironmentVariable($n, 'Process')
         [Environment]::SetEnvironmentVariable($n, $null, 'Process')
     }
@@ -20,7 +20,7 @@ AfterAll {
 Describe 'Module surface' {
     It 'exports the documented commands' {
         $names = (Get-Command -Module Fairlead).Name
-        foreach ($n in @('Start-Fairlead', 'Get-FairleadStatus', 'Import-FairleadCore', 'Initialize-FairleadEnvironment', 'Test-FairleadModelConfig')) { $names | Should -Contain $n }
+        foreach ($n in @('Start-Fairlead', 'Get-FairleadStatus', 'Import-FairleadCore', 'Initialize-FairleadEnvironment', 'Test-FairleadModelConfig', 'Open-FairleadWindow', 'Send-FairleadOpenRequest')) { $names | Should -Contain $n }
     }
     It 'resolves the repository root' {
         Get-FairleadRoot | Should -Be $script:Root
@@ -55,24 +55,22 @@ Describe 'Initialize-FairleadEnvironment' {
     BeforeEach {
         $script:Tmp = Join-Path ([IO.Path]::GetTempPath()) ('fairlead-pester-' + [guid]::NewGuid().ToString('N'))
         New-Item -ItemType Directory -Force (Join-Path $script:Tmp 'config') | Out-Null
-        foreach ($n in @('FAIRLEAD_PORT', 'FAIRLEAD_BIND', 'FAIRLEAD_AUTO_STOP', 'FAIRLEAD_DATA_DIR')) { [Environment]::SetEnvironmentVariable($n, $null, 'Process') }
+        foreach ($n in @('FAIRLEAD_PORT', 'FAIRLEAD_BIND', 'FAIRLEAD_DATA_DIR')) { [Environment]::SetEnvironmentVariable($n, $null, 'Process') }
     }
     AfterEach { Remove-Item $script:Tmp -Recurse -Force -ErrorAction SilentlyContinue }
 
-    It 'defaults to the registry port, loopback, no auto-stop and %LOCALAPPDATA%\Fairlead' {
+    It 'defaults to the registry port, loopback and %LOCALAPPDATA%\Fairlead' {
         $s = (Initialize-FairleadEnvironment -Root $script:Tmp).Settings
         $s.PreferredPort | Should -Be 8776
-        $s.AutoStop | Should -BeFalse
         $s.DataDirectory | Should -Be (Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'Fairlead')
         $s.LogDirectory | Should -Be (Join-Path $script:Tmp 'logs')
     }
 
     It 'reads fairlead.env without overriding variables already set' {
-        Set-Content (Join-Path $script:Tmp 'config\fairlead.env') "FAIRLEAD_PORT=9001`nFAIRLEAD_BIND=loopback`nFAIRLEAD_AUTO_STOP=1"
+        Set-Content (Join-Path $script:Tmp 'config\fairlead.env') "FAIRLEAD_PORT=9001`nFAIRLEAD_BIND=loopback"
         [Environment]::SetEnvironmentVariable('FAIRLEAD_PORT', '9002', 'Process')
         $s = (Initialize-FairleadEnvironment -Root $script:Tmp).Settings
         $s.PreferredPort | Should -Be 9002
-        $s.AutoStop | Should -BeTrue
     }
 
     It 'refuses any bind other than loopback, including the removed lan option' {
@@ -122,7 +120,8 @@ Describe 'Test-FairleadModelConfig' {
 Describe 'Launcher' {
     It 'accepts the documented switches' {
         $p = (Get-Command (Join-Path $script:Root 'scripts\Start-Fairlead.ps1')).Parameters
-        foreach ($n in @('Open', 'NoBrowser', 'KeepConsole', 'NoTray', 'WithTab', 'Replace', 'Port')) { $p.Keys | Should -Contain $n }
+        foreach ($n in @('Open', 'NoBrowser', 'KeepConsole', 'NoTray', 'Replace', 'Port')) { $p.Keys | Should -Contain $n }
+        $p.Keys | Should -Not -Contain 'WithTab'   # no option stops Fairlead when the browser closes
     }
     It 'Launch-Fairlead.bat runs Start-Fairlead.ps1 in an STA PowerShell 5.1 (the tray needs STA)' {
         $bat = Get-Content (Join-Path $script:Root 'Launch-Fairlead.bat') -Raw
@@ -138,6 +137,85 @@ Describe 'Launcher' {
     }
 }
 
+Describe 'App window and single instance' {
+    It 'finds the first browser that exists and none when none does' {
+        $fake = Join-Path ([IO.Path]::GetTempPath()) ('fairlead-browser-' + [guid]::NewGuid().ToString('N') + '.exe')
+        Set-Content -LiteralPath $fake -Value 'x'
+        try {
+            Find-FairleadBrowser -Candidates @((Join-Path ([IO.Path]::GetTempPath()) 'no-such-browser.exe'), $fake) | Should -Be $fake
+            Find-FairleadBrowser -Candidates @((Join-Path ([IO.Path]::GetTempPath()) 'no-such-browser.exe')) | Should -BeNullOrEmpty
+        } finally { Remove-Item -LiteralPath $fake -Force -ErrorAction SilentlyContinue }
+    }
+    It 'builds an --app= command line with its own profile and the background features off' {
+        $a = Get-FairleadBrowserArguments -Url 'http://127.0.0.1:8776/?session=abc' -ProfileDir 'C:\Data Dir\app-window'
+        $a | Should -Contain '--app=http://127.0.0.1:8776/?session=abc'
+        $a | Should -Contain '--user-data-dir="C:\Data Dir\app-window"'
+        foreach ($f in @('--disable-extensions', '--disable-sync', '--disable-background-networking', '--disable-component-update', '--no-first-run')) { $a | Should -Contain $f }
+    }
+    It 'a second launch signals the running instance once, and reports false when nobody is listening' {
+        $name = 'Local\Fairlead.Test.' + [guid]::NewGuid().ToString('N')
+        Send-FairleadOpenRequest -Name $name | Should -BeFalse
+        $listener = New-FairleadOpenListener -Name $name
+        try {
+            Test-FairleadOpenRequested -Listener $listener | Should -BeFalse
+            Send-FairleadOpenRequest -Name $name | Should -BeTrue
+            Test-FairleadOpenRequested -Listener $listener | Should -BeTrue
+            Test-FairleadOpenRequested -Listener $listener | Should -BeFalse
+        } finally { $listener.Dispose() }
+        Send-FairleadOpenRequest -Name $name | Should -BeFalse
+    }
+    It 'the Quit confirmation says tools that use Fairlead will stop working' {
+        Get-FairleadQuitPrompt | Should -Match 'Tools that use Fairlead will stop working'
+    }
+}
+
+Describe 'Lifecycle without a browser' {
+    BeforeEach {
+        Import-FairleadCore
+        $script:LcTmp = Join-Path ([IO.Path]::GetTempPath()) ('fairlead-life-' + [guid]::NewGuid().ToString('N'))
+        $settings = New-Object Fairlead.Core.Config.FairleadSettings
+        $settings.RootDirectory = $script:LcTmp
+        $settings.DataDirectory = (Join-Path $script:LcTmp 'data')
+        $settings.LogDirectory = (Join-Path $script:LcTmp 'logs')
+        $settings.PreferredPort = 0
+        $script:LcHost = [Fairlead.Core.Facade]::CreateHost($settings, $null, 0, $null)
+        $script:LcInfo = $script:LcHost.Start()
+    }
+    AfterEach {
+        $script:LcHost.Dispose()
+        Remove-Item $script:LcTmp -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    It 'keeps serving after the last browser tab says it is leaving' {
+        $h = @{ 'X-Fairlead-Session' = $script:LcInfo.SessionToken }
+        for ($i = 0; $i -lt 2; $i++) {
+            (Invoke-RestMethod -Uri ($script:LcInfo.Url + 'api/heartbeat') -Method Post -Headers $h -Body '{"leaving":true}' -ContentType 'application/json' -TimeoutSec 5).ok | Should -BeTrue
+        }
+        Start-Sleep -Seconds 3
+        $script:LcHost.StopRequested | Should -BeFalse
+        $script:LcHost.WaitForStop(100) | Should -BeFalse
+        (Invoke-RestMethod -Uri ($script:LcInfo.GatewayUrl + '/health') -TimeoutSec 5).ok | Should -BeTrue
+    }
+    It 'Quit (Stop) ends the host: the wait returns, the port closes and the runtime file is gone' {
+        Test-Path $script:LcInfo.RuntimeFile | Should -BeTrue
+        $script:LcHost.Stop()
+        $script:LcHost.StopRequested | Should -BeTrue
+        $script:LcHost.WaitForStop(2000) | Should -BeTrue
+        { Invoke-RestMethod -Uri ($script:LcInfo.GatewayUrl + '/health') -TimeoutSec 3 } | Should -Throw
+        Test-Path $script:LcInfo.RuntimeFile | Should -BeFalse
+    }
+    It 'answers /__fleethacker/id as fairlead, and nothing answers once it has stopped' {
+        (Get-FairleadInstanceId -GatewayUrl $script:LcInfo.GatewayUrl).tool | Should -Be 'fairlead'
+        $script:LcHost.Stop()
+        Get-FairleadInstanceId -GatewayUrl $script:LcInfo.GatewayUrl | Should -BeNullOrEmpty
+    }
+    It 'the tray tooltip names Fairlead and its status within the 63-character limit, and the menu line gives the address' {
+        $t = [Fairlead.Core.Facade]::TrayText($script:LcHost)
+        $t.Length | Should -BeLessOrEqual 63
+        $t | Should -Match '^Fairlead - running on 127\.0\.0\.1:\d+$'
+        [Fairlead.Core.Facade]::TrayStatus($script:LcHost) | Should -Match '^Running on 127\.0\.0\.1:\d+ \('
+    }
+}
+
 Describe 'A real host on a free port' {
     It 'serves /v1/health, refuses /api without the session and writes then removes its runtime file' {
         Import-FairleadCore
@@ -147,7 +225,7 @@ Describe 'A real host on a free port' {
         $settings.DataDirectory = (Join-Path $tmp 'data')
         $settings.LogDirectory = (Join-Path $tmp 'logs')
         $settings.PreferredPort = 0
-        $hostObj = [Fairlead.Core.Facade]::CreateHost($settings, $null, 0, $null, $false)
+        $hostObj = [Fairlead.Core.Facade]::CreateHost($settings, $null, 0, $null)
         try {
             $info = $hostObj.Start()
             Test-Path $info.RuntimeFile | Should -BeTrue
@@ -175,7 +253,7 @@ Describe 'The fairlead CLI against a real host' {
         $settings.DataDirectory = (Join-Path $script:CliTmp 'data')
         $settings.LogDirectory = (Join-Path $script:CliTmp 'logs')
         $settings.PreferredPort = 0
-        $script:CliHost = [Fairlead.Core.Facade]::CreateHost($settings, $null, 0, $null, $false)
+        $script:CliHost = [Fairlead.Core.Facade]::CreateHost($settings, $null, 0, $null)
         $script:CliInfo = $script:CliHost.Start()
         $env:FAIRLEAD_DATA_DIR = $settings.DataDirectory
         $script:Cli = Join-Path $script:Root 'fairlead.cmd'
