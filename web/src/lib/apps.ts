@@ -1,6 +1,6 @@
 // The Fleet tools that get their Fairlead key straight from Fairlead ("Install for an app"), and the rule for any other
 // app name. The server enforces the same rule; this keeps the form from sending a name it will refuse.
-export const FLEET_APPS = ['PacketRat', 'Bowerbird', 'Gangplank', 'Halyard', 'Semaphore', 'SnapShackle', 'Bosun', 'TalkForge'] as const;
+export const FLEET_APPS = ['PacketRat', 'Bowerbird', 'Gangplank', 'Halyard', 'Semaphore', 'SnapShackle', 'BridgeWarden', 'Bosun', 'TalkForge'] as const;
 
 const APP_NAME = /^[A-Za-z][A-Za-z0-9-]{0,39}$/;
 
