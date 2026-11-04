@@ -166,6 +166,18 @@ function EditableProvider({ provider, probeMs, onDeleted }: { provider: Provider
           </Field>
           <Field label={`API key${provider.keySource === 'stored' ? ` (saved ${provider.keyHint ?? ''})` : provider.keySource === 'lazarette' ? ` (from Lazarette as ${provider.apiKeyEnv})` : provider.keySource === 'env' ? ` (from ${provider.apiKeyEnv})` : ''}`} hint="Encrypted for your Windows account. Changing the base URL forgets a saved key unless you enter it again.">
             <Input type="password" autoComplete="off" value={key} placeholder={provider.keySource === 'none' ? (draft.local ? 'Usually none for local servers' : 'Paste API key') : 'Leave empty to keep'} onChange={(e) => setKey(e.target.value)} />
+            {provider.keySource === 'stored' ? (
+              <Button size="sm" variant="quiet" className="mt-1 self-start" busy={busy === 'forget'}
+                onClick={() => void run('forget', async () => {
+                  await saveProvider({
+                    id: provider.id, name: provider.name, kind: provider.kind, baseUrl: provider.baseUrl, local: provider.local, enabled: provider.enabled,
+                    apiKeyEnv: provider.apiKeyEnv ?? '', timeoutSeconds: provider.timeoutSeconds, streamUsage: provider.streamUsage, models: provider.models,
+                  }, undefined, true);
+                  toast.push('ok', provider.apiKeyEnv ? `Saved key removed. Fairlead now reads ${provider.apiKeyEnv} from Lazarette, else the environment.` : 'Saved key removed.');
+                })}>
+                Forget saved key{provider.apiKeyEnv ? ` (use ${provider.apiKeyEnv} from Lazarette)` : ''}
+              </Button>
+            ) : null}
           </Field>
           <Field label="Or get it by this name from Lazarette, else this environment variable"><Input value={draft.apiKeyEnv ?? ''} onChange={(e) => setDraft({ ...draft, apiKeyEnv: e.target.value })} className="mono" placeholder="ANTHROPIC_API_KEY" /></Field>
           <Field label="Timeout (seconds)" hint="Until the first response headers, and the longest a stream may go quiet."><Input type="number" min={5} max={3600} value={draft.timeoutSeconds} onChange={(e) => setDraft({ ...draft, timeoutSeconds: Number(e.target.value) })} /></Field>
