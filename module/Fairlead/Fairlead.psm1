@@ -5,6 +5,7 @@
 # icon and open the browser.
 Set-StrictMode -Version 3.0
 
+. (Join-Path $PSScriptRoot 'Window.ps1')
 . (Join-Path $PSScriptRoot 'Tray.ps1')
 
 $script:FairleadCoreLoaded = $false
@@ -145,8 +146,6 @@ function Start-Fairlead {
       finished (or -Open), hides the console (unless -KeepConsole) and blocks until Exit, End session or Stop-Fairlead.
     .PARAMETER NoTray
       Run without the tray icon (CI, servers, PowerShell 7 on a machine without WinForms).
-    .PARAMETER AutoStop
-      Let the browser tab own the engine (stop 20 s after the tab closes). Off by default: Fairlead serves other tools.
     #>
     [CmdletBinding()]
     param(
@@ -156,8 +155,7 @@ function Start-Fairlead {
         [switch]$NoBrowser,
         [switch]$KeepConsole,
         [switch]$NoTray,
-        [string]$WebRoot,
-        [bool]$AutoStop = $false
+        [string]$WebRoot
     )
     $envInfo = Initialize-FairleadEnvironment -Root $Root
     $settings = $envInfo.Settings
@@ -168,8 +166,8 @@ function Start-Fairlead {
     $launcher['edition'] = $PSVersionTable.PSEdition
     $launcher['tray'] = -not $NoTray
     $preferred = if ($Port -gt 0) { $Port } else { $settings.PreferredPort }
-    $autoStopOn = $AutoStop -or $settings.AutoStop
-    $hostObj = [Fairlead.Core.Facade]::CreateHost($settings, $WebRoot, $preferred, $launcher, $autoStopOn)
+    $profileDir = Join-Path $settings.DataDirectory 'app-window'
+    $hostObj = [Fairlead.Core.Facade]::CreateHost($settings, $WebRoot, $preferred, $launcher)
     $info = $hostObj.Start()
     $setupDone = $hostObj.Config.Snapshot().SetupComplete
     Write-Host ''
@@ -184,10 +182,9 @@ function Start-Fairlead {
             foreach ($e in $gw.Errors) { Write-Host ('    ' + $e) -ForegroundColor Yellow }
         }
     }
-    if ($autoStopOn) { Write-Host '  FAIRLEAD_AUTO_STOP=1: it stops when the admin tab closes.' -ForegroundColor DarkGray }
-    else { Write-Host '  It keeps running after the browser closes. Stop it from the tray icon, "End session", or scripts\Stop-Fairlead.ps1.' -ForegroundColor DarkGray }
+    Write-Host '  It keeps running after the browser closes. Stop it from the tray icon (Quit Fairlead), "End session", or scripts\Stop-Fairlead.ps1.' -ForegroundColor DarkGray
     if ($NoBrowser) { Write-Host ('  Admin link (open once): ' + $info.LaunchUrl) -ForegroundColor DarkGray }
-    elseif ($Open -or -not $setupDone) { Start-Process $info.LaunchUrl }
+    elseif ($Open -or -not $setupDone) { [void](Open-FairleadWindow -Url $info.LaunchUrl -ProfileDir $profileDir) }
     $useTray = -not $NoTray -and (Test-FairleadTraySupported)
     if (-not $KeepConsole -and $useTray) {
         Start-Sleep -Milliseconds 600
@@ -196,7 +193,7 @@ function Start-Fairlead {
     try {
         if ($useTray) {
             $iconPath = Join-Path $Root 'assets\brand\tray.ico'
-            Invoke-FairleadTray -HostObject $hostObj -LaunchUrl $info.LaunchUrl -GatewayUrl $info.GatewayUrl -IconPath $iconPath
+            Invoke-FairleadTray -HostObject $hostObj -LaunchUrl $info.LaunchUrl -GatewayUrl $info.GatewayUrl -IconPath $iconPath -ProfileDir $profileDir
         } else {
             # Poll so Ctrl+C in a visible console still works.
             while (-not $hostObj.WaitForStop(500)) { }
@@ -250,4 +247,4 @@ function Get-FairleadStatus {
     }
 }
 
-Export-ModuleMember -Function Get-FairleadRoot, Get-FairleadCoreSource, Import-FairleadCore, Get-FairleadCoreLoadInfo, Initialize-FairleadEnvironment, Start-Fairlead, Test-FairleadModelConfig, Get-FairleadStatus
+Export-ModuleMember -Function Get-FairleadRoot, Get-FairleadCoreSource, Import-FairleadCore, Get-FairleadCoreLoadInfo, Initialize-FairleadEnvironment, Start-Fairlead, Test-FairleadModelConfig, Get-FairleadStatus, Find-FairleadBrowser, Get-FairleadBrowserArguments, Open-FairleadWindow, New-FairleadOpenListener, Test-FairleadOpenRequested, Send-FairleadOpenRequest, Get-FairleadInstanceId, Get-FairleadQuitPrompt

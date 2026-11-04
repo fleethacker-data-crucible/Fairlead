@@ -4,15 +4,16 @@
 
 | Action | How |
 |---|---|
-| Start | `Launch-Fairlead.bat` (tray icon; the setup page opens on first run) |
-| Open the admin page | Tray icon → **Open Fairlead** (double-click works too), or `Launch-Fairlead.bat --open` when not running |
+| Start | `Launch-Fairlead.bat` (tray icon; the setup page opens on first run). Starting it again reuses the running instance and reopens its window |
+| Open the admin page | Tray icon → **Open Fairlead** (double-click works too; it opens an Edge or Chrome app window with its own profile, or your default browser when neither is installed), or `Launch-Fairlead.bat` again |
 | Start with Windows | `scripts\Register-FairleadStartup.ps1` (a shortcut in your Startup folder; `-Remove` undoes it) |
-| Stop | Tray → **Exit Fairlead**, the **End session** button in the admin page, or `scripts\Stop-Fairlead.ps1` |
+| Stop | Tray → **Quit Fairlead** (asks first: tools that use Fairlead stop working), the **End session** button in the admin page, or `scripts\Stop-Fairlead.ps1` |
 | Restart | `Launch-Fairlead.bat --replace` |
 | Diagnose start-up | `Launch-Fairlead.bat --console --no-tray` keeps the window and Ctrl+C works |
 
 Launcher options: `--open`, `--console`, `--no-tray`, `--no-browser` (prints the one-time admin link instead),
-`--with-tab` (stop 20 s after the admin tab closes), `--replace`. `--stay` is accepted and is already the default.
+`--replace` (stop the running instance and start a new one). `--stay` is accepted and is already the default.
+There is no option that stops Fairlead when the browser closes.
 
 Fairlead keeps running after the browser closes on purpose: other tools depend on it. That is the TechStack tray
 exception; every other lifecycle rule applies (runtime file, single instance, Stop script, the build stops it).

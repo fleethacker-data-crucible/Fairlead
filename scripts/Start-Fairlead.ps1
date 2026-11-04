@@ -9,12 +9,9 @@
   Leave this window visible (diagnosing startup problems). Also: --console
 .PARAMETER NoTray
   No tray icon; the console stays and Ctrl+C stops Fairlead. Also: --no-tray
-.PARAMETER WithTab
-  Let the admin tab own the engine: it stops 20 s after the tab closes (the TechStack default for apps that
-  serve only their own UI). Fairlead serves other tools, so this is off unless asked. Also: --with-tab,
-  or FAIRLEAD_AUTO_STOP=1 in fairlead.env.
 .PARAMETER Replace
-  If Fairlead is already running, stop it and start a new one without asking. Also: --replace
+  If Fairlead is already running, stop it and start a new one. Without it, a second launch reuses the running
+  instance and just reopens its window. Also: --replace
 #>
 [CmdletBinding()]
 param(
@@ -23,7 +20,6 @@ param(
     [switch]$NoBrowser,
     [switch]$KeepConsole,
     [switch]$NoTray,
-    [switch]$WithTab,
     [switch]$Replace,
     [string]$WebRoot,
     [Parameter(ValueFromRemainingArguments = $true)][string[]]$Rest
@@ -35,7 +31,6 @@ foreach ($a in @($Rest)) {
         '^--?open$' { $Open = $true }
         '^--?no-browser$' { $NoBrowser = $true }
         '^--?no-tray$' { $NoTray = $true; $KeepConsole = $true }
-        '^--?with-tab$' { $WithTab = $true }
         '^--?stay$' { }   # the default for Fairlead; accepted so fleet muscle memory works
         '^--?replace$' { $Replace = $true }
         default { if ($a) { Write-Warning "Ignoring unknown option $a" } }
@@ -47,18 +42,25 @@ $root = Split-Path $PSScriptRoot -Parent
 $running = @(Get-FairleadProcesses -Root $root)
 if ($running.Count -gt 0) {
     $where = ($running | ForEach-Object { if ($_.Gateway) { $_.Gateway + ' (PID ' + $_.Pid + ')' } else { 'PID ' + $_.Pid } }) -join ', '
-    Write-Host ('Fairlead is already running: ' + $where) -ForegroundColor Yellow
-    Write-Host '  To open its admin page, use the Fairlead tray icon (Open Fairlead).' -ForegroundColor DarkGray
-    $answer = if ($Replace) { 'y' } else { Read-Host 'Stop it and start a new one? [y/N]' }
-    if ($answer -match '^[Yy]') {
+    if ($Replace) {
+        Write-Host ('Fairlead is already running: ' + $where + '. Replacing it.') -ForegroundColor Yellow
         foreach ($p in Stop-FairleadProcesses -Root $root) { Write-Host ('  stopped PID ' + $p) -ForegroundColor DarkGray }
     } else {
-        Write-Host 'Leaving the running gateway alone.' -ForegroundColor DarkGray
+        # Single instance: reuse the one that is running. Its tray reopens the window; nothing is stopped or started.
+        $answers = $false
+        foreach ($r in $running) { if ($r.Gateway -and (Get-FairleadInstanceId -GatewayUrl $r.Gateway)) { $answers = $true } }
+        if (Send-FairleadOpenRequest) {
+            Write-Host ('Fairlead is already running: ' + $where + '. Reopening its window.') -ForegroundColor Cyan
+        } else {
+            Write-Host ('Fairlead is already running: ' + $where + '.') -ForegroundColor Yellow
+            if ($answers) { Write-Host '  It answers on its port but has no tray icon to reopen, so it was started with --no-tray. Use --replace to restart it with one.' -ForegroundColor DarkGray }
+            else { Write-Host '  It is not answering yet. Wait a few seconds and start again, or use --replace.' -ForegroundColor DarkGray }
+        }
         exit 0
     }
 }
 try {
-    $params = @{ Port = $Port; Open = $Open; NoBrowser = $NoBrowser; KeepConsole = $KeepConsole; NoTray = $NoTray; AutoStop = [bool]$WithTab }
+    $params = @{ Port = $Port; Open = $Open; NoBrowser = $NoBrowser; KeepConsole = $KeepConsole; NoTray = $NoTray }
     if ($WebRoot) { $params['WebRoot'] = $WebRoot }
     Start-Fairlead @params
 } catch {

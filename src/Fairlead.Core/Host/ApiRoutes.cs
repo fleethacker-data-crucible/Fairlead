@@ -188,8 +188,7 @@ namespace Fairlead.Core.Host
             Admin.Get("/api/status", r => Task.FromResult(Json.Ok(Status())));
             Admin.Post("/api/heartbeat", r =>
             {
-                var body = Json.Body(r);
-                RecordPresence(Json.Read<bool?>(body, "leaving") == true);
+                // Accepted and ignored: Fairlead serves other tools, so a closed tab never stops it.
                 return Task.FromResult(Json.Ok(new { ok = true }));
             });
             Admin.Post("/api/session/stop", r =>
@@ -450,7 +449,7 @@ namespace Fairlead.Core.Host
                 preferredPort = Options.PreferredPort > 0 ? Options.PreferredPort : Settings.PreferredPort,
                 gatewayUrl = BaseUrl + "/v1",
                 startedAt = StartedAt,
-                autoStop = Options.AutoStop,
+                autoStop = false,
                 setupComplete = cfg.SetupComplete,
                 requireClientKey = cfg.RequireClientKey,
                 clients = cfg.Clients.Count,
