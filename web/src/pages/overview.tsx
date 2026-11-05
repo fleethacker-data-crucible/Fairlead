@@ -89,6 +89,7 @@ export function ProviderState({ p }: { p: Status['providers'][number] }) {
   if (p.authOk === false) return <Dot tone="err">Key rejected</Dot>;
   if (!p.local && p.keySource === 'none') return <Dot tone="warn">No key</Dot>;
   if (p.reachable === false) return <Dot tone="err">{p.local ? 'Not running' : 'Unreachable'}</Dot>;
+  if (p.reachable === true && p.local && p.listed === 0) return <Dot tone="warn">Running, no model installed</Dot>;
   if (p.reachable === true) return <Dot tone="ok">Ready</Dot>;
   return <Dot tone="neutral">Checking</Dot>;
 }

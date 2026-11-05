@@ -112,6 +112,7 @@ export const Status = z.object({
     probeMs: n,
     lastError: s,
     models: z.number(),
+    listed: z.number().default(0),
     breaker: z.string(),
     keySource: z.string(),
   }).passthrough()),
