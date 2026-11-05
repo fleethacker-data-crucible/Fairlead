@@ -584,6 +584,9 @@
   :where(.divide-line > :not(:last-child)) {
     border-color: var(--line);
   }
+  .self-start {
+    align-self: flex-start;
+  }
   .truncate {
     overflow: hidden;
     text-overflow: ellipsis;
