@@ -78,6 +78,6 @@ Fairlead runs on this PC. A prompt goes only where its route sends it: local mod
 - [API](docs/API.md): the gateway (`/v1`) and every admin route (`/api`)
 - [Operations](docs/OPERATIONS.md): running, stopping, config files, troubleshooting
 - [Development](docs/DEVELOPMENT.md): build, test, layout, conventions
-- [Integrations](integrations/README.md): per-tool setup and the hackathon worklist
-- [Roadmap](ROADMAP.md)
+- [Integrations](integrations/README.md): the per-tool integration notes and verification table
+- [Roadmap](ROADMAP.md): what is done and the worklist
 - Fleet standards: [TechStack](TechStack), [Unified UI](docs/UNIFIED-UI.md), [Local app lifecycle](docs/LOCAL_APP_LIFECYCLE.md)

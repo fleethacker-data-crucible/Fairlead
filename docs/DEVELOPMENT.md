@@ -18,7 +18,7 @@ src/Fairlead.Core/           C# 5 core, shipped as source (the .csproj is only t
 src/Fairlead.Core.Tests/     xUnit (compiles the core .cs files): translation, routing, breakers, gateway over real sockets, Newtonsoft parity
 web/                         React + TypeScript admin UI (build.mjs → web/dist)
 tests/pester/                PowerShell tests and repository rules
-integrations/                per-tool setup and the hackathon worklist
+integrations/                the per-tool integration notes and verification table (the worklist is in ROADMAP.md)
 config/                      fairlead.env.example
 docs/                        this documentation and the shared Fleet standards
 build/                       Build-Fairlead.ps1 (test + bundle), Test-FairleadAddType.ps1 (PS 5.1 compile check), New-FairleadBrand.ps1
