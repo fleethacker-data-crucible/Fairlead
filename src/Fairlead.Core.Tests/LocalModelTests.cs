@@ -55,9 +55,9 @@ namespace Fairlead.Core.Tests
         [Fact]
         public async Task InstalledModelsAreAddedAndStaleOnesDropped()
         {
-            Start("{\"models\":[{\"name\":\"qwen2.5:1.5b\"}]}");
+            Start("{\"models\":[{\"name\":\"llama3.2:1b\"}]}");
             var ids = Ollama(await Discover());
-            Assert.Contains("qwen2.5:1.5b", ids);
+            Assert.Contains("llama3.2:1b", ids);
             Assert.DoesNotContain("gone:latest", ids);
         }
 

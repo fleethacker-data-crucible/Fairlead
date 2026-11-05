@@ -183,7 +183,7 @@ function EditableProvider({ provider, probeMs, noneInstalled, onDeleted }: { pro
       </Section>
 
       <Section title={`Models (${draft.models.length})`} aside={<><span className="text-[12px]">last probe {ms(probeMs)}</span><Button size="sm" busy={busy === 'discover'} onClick={() => run('discover', async () => { await discoverProvider(provider.id); toast.push('ok', 'Model list refreshed.'); })}><LuRefreshCw size={14} />Fetch model list</Button></>}>
-        {noneInstalled ? <Notice tone="warn" className="mx-4 my-3">{provider.name} is running but has no model installed, so the <b>local</b> route has nothing to answer with. Install a small one with <code>ollama pull qwen2.5:1.5b</code> (about 1 GB), then press Fetch model list.</Notice> : null}
+        {noneInstalled ? <Notice tone="warn" className="mx-4 my-3">{provider.name} is running but has no model installed, so the <b>local</b> route has nothing to answer with. Install a small one with <code>ollama pull llama3.2:1b</code> (about 1.3 GB), then press Fetch model list.</Notice> : null}
         {draft.models.length === 0 ? (
           <Empty title="No saved models">{unsaved.length ? `${unsaved.length} found on the server; fetch the list to save them.` : 'Fetch the model list, or check the base URL and key.'}</Empty>
         ) : (
