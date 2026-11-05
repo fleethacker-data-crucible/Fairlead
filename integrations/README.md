@@ -22,7 +22,7 @@ but someone has to run it with the real tool and tick the checklist in its folde
 |---|---|---|---|
 | Any OpenAI SDK / curl | [openai-sdk](openai-sdk/README.md) | Verified | chat, streaming, tools, through Ollama and the gateway tests |
 | Anthropic SDK / Messages API | [anthropic-sdk](anthropic-sdk/README.md) | Verified | streaming SSE and `tool_use` translated to and from Ollama |
-| Claude Code | [claude-code](claude-code/README.md) | Hackathon | its wire format (Messages + streaming + tools + count_tokens) works; run the CLI end to end |
+| Claude Code | [claude-code](claude-code/README.md) | Hackathon | its wire format (Messages + streaming + tools + count_tokens) works; a headless `claude -p` run completed chat and Read, Edit and Bash round trips on a local model (2026-10-27); the interactive CLI on Claude and in Kedge mode is still to run |
 | Open WebUI | [open-webui](open-webui/README.md) | Hackathon | |
 | Continue (VS Code) | [continue](continue/README.md) | Hackathon | |
 | Aider | [aider](aider/README.md) | Hackathon | |

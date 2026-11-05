@@ -1,7 +1,8 @@
 # Claude Code
 
-**Status:** Hackathon. The wire format it uses is verified (Messages API, streaming, tools, `count_tokens`); the CLI
-itself has not been run end to end through Fairlead yet.
+**Status:** Hackathon. The wire format it uses is verified (Messages API, streaming, tools, `count_tokens`), and a
+headless `claude -p` run has completed tool round trips on a local model (see below); the interactive CLI on Claude and
+in Kedge mode is still to run.
 
 ## Setup
 
@@ -32,5 +33,5 @@ reach Claude Code. Its `/cost` dollars are priced as Claude, so they mean nothin
 
 - Anthropic-only request features (prompt caching `cache_control`, extended thinking, server tools like web search)
   pass through untouched to Anthropic but are dropped when translated for an OpenAI-compatible model.
-- `anthropic-beta` headers are not forwarded yet. If Claude Code depends on one, forward it in
-  `GatewayEngine.SendAsync` for same-dialect targets.
+- `anthropic-beta` headers are forwarded to Anthropic targets only (feature names, cleaned); any other provider never
+  sees them.

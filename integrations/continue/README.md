@@ -16,5 +16,5 @@
 
 - [ ] Chat and edit work through `auto`
 - [ ] Autocomplete on `fast` is quick enough (consider a hedge on the fast route)
-- [ ] Does Continue need `/v1/completions` (legacy, non-chat) for autocomplete? If so, add it to Fairlead
+- [ ] If Continue uses `/v1/completions` (legacy, non-chat) for autocomplete, check it against Fairlead's `/v1/completions`
 - [ ] Kedge mode: still works offline

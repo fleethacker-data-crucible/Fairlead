@@ -94,7 +94,7 @@ export function ClientsPage({ status }: { status: Status | undefined }) {
           <div className="flex flex-col gap-2 px-4 py-3">
             <div className="flex items-start justify-between gap-3">
               <p className="text-ink-2">{current.note}</p>
-              {current.status === 'hackathon' ? <Pill tone="warn">to verify at the hackathon</Pill> : <Pill tone="ok">tested</Pill>}
+              {current.status === 'hackathon' ? <Pill tone="warn">not yet verified against the live tool</Pill> : <Pill tone="ok">tested</Pill>}
             </div>
             <div className="panel"><div className="flex justify-end px-2 py-1"><CopyButton text={current.code} /></div><pre className="snippet hairline m-0 bg-surface-2 px-3 py-2">{current.code}</pre></div>
             {!fresh ? <p className="text-[12.5px] text-ink-3">Shown with a placeholder key. Create a key to fill it in; existing keys cannot be shown again.</p> : null}

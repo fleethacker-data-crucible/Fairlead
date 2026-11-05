@@ -8,7 +8,7 @@ Set up Fairlead once in the browser so every tool can use one local address, `ht
 
 - Windows PowerShell 5.1 (part of Windows). No administrator rights and no installer.
 - Microsoft Edge or Google Chrome.
-- Launch: `build\Build-Fairlead.ps1` once on the build machine, then `.\Launch-Fairlead.bat` (tray icon; the setup page opens on first run).
+- Launch: `.\Launch-Fairlead.bat` from a clone or a release zip (tray icon; the setup page opens on first run). The core is compiled from source at launch, so no build step is needed on the workstation.
 - Optional: a local model server such as Ollama, or a cloud provider key you are authorized to use.
 
 ## Steps
