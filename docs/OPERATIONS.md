@@ -49,5 +49,6 @@ that saved them, so re-enter keys on a new machine (or use environment variables
 | Everything goes local | Kedge mode: Diagnostics shows the probe results; a corporate firewall may block the probe hosts (edit them in Settings). |
 | A cloud provider is skipped | Diagnostics → circuit breakers: reset it after fixing the key or once the outage is over. |
 | Empty answers from a local thinking model | The model spent `max_tokens` on reasoning; raise the limit or route to a non-thinking model. |
+| Ollama is running but the `local` route fails or Kedge mode has nothing to use | No model is installed. The Providers page, `fairlead status` and the request error all say so. Install a small one, `ollama pull llama3.2:1b` (about 1.3 GB, runs on a CPU), then press Fetch model list (or `fairlead providers discover ollama`), which also drops entries for models the server no longer has. Set `fairlead routes set local --targets ollama/llama3.2:1b` to pin it; without a target Fairlead picks any model a local server lists. |
 | Ollama answers slowly the first time | Model load. Fairlead prefers models already in memory when it picks one itself. |
 | Long prompts look truncated on Ollama | Ollama's own context default (`num_ctx`) is smaller than the model's maximum; raise it in a Modelfile. |

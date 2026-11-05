@@ -471,6 +471,8 @@ namespace Fairlead.Core.Host
                         probeMs = h == null ? null : h.ProbeMs,
                         lastError = h == null ? null : h.LastError,
                         models = p.Models.Select(m => m.Id).Concat(DiscoveredModels(p.Id).Select(m => m.Id)).Distinct(StringComparer.OrdinalIgnoreCase).Count(),
+                        // What the server itself lists right now (saved entries it no longer has do not count): 0 on a reachable local server means nothing is installed.
+                        listed = DiscoveredModels(p.Id).Count,
                         breaker = b == null ? "closed" : b.State(DateTimeOffset.UtcNow).ToString().ToLowerInvariant(),
                         keySource = SecretProtector.KeySource(p, SecretValue),
                     };
@@ -658,6 +660,9 @@ namespace Fairlead.Core.Host
             Config.Update(c =>
             {
                 var target = c.FindProvider(id);
+                // A local server is the authority on what is installed: drop earlier discoveries it no longer lists (models removed or never pulled).
+                // Entries typed by hand are kept.
+                if (target.Local) target.Models.RemoveAll(old => old.Discovered && !models.Any(m => string.Equals(m.Id, old.Id, StringComparison.OrdinalIgnoreCase)));
                 foreach (var m in models)
                 {
                     var existing = target.FindModel(m.Id);

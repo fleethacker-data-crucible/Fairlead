@@ -727,6 +727,7 @@ function Invoke-Fairlead([string[]]$List) {
                 $v.providers | Select-Object id, name, local, enabled, reachable, breaker, keySource, models | Format-Table -AutoSize | Out-String -Width 200
                 $empty = @($v.routes | Where-Object { $_.strategy -ne 'auto' -and $_.targets -eq 0 } | ForEach-Object { $_.id })
                 if ($empty.Count) { 'Routes with no targets (requests fall back to local): ' + ($empty -join ', ') }
+                foreach ($np in @($v.providers | Where-Object { $_.local -and $_.enabled -and $_.reachable -eq $true -and $_.listed -eq 0 })) { $np.name + ' is running but has no model installed, so the local route has nothing to answer with. Install one: ollama pull llama3.2:1b, then: fairlead providers discover ' + $np.id }
             }
         }
         'commands' { Show-Commands }

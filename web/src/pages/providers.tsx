@@ -68,7 +68,7 @@ export function ProvidersPage({ status }: { status: Status | undefined }) {
               })}
             </ul>
           </Section>
-          {current ? <ProviderEditor key={current.id} provider={current} probeMs={status?.providers.find((x) => x.id === current.id)?.probeMs} onDeleted={() => setSelected(null)} /> : null}
+          {current ? <ProviderEditor key={current.id} provider={current} probeMs={status?.providers.find((x) => x.id === current.id)?.probeMs} noneInstalled={(() => { const st = status?.providers.find((x) => x.id === current.id); return !!st && current.local && st.reachable === true && st.listed === 0; })()} onDeleted={() => setSelected(null)} /> : null}
         </div>
       )}
     </Page>
@@ -113,12 +113,12 @@ function ManagedProvider({ provider, probeMs }: { provider: Provider; probeMs: n
   );
 }
 
-function ProviderEditor({ provider, probeMs, onDeleted }: { provider: Provider; probeMs: number | null | undefined; onDeleted: () => void }) {
+function ProviderEditor({ provider, probeMs, noneInstalled, onDeleted }: { provider: Provider; probeMs: number | null | undefined; noneInstalled: boolean; onDeleted: () => void }) {
   if (provider.managed) return <ManagedProvider provider={provider} probeMs={probeMs} />;
-  return <EditableProvider provider={provider} probeMs={probeMs} onDeleted={onDeleted} />;
+  return <EditableProvider provider={provider} probeMs={probeMs} noneInstalled={noneInstalled} onDeleted={onDeleted} />;
 }
 
-function EditableProvider({ provider, probeMs, onDeleted }: { provider: Provider; probeMs: number | null | undefined; onDeleted: () => void }) {
+function EditableProvider({ provider, probeMs, noneInstalled, onDeleted }: { provider: Provider; probeMs: number | null | undefined; noneInstalled: boolean; onDeleted: () => void }) {
   const toast = useToast();
   const [draft, setDraft] = useState(provider);
   const [key, setKey] = useState('');
@@ -195,6 +195,7 @@ function EditableProvider({ provider, probeMs, onDeleted }: { provider: Provider
       </Section>
 
       <Section title={`Models (${draft.models.length})`} aside={<><span className="text-[12px]">last probe {ms(probeMs)}</span><Button size="sm" busy={busy === 'discover'} onClick={() => run('discover', async () => { await discoverProvider(provider.id); toast.push('ok', 'Model list refreshed.'); })}><LuRefreshCw size={14} />Fetch model list</Button></>}>
+        {noneInstalled ? <Notice tone="warn" className="mx-4 my-3">{provider.name} is running but has no model installed, so the <b>local</b> route has nothing to answer with. Install a small one with <code>ollama pull llama3.2:1b</code> (about 1.3 GB), then press Fetch model list.</Notice> : null}
         {draft.models.length === 0 ? (
           <Empty title="No saved models">{unsaved.length ? `${unsaved.length} found on the server; fetch the list to save them.` : 'Fetch the model list, or check the base URL and key.'}</Empty>
         ) : (
