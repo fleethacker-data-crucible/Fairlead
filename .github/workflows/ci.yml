@@ -14,6 +14,7 @@ jobs:
   windows:
     # Self-hosted Windows workstation runner: exercises the exact Windows PowerShell 5.1 / .NET Framework 4.8
     # runtime the bundle targets. Needs Git; the setup actions below install the .NET SDK and Node without admin rights.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, Windows, X64]
     timeout-minutes: 30
     steps:

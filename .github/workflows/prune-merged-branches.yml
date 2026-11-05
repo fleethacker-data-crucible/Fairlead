@@ -9,6 +9,7 @@ permissions:
 jobs:
   prune:
     # Runs on the self-hosted Windows runner under Windows PowerShell 5.1 (no PowerShell 7 or Python).
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, Windows, X64]
     steps:
       - name: Remove only fully merged, unchanged, same-repository branches
