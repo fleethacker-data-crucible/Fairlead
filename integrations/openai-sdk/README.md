@@ -19,6 +19,7 @@ curl http://127.0.0.1:8776/v1/chat/completions -H "Authorization: Bearer fl-YOUR
 ```
 
 Also served: `GET /v1/models` (routes first, then every `provider/model`), `POST /v1/embeddings` (OpenAI-compatible
-providers; use `provider/model` for an embedding model, e.g. `ollama/nomic-embed-text`).
+providers; use `provider/model` for an embedding model, e.g. `ollama/nomic-embed-text`), `POST /v1/completions` (legacy,
+non-chat) and `POST /v1/audio/speech` and `/v1/audio/transcriptions` (OpenAI-compatible providers only).
 
-Not served yet: the Responses API (`/v1/responses`), Assistants, files, images, audio. See the roadmap.
+Not served yet: the Responses API (`/v1/responses`), Assistants, files, images. See the roadmap.
