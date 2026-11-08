@@ -77,7 +77,9 @@ try {
     Copy-Item (Join-Path $tmp 'mark-64.png') (Join-Path $brand 'mark-64.png') -Force
     foreach ($s in @(32, 192, 256)) { Copy-Item (Join-Path $tmp "mark-$s.png") (Join-Path $public "brand\icon-$s.png") -Force }
     Write-Ico (Join-Path $brand 'favicon.ico') @((Join-Path $tmp 'mark-16.png'), (Join-Path $tmp 'mark-32.png'), (Join-Path $tmp 'mark-48.png'), (Join-Path $tmp 'mark-256.png'))
-    Write-Ico (Join-Path $brand 'tray.ico') @((Join-Path $tmp 'mark-16.png'), (Join-Path $tmp 'mark-20.png'), (Join-Path $tmp 'mark-24.png'), (Join-Path $tmp 'mark-32.png'))
+    # tray.ico is not the mark: it is Fairlead's tile from the tray kit (16 to 256 px), the tray's fallback where Add-Type is blocked.
+    . (Join-Path $root 'module\Fairlead\vendor\fleet-tray\FleetTray.ps1')
+    Export-FleetTrayIco -App fairlead -Path (Join-Path $brand 'tray.ico')
     Copy-Item (Join-Path $brand 'favicon.ico') (Join-Path $public 'favicon.ico') -Force
     if (-not $MarkOnly -and (Test-Path (Join-Path $brand 'emblem-source.html'))) {
         foreach ($theme in @('light', 'dark')) {
