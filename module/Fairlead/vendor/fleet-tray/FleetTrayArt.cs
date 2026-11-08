@@ -20,6 +20,7 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
+using System.Drawing.Text;
 using System.IO;
 
 namespace FleetTray
@@ -85,7 +86,11 @@ namespace FleetTray
                     }
                 }
             }
-            catch (Exception) { }
+            // An unreadable key (a locked-down profile, a policy) means the tray is drawn for 100 % scale,
+            // the size Windows uses when it has no other answer; anything else is a real fault and is raised.
+            catch (System.Security.SecurityException) { return 96; }
+            catch (UnauthorizedAccessException) { return 96; }
+            catch (IOException) { return 96; }
             return 96;
         }
 
@@ -229,14 +234,13 @@ namespace FleetTray
         static FontFamily PickFamily()
         {
             if (cached != null) return cached;
+            // Looked up among the installed fonts, so a missing one is skipped rather than thrown.
+            FontFamily[] installed;
+            using (var fonts = new InstalledFontCollection()) installed = fonts.Families;
             foreach (string name in new string[] { "Segoe UI", "Arial", "Tahoma" })
             {
-                try
-                {
-                    var f = new FontFamily(name);
-                    if (f.IsStyleAvailable(FontStyle.Bold)) { cached = f; return f; }
-                }
-                catch (ArgumentException) { }
+                FontFamily f = Array.Find(installed, x => string.Equals(x.Name, name, StringComparison.OrdinalIgnoreCase) && x.IsStyleAvailable(FontStyle.Bold));
+                if (f != null) { cached = f; return f; }
             }
             cached = FontFamily.GenericSansSerif;
             return cached;
@@ -436,15 +440,16 @@ namespace FleetTray
         {
             int[] sizes = new int[] { 16, 20, 24, 28, 32, 40, 48 };
             if (!Apps.ContainsKey(app ?? "")) throw new ArgumentException("Unknown tool: " + app);
-            var frames = new Bitmap[sizes.Length];
+            // Only frames that were drawn are in the list, so each one is disposed even if a later size fails.
+            var frames = new List<Bitmap>(sizes.Length);
             try
             {
-                for (int i = 0; i < sizes.Length; i++) frames[i] = DrawApp(app, null, sizes[i]);
-                return IcoBytes(frames);
+                foreach (int s in sizes) frames.Add(DrawApp(app, null, s));
+                return IcoBytes(frames.ToArray());
             }
             finally
             {
-                foreach (Bitmap b in frames) if (b != null) b.Dispose();
+                foreach (Bitmap b in frames) b.Dispose();
             }
         }
 

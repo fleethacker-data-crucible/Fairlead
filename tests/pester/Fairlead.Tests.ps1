@@ -164,7 +164,7 @@ Describe 'Tray icon art' {
     }
     It 'keeps the kit private to the module and records its edge-ops version' {
         (Get-Command -Module Fairlead).Name | Should -Not -Contain 'Get-FleetTrayIcon'
-        Get-Content (Join-Path $script:Root 'module\Fairlead\vendor\fleet-tray\README.md') -Raw | Should -Match 'ui-kit/tray v1\.0\.0, commit c2172f7'
+        Get-Content (Join-Path $script:Root 'module\Fairlead\vendor\fleet-tray\README.md') -Raw | Should -Match 'ui-kit/tray v1\.0\.0, commit 2f90369'
     }
 }
 
