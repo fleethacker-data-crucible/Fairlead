@@ -137,6 +137,37 @@ Describe 'Launcher' {
     }
 }
 
+Describe 'Tray icon art' {
+    It 'asks the FleetHacker tray kit for the Fairlead icon, with tray.ico as the fallback and a busy badge in Kedge mode' {
+        InModuleScope Fairlead {
+            Mock Get-FleetTrayIcon { $null }
+            $ico = Join-Path (Get-FairleadRoot) 'assets\brand\tray.ico'
+            [void](Get-FairleadTrayIcon -IconPath $ico)
+            Should -Invoke Get-FleetTrayIcon -Times 1 -Exactly -ParameterFilter { $App -eq 'fairlead' -and $Status -eq '' -and $FallbackPath -eq $ico }
+            [void](Get-FairleadTrayIcon -IconPath $ico -Kedge $true)
+            Should -Invoke Get-FleetTrayIcon -Times 1 -Exactly -ParameterFilter { $App -eq 'fairlead' -and $Status -eq 'busy' -and $FallbackPath -eq $ico }
+            $body = (Get-Command Invoke-FairleadTray).Definition
+            $body | Should -Match 'Get-FairleadTrayIcon -IconPath \$IconPath'
+            $body | Should -Not -Match 'System\.Drawing\.Icon\(\$IconPath\)'
+        }
+    }
+    It 'draws the icon at the tray size, and tray.ico carries the tray sizes for sites without Add-Type' {
+        InModuleScope Fairlead {
+            $ico = Join-Path (Get-FairleadRoot) 'assets\brand\tray.ico'
+            $i = Get-FairleadTrayIcon -IconPath $ico -Kedge $true
+            try { $i.Width | Should -Be (Get-FleetTraySize) } finally { $i.Dispose() }
+            foreach ($px in @(16, 20, 24, 32)) {
+                $f = New-Object System.Drawing.Icon($ico, $px, $px)
+                try { $f.Width | Should -Be $px } finally { $f.Dispose() }
+            }
+        }
+    }
+    It 'keeps the kit private to the module and records its edge-ops version' {
+        (Get-Command -Module Fairlead).Name | Should -Not -Contain 'Get-FleetTrayIcon'
+        Get-Content (Join-Path $script:Root 'module\Fairlead\vendor\fleet-tray\README.md') -Raw | Should -Match 'ui-kit/tray v1\.0\.0, commit 2f90369'
+    }
+}
+
 Describe 'App window and single instance' {
     It 'finds the first browser that exists and none when none does' {
         $fake = Join-Path ([IO.Path]::GetTempPath()) ('fairlead-browser-' + [guid]::NewGuid().ToString('N') + '.exe')

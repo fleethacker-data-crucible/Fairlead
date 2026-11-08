@@ -8,7 +8,7 @@
 | `mark.svg` | Icon-only mark, simplified to read at 32 px: a roller fairlead with the line led between its rollers |
 | `mark-256.png`, `mark-64.png` | The mark as PNG |
 | `favicon.ico` | Browser icon (16, 32, 48, 256) |
-| `tray.ico` | Tray icon (16, 20, 24, 32) |
+| `tray.ico` | Tray icon fallback (16 to 256 px): Fairlead's tile from the FleetHacker tray kit (`module/Fairlead/vendor/fleet-tray`, `Export-FleetTrayIco`), used where `Add-Type` is blocked. Normally the tray draws it at the tray's size |
 
 The emblem is an engraved illustration in the Scrimshaw style: a brass roller fairlead bolted to a ship's rail, a
 hemp line led cleanly between its rollers and out of the circle on both sides, breaking waves below, the brass

@@ -3,6 +3,9 @@
 # Runs a WinForms message loop on the launcher's STA thread until Quit, End session or Stop-Fairlead.
 # Closing the browser never stops Fairlead: other tools use its one local address. Menu: status line (disabled),
 # Open Fairlead (also double-click), Copy gateway URL, Kedge mode, Quit Fairlead (asks first).
+# The icon art comes from the FleetHacker tray kit (vendor\fleet-tray, a copy of edge-ops ui-kit/tray), drawn at the
+# tray's real size for the display scale; while Kedge mode is active it carries an amber corner badge.
+. (Join-Path $PSScriptRoot 'vendor\fleet-tray\FleetTray.ps1')
 
 function Test-FairleadTraySupported {
     if ($env:OS -ne 'Windows_NT') { return $false }
@@ -13,6 +16,26 @@ function Test-FairleadTraySupported {
 function Get-FairleadQuitPrompt {
     <# The one-line confirmation shown before the router stops. #>
     return 'Quit Fairlead? Tools that use Fairlead will stop working.'
+}
+
+function Get-FairleadTrayIcon {
+    <#
+      Fairlead's tray icon from the kit at the tray's size, with the amber 'busy' badge while Kedge mode is active
+      (requests go to local models). Where Add-Type is blocked the kit falls back to IconPath (assets\brand\tray.ico)
+      at that same size, then to Windows' application icon.
+    #>
+    param([string]$IconPath, [bool]$Kedge = $false)
+    $status = ''
+    if ($Kedge) { $status = 'busy' }
+    return (Get-FleetTrayIcon -App fairlead -Status $status -FallbackPath $IconPath)
+}
+
+function Set-FairleadTrayIcon {
+    # Swaps the NotifyIcon's image and frees the one it replaces (never Windows' shared application icon).
+    param([Parameter(Mandatory = $true)]$NotifyIcon, [Parameter(Mandatory = $true)]$Icon)
+    $old = $NotifyIcon.Icon
+    $NotifyIcon.Icon = $Icon
+    if ($old -and -not [object]::ReferenceEquals($old, $Icon) -and -not [object]::ReferenceEquals($old, [System.Drawing.SystemIcons]::Application)) { $old.Dispose() }
 }
 
 function Invoke-FairleadTray {
@@ -27,8 +50,7 @@ function Invoke-FairleadTray {
     Add-Type -AssemblyName System.Windows.Forms, System.Drawing
     [System.Windows.Forms.Application]::EnableVisualStyles()
     $icon = New-Object System.Windows.Forms.NotifyIcon
-    if ($IconPath -and (Test-Path -LiteralPath $IconPath)) { $icon.Icon = New-Object System.Drawing.Icon($IconPath) }
-    else { $icon.Icon = [System.Drawing.SystemIcons]::Application }
+    $icon.Icon = Get-FairleadTrayIcon -IconPath $IconPath -Kedge ([bool]$HostObject.Health.KedgeActive)
     $icon.Text = [Fairlead.Core.Facade]::TrayText($HostObject)
     $icon.Visible = $true
 
@@ -83,6 +105,7 @@ function Invoke-FairleadTray {
         $k = $HostObject.Health.KedgeActive
         if ($k -ne $script:FairleadLastKedge) {
             $script:FairleadLastKedge = $k
+            Set-FairleadTrayIcon -NotifyIcon $icon -Icon (Get-FairleadTrayIcon -IconPath $IconPath -Kedge ([bool]$k))
             if ($k) { $icon.ShowBalloonTip(4000, 'Fairlead: Kedge mode', 'Cloud unreachable or forced off. Requests now go to local models.', [System.Windows.Forms.ToolTipIcon]::Warning) }
             else { $icon.ShowBalloonTip(3000, 'Fairlead', 'Cloud routes are back.', [System.Windows.Forms.ToolTipIcon]::Info) }
         }
@@ -94,7 +117,9 @@ function Invoke-FairleadTray {
         $timer.Dispose()
         if ($listener) { $listener.Dispose() }
         $icon.Visible = $false
+        $last = $icon.Icon
         $icon.Dispose()
+        if ($last -and -not [object]::ReferenceEquals($last, [System.Drawing.SystemIcons]::Application)) { $last.Dispose() }
         $menu.Dispose()
     }
 }
