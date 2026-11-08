@@ -8,7 +8,7 @@
 // size Windows wants for the current display scale (16 px at 100 %, 20 at 125 %, 24 at 150 %...).
 //
 // Rules this file keeps so every tool can carry it unchanged:
-// - C# 5 (Windows PowerShell 5.1's Add-Type compiler) and .NET Framework or .NET 8+ WinForms.
+// - C# 5 (the Add-Type compiler of Windows PS 5.1) and .NET Framework or .NET 8+ WinForms.
 // - No P/Invoke, no network, no files written: phoenix-lai's source guard allows only kernel32
 //   and vulkan imports, and Constrained Language Mode sites load it with Add-Type alone.
 // - Icons are built as in-memory .ico data with a real alpha channel, never through GetHicon.
@@ -431,10 +431,10 @@ namespace FleetTray
             }
         }
 
-        /// <summary>A multi-size .ico for a tool (16 to 256 px): the fallback file a tool ships.</summary>
+        /// <summary>A multi-size .ico for a tool (16 to 48 px, every size a tray uses up to 300 % scale): the fallback file a tool ships. No 256 px frame: uncompressed it alone is 260 KB, and a tray never asks for it.</summary>
         public static byte[] AppIcoBytes(string app)
         {
-            int[] sizes = new int[] { 16, 20, 24, 28, 32, 40, 48, 64, 256 };
+            int[] sizes = new int[] { 16, 20, 24, 28, 32, 40, 48 };
             if (!Apps.ContainsKey(app ?? "")) throw new ArgumentException("Unknown tool: " + app);
             var frames = new Bitmap[sizes.Length];
             try

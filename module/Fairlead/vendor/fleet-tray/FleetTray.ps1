@@ -81,7 +81,7 @@ function Get-FleetTrayFallback {
 }
 
 function Export-FleetTrayIco {
-    <# Writes a tool's multi-size .ico (16 to 256 px) to Path: the fallback file a tool ships. #>
+    <# Writes a tool's multi-size .ico (16 to 48 px) to Path: the fallback file a tool ships. #>
     [CmdletBinding()]
     param([Parameter(Mandatory = $true)][string]$App, [Parameter(Mandatory = $true)][string]$Path)
     if (-not (Import-FleetTrayArt)) { throw 'FleetTray: C# could not be compiled here.' }
