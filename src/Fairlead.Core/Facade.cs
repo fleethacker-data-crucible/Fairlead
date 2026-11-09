@@ -32,12 +32,22 @@ namespace Fairlead.Core
 
         public static FairleadHost CreateHost(FairleadSettings settings, string webRoot, int preferredPort, Dictionary<string, object> launcherState)
         {
+            return CreateHost(settings, webRoot, preferredPort, launcherState, null);
+        }
+
+        /// <summary>
+        /// processPath is what this process runs, reported as the FleetPort id's path: Start-Fairlead.ps1 passes its own
+        /// script ($PSCommandPath). Null or empty uses the process executable.
+        /// </summary>
+        public static FairleadHost CreateHost(FairleadSettings settings, string webRoot, int preferredPort, Dictionary<string, object> launcherState, string processPath)
+        {
             return new FairleadHost(new HostOptions
             {
                 Settings = settings,
                 WebRoot = webRoot,
                 PreferredPort = preferredPort,
                 LauncherState = launcherState ?? new Dictionary<string, object>(),
+                ProcessPath = processPath,
             });
         }
 
