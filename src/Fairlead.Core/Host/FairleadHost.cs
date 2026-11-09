@@ -41,6 +41,11 @@ namespace Fairlead.Core.Host
         public Func<string, string> Unprotect { get; set; }
         /// <summary>Start the health monitor (off in tests that drive health by hand).</summary>
         public bool Monitor { get; set; }
+        /// <summary>
+        /// What this process runs, for the FleetPort id's path: the launcher passes its own script
+        /// (scripts\Start-Fairlead.ps1, the powershell.exe -File argument). Null uses the process executable.
+        /// </summary>
+        public string ProcessPath { get; set; }
 
         public HostOptions()
         {
@@ -116,6 +121,7 @@ namespace Fairlead.Core.Host
             Admin = new Router();
             Gateway = new Router();
             StartedAt = DateTimeOffset.UtcNow;
+            ProcessPath = ResolveProcessPath(options.ProcessPath);
             Config.Changed += c => Lazarette.HoldHours = c.LazaretteHoldHours;
             Config.Changed += c => Log.Info("CONFIG_SAVED", "fairlead.json saved (" + c.Providers.Count + " providers, " + c.Routes.Count + " routes).");
             RegisterGatewayRoutes();
@@ -169,6 +175,11 @@ namespace Fairlead.Core.Host
         public Router Gateway { get; private set; }
         public string SessionToken { get; private set; }
         public DateTimeOffset StartedAt { get; private set; }
+        /// <summary>
+        /// The full path of what this process runs (the FleetPort id's path): HostOptions.ProcessPath made absolute,
+        /// else the process executable. Callers match it against Win32_Process's executable or -File script.
+        /// </summary>
+        public string ProcessPath { get; private set; }
         public int Port { get { return _server == null ? 0 : _server.Port; } }
         public bool StopRequested { get; private set; }
         public string BaseUrl { get { return "http://127.0.0.1:" + Port; } }
@@ -309,6 +320,31 @@ namespace Fairlead.Core.Host
             catch (UnauthorizedAccessException) { _runtimeFile = null; }
         }
 
+        /// <summary>The given script or executable as an absolute, normalized path; without one, this process's executable.</summary>
+        public static string ResolveProcessPath(string given)
+        {
+            if (!string.IsNullOrWhiteSpace(given))
+            {
+                try { return Path.GetFullPath(given.Trim()); }
+                catch (ArgumentException) { }
+                catch (NotSupportedException) { }
+                catch (PathTooLongException) { }
+            }
+            try
+            {
+                using (var p = System.Diagnostics.Process.GetCurrentProcess())
+                {
+                    var m = p.MainModule;
+                    if (m != null && !string.IsNullOrEmpty(m.FileName)) return Path.GetFullPath(m.FileName);
+                }
+            }
+            catch (System.ComponentModel.Win32Exception) { }
+            catch (InvalidOperationException) { }
+            catch (NotSupportedException) { }
+            catch (ArgumentException) { }
+            return null;
+        }
+
         private static string NewToken()
         {
             var bytes = new byte[24];
@@ -335,7 +371,7 @@ namespace Fairlead.Core.Host
                 var idOrigin = request.Header("Origin");
                 if (idOrigin != null && !IsOwnOrigin(idOrigin)) return Json.Error(403, "BAD_ORIGIN", "Cross-origin requests are not accepted.", request.RequestId);
                 if (request.Method != "GET") return Json.Error(405, "METHOD_NOT_ALLOWED", "Method not allowed.", request.RequestId);
-                return Json.Ok(new { tool = "fairlead", version = Version, pid = System.Diagnostics.Process.GetCurrentProcess().Id });
+                return Json.Ok(new { tool = "fairlead", version = Version, pid = System.Diagnostics.Process.GetCurrentProcess().Id, path = ProcessPath });
             }
 
             if (request.Path.StartsWith("/api/", StringComparison.Ordinal) || request.Path == "/api")

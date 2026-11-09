@@ -236,6 +236,11 @@ Describe 'Lifecycle without a browser' {
     }
     It 'answers /__fleethacker/id as fairlead, and nothing answers once it has stopped' {
         (Get-FairleadInstanceId -GatewayUrl $script:LcInfo.GatewayUrl).tool | Should -Be 'fairlead'
+        # No script given: the id names this process's executable, exactly as Win32_Process reports it.
+        $id = Invoke-RestMethod -Uri ('http://127.0.0.1:' + $script:LcInfo.Port + '/__fleethacker/id') -TimeoutSec 5
+        $id.pid | Should -Be $PID
+        $exe = (Get-CimInstance Win32_Process -Filter ('ProcessId = ' + $PID)).ExecutablePath
+        $id.path | Should -Be $exe
         $script:LcHost.Stop()
         Get-FairleadInstanceId -GatewayUrl $script:LcInfo.GatewayUrl | Should -BeNullOrEmpty
     }
@@ -244,6 +249,35 @@ Describe 'Lifecycle without a browser' {
         $t.Length | Should -BeLessOrEqual 63
         $t | Should -Match '^Fairlead - running on 127\.0\.0\.1:\d+$'
         [Fairlead.Core.Facade]::TrayStatus($script:LcHost) | Should -Match '^Running on 127\.0\.0\.1:\d+ \('
+    }
+}
+
+Describe 'The FleetPort id path' {
+    It 'reports the script Start-Fairlead.ps1 passes, absolute and normalized' {
+        Import-FairleadCore
+        $tmp = Join-Path ([IO.Path]::GetTempPath()) ('fairlead-idpath-' + [guid]::NewGuid().ToString('N'))
+        $settings = New-Object Fairlead.Core.Config.FairleadSettings
+        $settings.RootDirectory = $tmp
+        $settings.DataDirectory = (Join-Path $tmp 'data')
+        $settings.LogDirectory = (Join-Path $tmp 'logs')
+        $settings.PreferredPort = 0
+        $startScript = Join-Path $PSScriptRoot '..\..\scripts\Start-Fairlead.ps1'
+        $hostObj = [Fairlead.Core.Facade]::CreateHost($settings, $null, 0, $null, $startScript)
+        try {
+            $info = $hostObj.Start()
+            $id = Invoke-RestMethod -Uri ('http://127.0.0.1:' + $info.Port + '/__fleethacker/id') -TimeoutSec 5
+            $id.tool | Should -Be 'fairlead'
+            $id.path | Should -Be ([IO.Path]::GetFullPath($startScript))
+            $id.path | Should -Not -Match '\\\.\.\\'
+            Test-Path -LiteralPath $id.path | Should -BeTrue
+        } finally {
+            $hostObj.Dispose()
+            Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+    It 'Start-Fairlead.ps1 hands its own path to the host' {
+        $text = Get-Content (Join-Path $PSScriptRoot '..\..\scripts\Start-Fairlead.ps1') -Raw
+        $text | Should -Match 'ScriptPath = \$PSCommandPath'
     }
 }
 

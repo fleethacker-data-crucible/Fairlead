@@ -23,6 +23,12 @@ machine a key is optional when `requireClientKey` is off. Other machines always 
 | `GET /v1/models`, `GET /v1/models/{id}` | routes, then targets. An id that can serve audio carries `"audio": ["speech"]` and/or `["transcription"]`: a provider/model whose name says so (tts, speech, whisper, transcribe, stt) on an OpenAI-compatible provider, and a route with such a target. `GET /v1/models?capability=audio` lists only those A provider/model id works in the path as is (`/v1/models/ollama/tiny`) or with the slash encoded. `context_window` is added when a provider reported it or the operator entered it (a route shows the smallest window among its targets); it is left out, never guessed, when unknown |
 | `GET /v1/health` | `{ ok, kedge, internet }`, no auth |
 
+The FleetPort id, `GET /__fleethacker/id` (loopback only, no auth, no foreign `Origin`), answers
+`{ tool: "fairlead", version, pid, path }`. `path` is the absolute path of what the process runs: the launcher's
+`-File` script (`scripts\Start-Fairlead.ps1`, which hands its own path to the host) when Fairlead runs under
+`powershell.exe`/`pwsh`, else the process executable. Callers such as Semaphore check that `pid` and
+`path` match the process listening on the port (Win32_Process `ExecutablePath`, or the `-File` script of its command line).
+
 Request headers: `X-Fairlead-Route: <route>` forces a route; `X-Fairlead-Privacy: local` keeps the request on local
 models. Response headers: `X-Fairlead-Route`, `-Target`, `-Mode` (`normal` or `kedge`), `-Attempts`, `-Request-Id`,
 `-Private`.

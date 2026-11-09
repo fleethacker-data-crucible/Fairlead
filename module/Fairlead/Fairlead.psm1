@@ -146,6 +146,10 @@ function Start-Fairlead {
       finished (or -Open), hides the console (unless -KeepConsole) and blocks until Exit, End session or Stop-Fairlead.
     .PARAMETER NoTray
       Run without the tray icon (CI, servers, PowerShell 7 on a machine without WinForms).
+    .PARAMETER ScriptPath
+      The script this process runs (powershell.exe -File), reported as the path in /__fleethacker/id so callers can
+      match it to the listening process. Start-Fairlead.ps1 passes its own path; without it the id reports the
+      PowerShell executable.
     #>
     [CmdletBinding()]
     param(
@@ -155,7 +159,8 @@ function Start-Fairlead {
         [switch]$NoBrowser,
         [switch]$KeepConsole,
         [switch]$NoTray,
-        [string]$WebRoot
+        [string]$WebRoot,
+        [string]$ScriptPath
     )
     $envInfo = Initialize-FairleadEnvironment -Root $Root
     $settings = $envInfo.Settings
@@ -167,7 +172,7 @@ function Start-Fairlead {
     $launcher['tray'] = -not $NoTray
     $preferred = if ($Port -gt 0) { $Port } else { $settings.PreferredPort }
     $profileDir = Join-Path $settings.DataDirectory 'app-window'
-    $hostObj = [Fairlead.Core.Facade]::CreateHost($settings, $WebRoot, $preferred, $launcher)
+    $hostObj = [Fairlead.Core.Facade]::CreateHost($settings, $WebRoot, $preferred, $launcher, $ScriptPath)
     $info = $hostObj.Start()
     $setupDone = $hostObj.Config.Snapshot().SetupComplete
     Write-Host ''

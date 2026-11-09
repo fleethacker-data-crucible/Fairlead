@@ -311,6 +311,19 @@ namespace Fairlead.Core.Tests
             var o = JObject.Parse(await _http.GetStringAsync(host.BaseUrl + "/__fleethacker/id"));
             Assert.Equal("fairlead", (string?)o["tool"]);
             Assert.Equal(System.Diagnostics.Process.GetCurrentProcess().Id, (int)o["pid"]!);
+            // No launcher script in tests: the id names this process's executable.
+            Assert.Equal(System.Diagnostics.Process.GetCurrentProcess().MainModule!.FileName, (string?)o["path"]);
+        }
+
+        [Fact]
+        public void TheIdPathIsTheGivenScriptMadeAbsolute()
+        {
+            var relative = Path.Combine("scripts", "..", "scripts", "Start-Fairlead.ps1");
+            var expected = Path.GetFullPath(relative);
+            Assert.Equal(expected, FairleadHost.ResolveProcessPath(relative));
+            Assert.Equal(expected, FairleadHost.ResolveProcessPath("  " + relative + "  "));
+            Assert.Equal(System.Diagnostics.Process.GetCurrentProcess().MainModule!.FileName, FairleadHost.ResolveProcessPath(null));
+            Assert.Equal(System.Diagnostics.Process.GetCurrentProcess().MainModule!.FileName, FairleadHost.ResolveProcessPath(""));
         }
     }
 }

@@ -60,7 +60,8 @@ if ($running.Count -gt 0) {
     }
 }
 try {
-    $params = @{ Port = $Port; Open = $Open; NoBrowser = $NoBrowser; KeepConsole = $KeepConsole; NoTray = $NoTray }
+    # This script is the -File of the process; /__fleethacker/id reports it as path (callers match it to Win32_Process).
+    $params = @{ Port = $Port; Open = $Open; NoBrowser = $NoBrowser; KeepConsole = $KeepConsole; NoTray = $NoTray; ScriptPath = $PSCommandPath }
     if ($WebRoot) { $params['WebRoot'] = $WebRoot }
     Start-Fairlead @params
 } catch {
