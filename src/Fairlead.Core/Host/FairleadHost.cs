@@ -46,6 +46,8 @@ namespace Fairlead.Core.Host
         /// (scripts\Start-Fairlead.ps1, the powershell.exe -File argument). Null uses the process executable.
         /// </summary>
         public string ProcessPath { get; set; }
+        /// <summary>The local token file (Gateway.LocalToken). Null: the default file for a real host, none for a test host built from a given config; "" turns it off.</summary>
+        public string LocalTokenFile { get; set; }
 
         public HostOptions()
         {
@@ -116,6 +118,12 @@ namespace Fairlead.Core.Host
             Engine = new GatewayEngine(Config, Upstream, Health, Breakers, Metrics, Log);
             Engine.Cache = new ResponseCache(Settings.ResponseCacheSeconds, Settings.ResponseCacheEntries);
             Engine.CitedAnswers = new Fairlead.Core.Bearing.BearingService(Settings.BearingDirectory);
+            LocalTokenFile = options.LocalTokenFile ?? (options.Config != null || !Fairlead.Core.Gateway.LocalToken.Enabled() ? string.Empty : Fairlead.Core.Gateway.LocalToken.DefaultPath());
+            if (!string.IsNullOrEmpty(LocalTokenFile))
+            {
+                try { Engine.LocalKeyHash = GatewayEngine.HashKey(Fairlead.Core.Gateway.LocalToken.Ensure(LocalTokenFile)); Log.Info("GATEWAY", "Local token ready: apps of this account read " + LocalTokenFile + " (nothing to configure)."); }
+                catch (Exception e) { Log.Warn("GATEWAY", "The local token could not be made (" + e.GetType().Name + "); local apps need a client key from Fairlead > Clients."); }
+            }
             SessionToken = string.IsNullOrEmpty(options.SessionToken) ? NewToken() : options.SessionToken;
             CliToken = NewToken();
             Admin = new Router();
@@ -180,6 +188,8 @@ namespace Fairlead.Core.Host
         /// else the process executable. Callers match it against Win32_Process's executable or -File script.
         /// </summary>
         public string ProcessPath { get; private set; }
+        /// <summary>The local token file in use (Gateway.LocalToken), or "" when there is none.</summary>
+        public string LocalTokenFile { get; private set; }
         public int Port { get { return _server == null ? 0 : _server.Port; } }
         public bool StopRequested { get; private set; }
         public string BaseUrl { get { return "http://127.0.0.1:" + Port; } }

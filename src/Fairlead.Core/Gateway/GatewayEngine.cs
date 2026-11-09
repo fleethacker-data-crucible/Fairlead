@@ -60,6 +60,9 @@ namespace Fairlead.Core.Gateway
 
         // ---------- client keys ----------
 
+        /// <summary>SHA-256 of the local token (LocalToken), accepted from loopback callers; null when it is off.</summary>
+        public string LocalKeyHash { get; set; }
+
         public static string NewClientKey()
         {
             var bytes = new byte[24];
@@ -104,6 +107,13 @@ namespace Fairlead.Core.Gateway
                 client = cfg.Clients.FirstOrDefault(c => FixedTimeEquals(c.Hash, hash));
             }
             if (client != null) return true;
+            // The local token (LocalToken): apps of this account, from this machine only, named by X-Fairlead-Label.
+            if (request.IsLoopback && !string.IsNullOrEmpty(LocalKeyHash) && !string.IsNullOrEmpty(key) && FixedTimeEquals(HashKey(key), LocalKeyHash))
+            {
+                var app = LocalToken.AppName(request.Header(LabelHeader));
+                client = new ClientKey { Id = "local:" + app.ToLowerInvariant(), Name = app + " (this account)", Prefix = "local" };
+                return true;
+            }
             if (!request.IsLoopback) { error = "A Fairlead client key is required from another machine (Authorization: Bearer fl-...)."; return false; }
             if (!cfg.RequireClientKey) return true;
             error = string.IsNullOrEmpty(key)
