@@ -77,7 +77,7 @@ config view, unless noted.
 | `POST /api/routing/reset` | rules and aliases back to the defaults |
 | `POST /api/explain` | `{ prompt \| body, model?, route?, private?, client?, withTools? }`; dry run: route, decision trace, candidates |
 | `POST /api/playground` | same body, plus `system?`, `maxTokens?`; sends it through the gateway and returns `{ status, text, error, route, target, record }` |
-| `POST /api/clients` | `{ name, routes?, installFor? }`; returns `{ key }` once (only its hash is kept). With `installFor: "<AppName>"` (letter first, then letters, digits and hyphens, up to 40) the key is saved to Windows Credential Manager as a generic credential with target `Fairlead/<AppName>` for this Windows user and is **not** returned: the answer is `{ client, installed: "Fairlead/<AppName>" }`. `name` defaults to the app name. If the save fails, the key is removed again and the answer is 400 with the reason |
+| `POST /api/clients` | `{ name, routes?, installFor? }`; returns `{ key }` once (only its hash is kept). With `installFor: "<AppName>"` (letter first, then letters, digits and hyphens, up to 40) the key is saved to Windows Credential Manager as a generic credential with target `Fairlead/<AppName>` for this Windows user and is **not** returned: the answer is `{ client, installed: "Fairlead/<AppName>" }`. The command is `fairlead clients install <AppName>` (PacketRat and Gangplank are in the registry; see OPERATIONS.md). `name` defaults to the app name. If the save fails, the key is removed again and the answer is 400 with the reason |
 | `DELETE /api/clients/{id}` | |
 
 ### Settings and Kedge mode

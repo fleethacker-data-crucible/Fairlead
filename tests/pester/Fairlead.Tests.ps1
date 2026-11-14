@@ -398,6 +398,12 @@ Describe 'The fairlead CLI against a real host' {
         (Invoke-Cli kedge on).Out | Should -Match 'Kedge mode on'
         (Invoke-CliJson config).kedge | Should -Be 'on'
         (Invoke-Cli explain 'hello there').Out | Should -Match 'Route: '
+
+        $listed = Invoke-Cli clients install
+        $listed.Code | Should -Be 0
+        $listed.Out | Should -Match 'PacketRat'
+        $listed.Out | Should -Match 'Gangplank'
+        $listed.Out | Should -Not -Match 'fl-'
     }
 
     It 'runs every read-only command, in tables and as JSON' {
@@ -451,6 +457,43 @@ Describe 'The fairlead CLI against a real host' {
         $r = Invoke-Cli status
         $r.Code | Should -Be 1
         $r.Out | Should -Match 'not running'
+    }
+}
+
+Describe 'Client-key registry' {
+    BeforeAll {
+        $script:RegistryEap = $ErrorActionPreference
+        $script:RegistryRoot = $script:Root
+        . (Join-Path $script:Root 'scripts\fairlead.ps1')
+        $ErrorActionPreference = $script:RegistryEap
+        $script:Root = $script:RegistryRoot
+    }
+
+    It 'lists Gangplank the same way as PacketRat, in step with the Clients page' {
+        $apps = @(Get-ClientKeyRegistry)
+        $apps | Should -Contain 'PacketRat'
+        $apps | Should -Contain 'Gangplank'
+        ($apps | Select-Object -Unique).Count | Should -Be $apps.Count
+        foreach ($app in $apps) { Test-ClientAppName $app | Should -BeTrue }
+        Test-ClientAppName '9app' | Should -BeFalse
+        Test-ClientAppName '../x' | Should -BeFalse
+        $web = Get-Content (Join-Path $script:Root 'web\src\lib\apps.ts') -Raw
+        foreach ($app in $apps) { $web | Should -Match ("'" + $app + "'") }
+        (Get-HelpText) | Should -Match 'clients install \[<app>\]'
+        # Get-CommandList returns one array, so the first element of @() is that array.
+        $commands = @(Get-CommandList)[0]
+        $install = @($commands | Where-Object { $_.usage -like 'clients install*' })
+        $install.Count | Should -Be 1
+        $install[0].name | Should -Be 'clients'
+        @($install[0].routes) | Should -Contain 'POST /api/clients'
+        $install[0].destructive | Should -BeFalse
+    }
+
+    It 'refuses to print a key that an install answer included' {
+        $ok = New-Object psobject -Property @{ installed = 'Fairlead/Gangplank' }
+        { Assert-InstalledClientKey $ok } | Should -Not -Throw
+        $bad = New-Object psobject -Property @{ installed = 'Fairlead/Gangplank'; key = 'fl-example' }
+        { Assert-InstalledClientKey $bad } | Should -Throw '*refusing to print*'
     }
 }
 
