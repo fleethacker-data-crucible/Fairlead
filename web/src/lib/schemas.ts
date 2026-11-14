@@ -147,7 +147,7 @@ export const Provider = z.object({
   streamUsage: z.boolean().default(true),
   models: z.array(ModelInfo),
   discovered: z.array(ModelInfo).default([]),
-  keySource: z.enum(['stored', 'lazarette', 'env', 'none']),
+  keySource: z.enum(['stored', 'lazarette', 'env', 'local-token', 'none']),
   keyHint: s,
   /** From the AI gateway model file: shown, never edited here. */
   managed: z.boolean().default(false),

@@ -92,7 +92,7 @@ function ManagedProvider({ provider, probeMs }: { provider: Provider; probeMs: n
       <dl className="grid gap-x-6 gap-y-2 px-4 py-4 text-[13px] md:grid-cols-2">
         <div><dt className="text-ink-3">API style</dt><dd>OpenAI Responses (called without streaming)</dd></div>
         <div><dt className="text-ink-3">Endpoint path</dt><dd className="mono">{provider.path ?? ''}</dd></div>
-        <div><dt className="text-ink-3">Token</dt><dd>{provider.keySource === 'env' ? <>from <span className="mono">{provider.apiKeyEnv}</span></> : provider.keySource === 'lazarette' ? <>from Lazarette (<span className="mono">{provider.apiKeyEnv}</span>)</> : <span className="text-err">not set ({provider.apiKeyEnv})</span>}</dd></div>
+        <div><dt className="text-ink-3">Token</dt><dd>{provider.keySource === 'env' ? <>from <span className="mono">{provider.apiKeyEnv}</span></> : provider.keySource === 'lazarette' ? <>from Lazarette (<span className="mono">{provider.apiKeyEnv}</span>)</> : provider.keySource === 'local-token' ? <>from the TalkForge local token</> : <span className="text-err">not set ({provider.apiKeyEnv})</span>}</dd></div>
         <div><dt className="text-ink-3">Retries on transient errors</dt><dd>{provider.retries ?? 0}, then the route's next target</dd></div>
         <div><dt className="text-ink-3">Timeout</dt><dd>{provider.timeoutSeconds} s</dd></div>
         <div><dt className="text-ink-3">Last probe</dt><dd>{ms(probeMs)}</dd></div>
@@ -164,7 +164,7 @@ function EditableProvider({ provider, probeMs, onDeleted }: { provider: Provider
           <Field label="Base URL" hint={draft.kind === 'openAi' ? 'Include /v1, e.g. https://api.openai.com/v1' : 'The server root, e.g. http://127.0.0.1:11434'} className="md:col-span-2">
             <Input value={draft.baseUrl} onChange={(e) => setDraft({ ...draft, baseUrl: e.target.value })} className="mono" />
           </Field>
-          <Field label={`API key${provider.keySource === 'stored' ? ` (saved ${provider.keyHint ?? ''})` : provider.keySource === 'lazarette' ? ` (from Lazarette as ${provider.apiKeyEnv})` : provider.keySource === 'env' ? ` (from ${provider.apiKeyEnv})` : ''}`} hint="Encrypted for your Windows account. Changing the base URL forgets a saved key unless you enter it again.">
+          <Field label={`API key${provider.keySource === 'stored' ? ` (saved ${provider.keyHint ?? ''})` : provider.keySource === 'lazarette' ? ` (from Lazarette as ${provider.apiKeyEnv})` : provider.keySource === 'env' ? ` (from ${provider.apiKeyEnv})` : provider.keySource === 'local-token' ? ' (TalkForge local token)' : ''}`} hint="Encrypted for your Windows account. Changing the base URL forgets a saved key unless you enter it again. TalkForge with no key reads %LOCALAPPDATA%\\TalkForge\\local-token.">
             <Input type="password" autoComplete="off" value={key} placeholder={provider.keySource === 'none' ? (draft.local ? 'Usually none for local servers' : 'Paste API key') : 'Leave empty to keep'} onChange={(e) => setKey(e.target.value)} />
             {provider.keySource === 'stored' ? (
               <Button size="sm" variant="quiet" className="mt-1 self-start" busy={busy === 'forget'}

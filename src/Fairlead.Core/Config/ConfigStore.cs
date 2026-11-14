@@ -280,7 +280,7 @@ namespace Fairlead.Core.Config
                 var env = Environment.GetEnvironmentVariable(p.ApiKeyEnv);
                 if (!string.IsNullOrWhiteSpace(env)) return env.Trim();
             }
-            return null;
+            return TalkForgeLocalToken.KeyFor(p);
         }
 
         /// <summary>"stored", "env" or "none": where the key comes from, for the UI.</summary>
@@ -295,6 +295,7 @@ namespace Fairlead.Core.Config
             if (!string.IsNullOrEmpty(Unprotect(p.ApiKeyProtected))) return "stored";
             if (!string.IsNullOrEmpty(p.ApiKeyEnv) && vault != null && !string.IsNullOrEmpty(vault(p.ApiKeyEnv))) return "lazarette";
             if (!string.IsNullOrEmpty(p.ApiKeyEnv) && !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(p.ApiKeyEnv))) return "env";
+            if (!string.IsNullOrEmpty(TalkForgeLocalToken.KeyFor(p))) return "local-token";
             return "none";
         }
 
