@@ -31,6 +31,23 @@ exception; every other lifecycle rule applies (runtime file, single instance, St
 `fairlead.json` moves between machines only for routes and rules: DPAPI keys can be read only by the Windows user
 that saved them, so re-enter keys on a new machine (or use environment variables).
 
+## Client keys for Fleet apps
+
+PacketRat, Gangplank, and the other Fleet apps read their key from Windows Credential Manager, generic credential
+`Fairlead/<App>` (for example `Fairlead/PacketRat` and `Fairlead/Gangplank`). Fairlead writes that credential and does
+not print the key:
+
+```
+fairlead clients install PacketRat
+fairlead clients install Gangplank
+```
+
+`fairlead clients install` with no name lists the registry (`Get-ClientKeyRegistry` in `scripts\fairlead.ps1`, the same
+names as the Clients page). Optional `--routes a,b` limits the key. Revoke an existing key first with
+`fairlead clients remove <name> --yes`. Any other app name is accepted when it starts with a letter and then uses
+letters, digits, and hyphens (up to 40). A tool on this Windows account can also use the local token when no
+credential is installed (`%LOCALAPPDATA%\Fairlead\local-token`).
+
 ## The hackathon network
 
 - Fairlead listens on this machine only (127.0.0.1, a Fleet rule), so tools must run on the same PC. Containers and other

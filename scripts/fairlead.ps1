@@ -241,6 +241,7 @@ Routes and routing
 Clients
   clients [list]
   clients add <name> [--routes a,b] [--rate N]   prints the key once; --rate limits requests a minute   POST /api/clients
+  clients install [<app>] [--routes a,b]   save a Fleet app key to Windows Credential Manager as Fairlead/<app>; the key is not printed; no app lists the registry   POST /api/clients
   clients budget <id|name> [--daily N|off] [--soft N|off]   daily token limit (429 over it) and a soft limit (smart becomes fast)   POST /api/clients/{id}/budget
   clients usage                       tokens used today by each key   GET /api/clients/usage
   clients rate <id|name> <N|off>      limit a key to N requests a minute (off = no limit)   POST /api/clients/{id}/rate-limit
@@ -495,6 +496,33 @@ function Invoke-Routing {
     }
 }
 
+# Client-key registry: Fleet apps that read Fairlead/<App> from Windows Credential Manager.
+# PacketRat and Gangplank are issued the same way. Keep this list in step with web/src/lib/apps.ts.
+function Get-ClientKeyRegistry {
+    return [string[]]@(
+        'PacketRat',
+        'Bowerbird',
+        'Gangplank',
+        'Halyard',
+        'Semaphore',
+        'SnapShackle',
+        'BridgeWarden',
+        'Bosun',
+        'TalkForge'
+    )
+}
+
+function Test-ClientAppName([string]$Name) {
+    return [bool]($Name -match '^[A-Za-z][A-Za-z0-9-]{0,39}$')
+}
+
+function Assert-InstalledClientKey($Result) {
+    if ($null -eq $Result) { throw 'Fairlead returned no answer for the installed key.' }
+    $keyProp = $Result.PSObject.Properties['key']
+    if ($keyProp -and $keyProp.Value) { throw 'The install answer included a key; refusing to print it.' }
+    if (-not $Result.installed) { throw 'The install answer did not name the credential.' }
+}
+
 function Invoke-Clients {
     $sub = Word 1
     if (-not $sub) { $sub = 'list' }
@@ -508,6 +536,22 @@ function Invoke-Clients {
             if (Opt 'rate') { $payload.rateLimitPerMinute = [int](Opt 'rate') }
             $r = Invoke-Api POST '/api/clients' $payload
             Out-Result $r { param($v) 'Client key for ' + (Word 2) + ' (shown once; Fairlead keeps only its hash):'; $v.key }
+        }
+        'install' {
+            $app = Word 2
+            if (-not $app) {
+                Out-Result (Get-ClientKeyRegistry) { param($v)
+                    'Fleet apps that read Fairlead/<App> from Windows Credential Manager:'
+                    (@($v) -join ', ')
+                    'Install one (the key is not printed): fairlead clients install <app>'
+                }
+                return
+            }
+            if (-not (Test-ClientAppName $app)) { throw ('App names start with a letter and use letters, digits and hyphens (up to 40 characters). Registry: ' + ((@(Get-ClientKeyRegistry)) -join ', ') + '.') }
+            $payload = @{ installFor = $app; routes = @(Split-List (Opt 'routes')) }
+            $r = Invoke-Api POST '/api/clients' $payload
+            Assert-InstalledClientKey $r
+            Out-Result $r { param($v) 'Installed a client key for ' + $app + ' as ' + $v.installed + '. The key is not printed; the app reads it from Windows Credential Manager.' }
         }
         'usage' {
             Out-Result (Invoke-Api GET '/api/clients/usage') { param($v) @($v) | Select-Object name, usedToday, dailyTokenLimit, dailyTokenSoftLimit | Format-Table -AutoSize | Out-String -Width 200 }
