@@ -1,9 +1,10 @@
 import { cva, type VariantProps } from 'class-variance-authority';
 import { clsx, type ClassValue } from 'clsx';
 import type React from 'react';
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes } from 'react';
+import { createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type KeyboardEvent, type ReactNode, type SelectHTMLAttributes } from 'react';
 import { twMerge } from 'tailwind-merge';
 import { LuCheck, LuChevronDown, LuCircleAlert, LuCopy, LuInfo, LuLoaderCircle, LuX } from 'react-icons/lu';
+import { tabDomIds, tabIndexAfter, tabMove } from '../lib/a11y';
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -187,25 +188,60 @@ export function Progress({ done, total, label }: { done: number; total: number; 
   );
 }
 
-// ---- tabs ----
+// ---- tabs (roving tabindex; arrow keys stay in the set, Tab leaves it) ----
 
-export function Tabs<T extends string>({ value, onChange, items }: { value: T; onChange: (v: T) => void; items: Array<{ value: T; label: ReactNode; count?: number }> }) {
+export function Tabs<T extends string>({ id, label, value, onChange, items, children, panelClassName }: {
+  id: string;
+  label?: string;
+  value: T;
+  onChange: (v: T) => void;
+  items: Array<{ value: T; label: ReactNode; count?: number }>;
+  children?: ReactNode;
+  panelClassName?: string;
+}) {
+  const refs = useRef<Array<HTMLButtonElement | null>>([]);
+  const selectedIndex = items.findIndex((it) => it.value === value);
+  const onKeyDown = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
+    const move = tabMove(event.key);
+    if (!move) return;
+    event.preventDefault();
+    const next = tabIndexAfter(move, index, items.length);
+    const item = items[next];
+    if (!item) return;
+    onChange(item.value);
+    refs.current[next]?.focus();
+  };
+  const selected = tabDomIds(id, value);
   return (
-    <div role="tablist" className="flex gap-1 border-b border-line-2 px-2">
-      {items.map((it) => (
-        <button
-          key={it.value}
-          role="tab"
-          type="button"
-          aria-selected={it.value === value}
-          onClick={() => onChange(it.value)}
-          className={cn('-mb-px flex items-center gap-1.5 border-b-2 px-3 py-2 text-[13px]', it.value === value ? 'border-accent text-ink' : 'border-transparent text-ink-2 hover:text-ink')}
-        >
-          {it.label}
-          {it.count !== undefined ? <span className="num rounded-full bg-surface-2 px-1.5 text-[11px] text-ink-2">{it.count}</span> : null}
-        </button>
-      ))}
-    </div>
+    <>
+      <div role="tablist" aria-orientation="horizontal" aria-label={label} className="flex gap-1 border-b border-line-2 px-2">
+        {items.map((it, index) => {
+          const ids = tabDomIds(id, it.value);
+          const selectedTab = it.value === value;
+          return (
+            <button
+              key={it.value}
+              ref={(node) => { refs.current[index] = node; }}
+              id={ids.tab}
+              role="tab"
+              type="button"
+              aria-selected={selectedTab}
+              aria-controls={ids.panel}
+              tabIndex={selectedTab || (selectedIndex < 0 && index === 0) ? 0 : -1}
+              onClick={() => onChange(it.value)}
+              onKeyDown={(event) => onKeyDown(event, index)}
+              className={cn('-mb-px flex items-center gap-1.5 border-b-2 px-3 py-2 text-[13px]', selectedTab ? 'border-accent text-ink' : 'border-transparent text-ink-2 hover:text-ink')}
+            >
+              {it.label}
+              {it.count !== undefined ? <span className="num rounded-full bg-surface-2 px-1.5 text-[11px] text-ink-2">{it.count}</span> : null}
+            </button>
+          );
+        })}
+      </div>
+      {children !== undefined ? (
+        <div role="tabpanel" id={selected.panel} aria-labelledby={selected.tab} className={panelClassName}>{children}</div>
+      ) : null}
+    </>
   );
 }
 
@@ -249,16 +285,18 @@ export function ConfirmDialog({ open, title, children, confirmLabel, danger, onC
   open: boolean; title: string; children: ReactNode; confirmLabel: string; danger?: boolean; onConfirm: () => void; onCancel: () => void; confirmDisabled?: boolean;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
+  const titleId = useId();
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
+    // showModal keeps the browser's focus trap and inert background. Do not replace it with show().
     if (open && !el.open) el.showModal();
     if (!open && el.open) el.close();
   }, [open]);
   return (
-    <dialog ref={ref} onClose={onCancel} className="m-auto w-[480px] max-w-[calc(100vw-2rem)] rounded-dialog border border-line bg-surface p-0 text-ink backdrop:bg-black/40">
+    <dialog ref={ref} aria-labelledby={titleId} onClose={onCancel} className="m-auto w-[480px] max-w-[calc(100vw-2rem)] rounded-dialog border border-line bg-surface p-0 text-ink backdrop:bg-black/40">
       <div className="flex flex-col gap-3 p-5">
-        <h2>{title}</h2>
+        <h2 id={titleId}>{title}</h2>
         <div className="text-ink-2">{children}</div>
         <div className="mt-2 flex justify-end gap-2">
           <Button variant="quiet" onClick={onCancel}>Cancel</Button>
