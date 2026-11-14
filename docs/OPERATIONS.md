@@ -5,7 +5,7 @@
 | Action | How |
 |---|---|
 | Start | `Launch-Fairlead.bat` (tray icon; the setup page opens on first run). Starting it again reuses the running instance and reopens its window |
-| Open the admin page | Tray icon → **Open Fairlead** (double-click works too; it opens an Edge or Chrome app window with its own profile, or your default browser when neither is installed), or `Launch-Fairlead.bat` again |
+| Open the admin page | Tray icon → **Open Fairlead** (double-click works too; it opens an Edge or Chrome app window with its own profile, or your default browser when neither is installed), or `Launch-Fairlead.bat` again. A bookmark of the port has no session token, so that page refuses requests |
 | Start with Windows | `scripts\Register-FairleadStartup.ps1` (a shortcut in your Startup folder; `-Remove` undoes it) |
 | Stop | Tray → **Quit Fairlead** (asks first: tools that use Fairlead stop working), the **End session** button in the admin page, or `scripts\Stop-Fairlead.ps1` |
 | Restart | `Launch-Fairlead.bat --replace` |

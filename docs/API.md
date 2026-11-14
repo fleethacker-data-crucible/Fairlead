@@ -37,7 +37,7 @@ models. Response headers: `X-Fairlead-Route`, `-Target`, `-Mode` (`normal` or `k
 
 Auth: `X-Fairlead-Session: <token>`, plus a loopback `Host` and no foreign `Origin`.
 
-- **The browser** gets the session token once, in the URL the launcher opens. It is never written to disk.
+- **The browser** gets the session token once, in the URL the launcher opens: the path `/s/<token>/`, repeated as `?session=` and `#session=` so a window that drops the query string still has it. The page stores it in sessionStorage and strips it from the address. It is never written to disk. A visit to the bare port has no token, and the page says so.
 - **The CLI** reads a separate token from `%LOCALAPPDATA%\Fairlead\fairlead-cli.json`, encrypted with DPAPI for the
   user who started Fairlead (see [CLI.md](CLI.md)).
 

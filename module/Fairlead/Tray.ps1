@@ -47,6 +47,13 @@ function Invoke-FairleadTray {
         [string]$IconPath,
         [string]$ProfileDir
     )
+    # Click and timer handlers run outside this function's locals. Keep the launch URL (it holds the session) in script scope.
+    $script:FairleadOpenUrl = $LaunchUrl
+    $script:FairleadOpenProfile = $ProfileDir
+    $script:FairleadTrayGateway = $GatewayUrl
+    $script:FairleadTrayHost = $HostObject
+    $script:FairleadTrayIconPath = $IconPath
+
     Add-Type -AssemblyName System.Windows.Forms, System.Drawing
     [System.Windows.Forms.Application]::EnableVisualStyles()
     $icon = New-Object System.Windows.Forms.NotifyIcon
@@ -66,16 +73,16 @@ function Invoke-FairleadTray {
     [void]$menu.Items.Add('-')
     $openItem = $menu.Items.Add('&Open Fairlead')
     $openItem.Font = New-Object System.Drawing.Font($openItem.Font, [System.Drawing.FontStyle]::Bold)
-    $openItem.add_Click({ [void](Open-FairleadWindow -Url $LaunchUrl -ProfileDir $ProfileDir) })
+    $openItem.add_Click({ [void](Open-FairleadWindow -Url $script:FairleadOpenUrl -ProfileDir $script:FairleadOpenProfile) })
     $copyItem = $menu.Items.Add('&Copy gateway URL')
-    $copyItem.add_Click({ [System.Windows.Forms.Clipboard]::SetText($GatewayUrl); $icon.ShowBalloonTip(2000, 'Fairlead', ('Copied ' + $GatewayUrl), [System.Windows.Forms.ToolTipIcon]::Info) })
+    $copyItem.add_Click({ [System.Windows.Forms.Clipboard]::SetText($script:FairleadTrayGateway); $script:FairleadTrayIcon.ShowBalloonTip(2000, 'Fairlead', ('Copied ' + $script:FairleadTrayGateway), [System.Windows.Forms.ToolTipIcon]::Info) })
     $kedgeMenu = New-Object System.Windows.Forms.ToolStripMenuItem('&Kedge mode')
     $kAuto = $kedgeMenu.DropDownItems.Add('&Auto (local when offline)')
     $kOn = $kedgeMenu.DropDownItems.Add('O&n (local models only)')
     $kOff = $kedgeMenu.DropDownItems.Add('O&ff (never switch automatically)')
-    $kAuto.add_Click({ [Fairlead.Core.Facade]::SetKedge($HostObject, 'auto') })
-    $kOn.add_Click({ [Fairlead.Core.Facade]::SetKedge($HostObject, 'on') })
-    $kOff.add_Click({ [Fairlead.Core.Facade]::SetKedge($HostObject, 'off') })
+    $kAuto.add_Click({ [Fairlead.Core.Facade]::SetKedge($script:FairleadTrayHost, 'auto') })
+    $kOn.add_Click({ [Fairlead.Core.Facade]::SetKedge($script:FairleadTrayHost, 'on') })
+    $kOff.add_Click({ [Fairlead.Core.Facade]::SetKedge($script:FairleadTrayHost, 'off') })
     [void]$menu.Items.Add($kedgeMenu)
     [void]$menu.Items.Add('-')
     $quitItem = $menu.Items.Add('&Quit Fairlead')
@@ -83,31 +90,38 @@ function Invoke-FairleadTray {
         $answer = [System.Windows.Forms.MessageBox]::Show((Get-FairleadQuitPrompt), 'Quit Fairlead',
             [System.Windows.Forms.MessageBoxButtons]::YesNo, [System.Windows.Forms.MessageBoxIcon]::Question,
             [System.Windows.Forms.MessageBoxDefaultButton]::Button2)
-        if ($answer -eq [System.Windows.Forms.DialogResult]::Yes) { $HostObject.Stop() }
+        if ($answer -eq [System.Windows.Forms.DialogResult]::Yes) { $script:FairleadTrayHost.Stop() }
     })
     $icon.ContextMenuStrip = $menu
-    $icon.add_DoubleClick({ [void](Open-FairleadWindow -Url $LaunchUrl -ProfileDir $ProfileDir) })
+    $icon.add_DoubleClick({ [void](Open-FairleadWindow -Url $script:FairleadOpenUrl -ProfileDir $script:FairleadOpenProfile) })
 
     $script:FairleadLastKedge = $HostObject.Health.KedgeActive
+    $script:FairleadTrayIcon = $icon
+    $script:FairleadTrayState = $state
+    $script:FairleadTrayListener = $listener
+    $script:FairleadTrayKAuto = $kAuto
+    $script:FairleadTrayKOn = $kOn
+    $script:FairleadTrayKOff = $kOff
     $timer = New-Object System.Windows.Forms.Timer
+    $script:FairleadTrayTimer = $timer
     $timer.Interval = 1500
     $timer.add_Tick({
-        if ($HostObject.StopRequested) {
-            $timer.Stop()
+        if ($script:FairleadTrayHost.StopRequested) {
+            $script:FairleadTrayTimer.Stop()
             [System.Windows.Forms.Application]::ExitThread()
             return
         }
-        if ($listener -and (Test-FairleadOpenRequested -Listener $listener)) { [void](Open-FairleadWindow -Url $LaunchUrl -ProfileDir $ProfileDir) }
-        $icon.Text = [Fairlead.Core.Facade]::TrayText($HostObject)
-        $state.Text = [Fairlead.Core.Facade]::TrayStatus($HostObject)
-        $mode = $HostObject.Config.Snapshot().Kedge.ToString()
-        $kAuto.Checked = ($mode -eq 'Auto'); $kOn.Checked = ($mode -eq 'On'); $kOff.Checked = ($mode -eq 'Off')
-        $k = $HostObject.Health.KedgeActive
+        if ($script:FairleadTrayListener -and (Test-FairleadOpenRequested -Listener $script:FairleadTrayListener)) { [void](Open-FairleadWindow -Url $script:FairleadOpenUrl -ProfileDir $script:FairleadOpenProfile) }
+        $script:FairleadTrayIcon.Text = [Fairlead.Core.Facade]::TrayText($script:FairleadTrayHost)
+        $script:FairleadTrayState.Text = [Fairlead.Core.Facade]::TrayStatus($script:FairleadTrayHost)
+        $mode = $script:FairleadTrayHost.Config.Snapshot().Kedge.ToString()
+        $script:FairleadTrayKAuto.Checked = ($mode -eq 'Auto'); $script:FairleadTrayKOn.Checked = ($mode -eq 'On'); $script:FairleadTrayKOff.Checked = ($mode -eq 'Off')
+        $k = $script:FairleadTrayHost.Health.KedgeActive
         if ($k -ne $script:FairleadLastKedge) {
             $script:FairleadLastKedge = $k
-            Set-FairleadTrayIcon -NotifyIcon $icon -Icon (Get-FairleadTrayIcon -IconPath $IconPath -Kedge ([bool]$k))
-            if ($k) { $icon.ShowBalloonTip(4000, 'Fairlead: Kedge mode', 'Cloud unreachable or forced off. Requests now go to local models.', [System.Windows.Forms.ToolTipIcon]::Warning) }
-            else { $icon.ShowBalloonTip(3000, 'Fairlead', 'Cloud routes are back.', [System.Windows.Forms.ToolTipIcon]::Info) }
+            Set-FairleadTrayIcon -NotifyIcon $script:FairleadTrayIcon -Icon (Get-FairleadTrayIcon -IconPath $script:FairleadTrayIconPath -Kedge ([bool]$k))
+            if ($k) { $script:FairleadTrayIcon.ShowBalloonTip(4000, 'Fairlead: Kedge mode', 'Cloud unreachable or forced off. Requests now go to local models.', [System.Windows.Forms.ToolTipIcon]::Warning) }
+            else { $script:FairleadTrayIcon.ShowBalloonTip(3000, 'Fairlead', 'Cloud routes are back.', [System.Windows.Forms.ToolTipIcon]::Info) }
         }
     })
     $timer.Start()

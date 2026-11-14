@@ -273,7 +273,9 @@ namespace Fairlead.Core.Host
                 Url = "http://127.0.0.1:" + port + "/",
                 GatewayUrl = "http://127.0.0.1:" + port + "/v1",
                 SessionToken = SessionToken,
-                LaunchUrl = "http://127.0.0.1:" + port + "/?session=" + SessionToken,
+                // Path first: a browser or ShellExecute that cuts the URL at '?' still delivers the token.
+                // Query and hash repeat it for older links. The page stores the token and strips all three.
+                LaunchUrl = "http://127.0.0.1:" + port + "/s/" + SessionToken + "/?session=" + SessionToken + "#session=" + SessionToken,
                 PortIsRegistry = port == preferred,
                 LogFile = Log.FilePath,
                 ConfigFile = Config.FilePath,
@@ -405,6 +407,15 @@ namespace Fairlead.Core.Host
                 catch (InvalidOperationException ex) { return Json.Error(409, "CONFLICT", ex.Message, request.RequestId); }
             }
 
+            // /s/<session>/ is the admin page (and its files) for the launcher's window only.
+            // A wrong token is a bare 404: the body must not contain the real token.
+            if (request.Path.StartsWith("/s/", StringComparison.Ordinal))
+            {
+                string rest;
+                if (!TrySessionShell(request.Path, out rest)) return HttpResponse.Text(404, "Not found");
+                request.Path = rest;
+            }
+
             var webRoot = Options.WebRoot ?? Settings.WebRootDirectory;
             if (!string.IsNullOrEmpty(webRoot))
             {
@@ -452,6 +463,21 @@ namespace Fairlead.Core.Host
             r.Headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type, x-api-key, anthropic-version, anthropic-beta, X-Fairlead-Route, X-Fairlead-Privacy, X-Fairlead-Label, X-Fairlead-Bearing, X-Fairlead-Bearing-Top";
             r.Headers["Access-Control-Expose-Headers"] = "X-Fairlead-Bearing, X-Fairlead-Route, X-Fairlead-Target, X-Fairlead-Mode, X-Fairlead-Attempts, X-Fairlead-Request-Id, X-Fairlead-Private, X-Fairlead-Fallback, X-Fairlead-Fallback-Reason";
             r.Headers["Access-Control-Max-Age"] = "600";
+        }
+
+        /// <summary>/s/&lt;token&gt; and /s/&lt;token&gt;/... become the static path under them when the token matches.</summary>
+        private bool TrySessionShell(string path, out string rest)
+        {
+            rest = null;
+            const string marker = "/s/";
+            if (path == null || !path.StartsWith(marker, StringComparison.Ordinal)) return false;
+            var after = path.Substring(marker.Length);
+            if (after.Length == 0) return false;
+            var cut = after.IndexOf('/');
+            var token = cut < 0 ? after : after.Substring(0, cut);
+            if (token.Length != SessionToken.Length || !FixedTimeEquals(token, SessionToken)) return false;
+            rest = (cut < 0 || cut == after.Length - 1) ? "/" : after.Substring(cut);
+            return true;
         }
 
         private bool BeaconTokenMatches(HttpRequest request)

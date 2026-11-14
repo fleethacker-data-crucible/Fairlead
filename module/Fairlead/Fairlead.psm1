@@ -178,7 +178,7 @@ function Start-Fairlead {
     Write-Host ''
     Write-Host ('Fairlead is running. Point tools at ' + $info.GatewayUrl) -ForegroundColor Cyan
     if (-not $info.PortIsRegistry) { Write-Host ('  Port ' + $preferred + ' was busy, so Fairlead took ' + $info.Port + '. Tools configured for ' + $preferred + ' will not reach it.') -ForegroundColor Yellow }
-    Write-Host ('  Admin: ' + $info.Url + '   Config: ' + $info.ConfigFile) -ForegroundColor DarkGray
+    Write-Host ('  Admin page: tray icon, Open Fairlead (port ' + $info.Port + '). A bookmark of that port has no session token. Config: ' + $info.ConfigFile) -ForegroundColor DarkGray
     $gw = $hostObj.GatewayModels
     if ($gw) {
         if ($gw.Ok) { Write-Host ('  AI gateway: ' + $gw.Providers.Count + ' endpoint(s), ' + $gw.EnabledModels + ' enabled model(s) from ' + $gw.Path) -ForegroundColor DarkGray }

@@ -10,15 +10,37 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * Where the launcher put this tab's session token, and the address to show after it is stored.
+ * The token travels in the path (`/s/<token>/`) so a browser that drops `?session=` still has it,
+ * and also in the query and in `#session=` for older links. A route hash such as `#/setup` is left alone.
+ */
+export function locateSession(href: string): { token: string | null; next: string } {
+  const url = new URL(href);
+  const queryToken = url.searchParams.get('session');
+  url.searchParams.delete('session');
+  const segments = url.pathname.split('/');
+  const rawPath = segments[2] ?? '';
+  const pathToken = segments[1] === 's' && /^[0-9a-f]{48}$/i.test(rawPath) ? rawPath : null;
+  let hash = url.hash;
+  let hashToken: string | null = null;
+  const hashMatch = /^#session=([0-9a-f]{48})$/i.exec(hash);
+  if (hashMatch && hashMatch[1]) {
+    hashToken = hashMatch[1];
+    hash = '';
+  }
+  const token = (queryToken && queryToken.trim()) || pathToken || hashToken || null;
+  const pathname = pathToken ? '/' : url.pathname || '/';
+  return { token, next: pathname + url.search + hash };
+}
+
 export function captureSessionToken(): string | null {
   try {
-    const url = new URL(window.location.href);
-    const fromUrl = url.searchParams.get('session');
-    if (fromUrl) {
-      sessionStorage.setItem(TOKEN_KEY, fromUrl);
-      url.searchParams.delete('session');
-      window.history.replaceState({}, '', url.pathname + (url.search || '') + url.hash);
-      return fromUrl;
+    const found = locateSession(window.location.href);
+    if (found.token) {
+      try { sessionStorage.setItem(TOKEN_KEY, found.token); } catch { /* this load still uses the token */ }
+      try { window.history.replaceState({}, '', found.next); } catch { /* leave the token in the address */ }
+      return found.token;
     }
     return sessionStorage.getItem(TOKEN_KEY);
   } catch {
@@ -28,10 +50,10 @@ export function captureSessionToken(): string | null {
 
 export function sessionToken(): string | null {
   try {
-    return sessionStorage.getItem(TOKEN_KEY);
-  } catch {
-    return null;
-  }
+    const stored = sessionStorage.getItem(TOKEN_KEY);
+    if (stored) return stored;
+  } catch { /* read it from the address instead */ }
+  return captureSessionToken();
 }
 
 export async function api<T = unknown>(path: string, init: RequestInit & { json?: unknown } = {}): Promise<T> {

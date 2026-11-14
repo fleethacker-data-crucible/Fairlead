@@ -24,9 +24,10 @@ function Get-FairleadBrowserArguments {
        update features switched off. #>
     [CmdletBinding()]
     param([Parameter(Mandatory = $true)][string]$Url, [Parameter(Mandatory = $true)][string]$ProfileDir)
+    # Quote the URL. Unquoted, Start-Process / ShellExecute can cut it at '?' and the page loads with no session.
     return @(
-        ('--app=' + $Url),
-        ('--user-data-dir="' + $ProfileDir + '"'),
+        ('--app="' + ($Url -replace '"', '') + '"'),
+        ('--user-data-dir="' + ($ProfileDir -replace '"', '') + '"'),
         '--no-first-run', '--no-default-browser-check', '--disable-extensions', '--disable-sync',
         '--disable-background-networking', '--disable-component-update', '--disable-domain-reliability', '--no-pings'
     )
@@ -41,10 +42,19 @@ function Open-FairleadWindow {
         if (-not $Browser) { $Browser = Find-FairleadBrowser }
         if ($Browser -and $ProfileDir) {
             [void](New-Item -ItemType Directory -Force -Path $ProfileDir -ErrorAction SilentlyContinue)
-            Start-Process -FilePath $Browser -ArgumentList (Get-FairleadBrowserArguments -Url $Url -ProfileDir $ProfileDir)
+            # UseShellExecute would hand the command line to the shell, which drops '?' and '#'. CreateProcess keeps them.
+            $start = New-Object System.Diagnostics.ProcessStartInfo
+            $start.FileName = $Browser
+            $start.Arguments = (Get-FairleadBrowserArguments -Url $Url -ProfileDir $ProfileDir) -join ' '
+            $start.UseShellExecute = $false
+            [void][System.Diagnostics.Process]::Start($start)
             return $true
         }
-        Start-Process $Url
+        # No Edge or Chrome: the path /s/<token>/ still carries the session if the query string is stripped.
+        $open = New-Object System.Diagnostics.ProcessStartInfo
+        $open.FileName = $Url
+        $open.UseShellExecute = $true
+        [void][System.Diagnostics.Process]::Start($open)
     } catch {
         Write-Warning ('Could not open the Fairlead window: ' + $_.Exception.Message)
     }
