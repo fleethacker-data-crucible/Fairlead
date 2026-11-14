@@ -41,4 +41,5 @@ test('install-for-an-app names: the Fleet tools and any name the server accepts'
   for (const bad of ['', '9app', 'has space', '../x', 'a'.repeat(41), '-lead']) assert.equal(isValidAppName(bad), false, bad);
   assert.equal(isValidAppName('a'.repeat(40)), true);
   assert.equal(credentialTarget('PacketRat'), 'Fairlead/PacketRat');
+  assert.equal(credentialTarget('Gangplank'), 'Fairlead/Gangplank');
 });
