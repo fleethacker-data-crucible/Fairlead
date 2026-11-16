@@ -78,7 +78,8 @@ with an error event in the caller's dialect; replaying a half-delivered answer f
 
 - Admin pages and `/api` are served to loopback only, check the `Host` header (DNS rebinding) and require the
   random per-session token in `X-Fairlead-Session`. The tray and the launcher hold the token; it is never written
-  to the runtime file.
+  to the runtime file. The browser is opened at `/s/<ticket>/`. That ticket lasts about 60 seconds and works once:
+  the page trades it at `POST /api/session/claim` for the session token.
 - `/v1` requires a client key (`fl-…`) unless the operator turns that off. Fairlead binds 127.0.0.1 only, and the
   server refuses any non-loopback peer as a second line of defence.
 - Browser origins are refused on `/v1` unless listed, so a web page cannot spend the operator's credits.

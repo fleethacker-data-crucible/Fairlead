@@ -191,6 +191,7 @@ namespace Fairlead.Core.Host
                 // Accepted and ignored: Fairlead serves other tools, so a closed tab never stops it.
                 return Task.FromResult(Json.Ok(new { ok = true }));
             });
+            Admin.Post("/api/session/claim", ClaimLaunchTicket);
             Admin.Post("/api/session/stop", r =>
             {
                 if (!string.Equals(r.Header(IntentHeader), "end-session", StringComparison.Ordinal))
@@ -408,6 +409,15 @@ namespace Fairlead.Core.Host
             Admin.Post("/api/playground", Playground);
         }
 
+        /// <summary>Trades a single-use launch ticket for the session token, then forgets the ticket. No session header: the page does not have one yet.</summary>
+        private Task<HttpResponse> ClaimLaunchTicket(HttpRequest request)
+        {
+            var ticket = request.Body.Length == 0 ? null : Json.Read<string>(Json.Body(request), "ticket");
+            if (!TryTakeLaunchTicket(ticket))
+                return Task.FromResult(Json.Error(401, "TICKET_INVALID", "This launch link has already been used or has expired. Open Fairlead from the tray again.", request.RequestId));
+            return Task.FromResult(Json.Ok(new { token = SessionToken }));
+        }
+
         /// <summary>
         /// Server-sent events for the live routing view: start, attempt, firstByte and done for every gateway request,
         /// as they happen. Same session token as the rest of /api (the UI reads it with fetch, not EventSource, so the
@@ -471,6 +481,8 @@ namespace Fairlead.Core.Host
                         probeMs = h == null ? null : h.ProbeMs,
                         lastError = h == null ? null : h.LastError,
                         models = p.Models.Select(m => m.Id).Concat(DiscoveredModels(p.Id).Select(m => m.Id)).Distinct(StringComparer.OrdinalIgnoreCase).Count(),
+                        // What the server itself lists right now (saved entries it no longer has do not count): 0 on a reachable local server means nothing is installed.
+                        listed = DiscoveredModels(p.Id).Count,
                         breaker = b == null ? "closed" : b.State(DateTimeOffset.UtcNow).ToString().ToLowerInvariant(),
                         keySource = SecretProtector.KeySource(p, SecretValue),
                     };
@@ -658,6 +670,9 @@ namespace Fairlead.Core.Host
             Config.Update(c =>
             {
                 var target = c.FindProvider(id);
+                // A local server is the authority on what is installed: drop earlier discoveries it no longer lists (models removed or never pulled).
+                // Entries typed by hand are kept.
+                if (target.Local) target.Models.RemoveAll(old => old.Discovered && !models.Any(m => string.Equals(m.Id, old.Id, StringComparison.OrdinalIgnoreCase)));
                 foreach (var m in models)
                 {
                     var existing = target.FindModel(m.Id);

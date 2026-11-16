@@ -37,7 +37,7 @@ models. Response headers: `X-Fairlead-Route`, `-Target`, `-Mode` (`normal` or `k
 
 Auth: `X-Fairlead-Session: <token>`, plus a loopback `Host` and no foreign `Origin`.
 
-- **The browser** gets the session token once, in the URL the launcher opens. It is never written to disk.
+- **The browser** never receives the session token in a URL. The launcher opens `/s/<ticket>/`, a random single-use ticket that lasts about 60 seconds. The page POSTs that ticket once to `POST /api/session/claim`, which returns the session token and invalidates the ticket. The page stores the token in sessionStorage and strips the ticket from the address. A ticket left on a command line, in history, or in a cache is worthless after that. The token is never written to disk. A visit to the bare port has no token, and the page says so.
 - **The CLI** reads a separate token from `%LOCALAPPDATA%\Fairlead\fairlead-cli.json`, encrypted with DPAPI for the
   user who started Fairlead (see [CLI.md](CLI.md)).
 
@@ -53,6 +53,7 @@ config view, unless noted.
 | `GET /api/health` | | `{ ok, version }` (no auth) |
 | `GET /api/status` | | version, port, gateway URL, connectivity, providers with health, routes with target counts, metrics |
 | `POST /api/heartbeat` | `{ leaving }` | accepted and ignored: Fairlead never stops because a tab closed |
+| `POST /api/session/claim` | `{ ticket }` | `{ token }` once. No session header. A second claim, or a ticket older than about 60 seconds, is 401 and does not return the token |
 | `POST /api/session/stop` | header `X-Fairlead-Intent: end-session` | `{ stopping }` |
 
 ### Config, providers and models
@@ -77,7 +78,7 @@ config view, unless noted.
 | `POST /api/routing/reset` | rules and aliases back to the defaults |
 | `POST /api/explain` | `{ prompt \| body, model?, route?, private?, client?, withTools? }`; dry run: route, decision trace, candidates |
 | `POST /api/playground` | same body, plus `system?`, `maxTokens?`; sends it through the gateway and returns `{ status, text, error, route, target, record }` |
-| `POST /api/clients` | `{ name, routes?, installFor? }`; returns `{ key }` once (only its hash is kept). With `installFor: "<AppName>"` (letter first, then letters, digits and hyphens, up to 40) the key is saved to Windows Credential Manager as a generic credential with target `Fairlead/<AppName>` for this Windows user and is **not** returned: the answer is `{ client, installed: "Fairlead/<AppName>" }`. `name` defaults to the app name. If the save fails, the key is removed again and the answer is 400 with the reason |
+| `POST /api/clients` | `{ name, routes?, installFor? }`; returns `{ key }` once (only its hash is kept). With `installFor: "<AppName>"` (letter first, then letters, digits and hyphens, up to 40) the key is saved to Windows Credential Manager as a generic credential with target `Fairlead/<AppName>` for this Windows user and is **not** returned: the answer is `{ client, installed: "Fairlead/<AppName>" }`. The command is `fairlead clients install <AppName>` (PacketRat and Gangplank are in the registry; see OPERATIONS.md). `name` defaults to the app name. If the save fails, the key is removed again and the answer is 400 with the reason |
 | `DELETE /api/clients/{id}` | |
 
 ### Settings and Kedge mode

@@ -5,7 +5,7 @@
 | Action | How |
 |---|---|
 | Start | `Launch-Fairlead.bat` (tray icon; the setup page opens on first run). Starting it again reuses the running instance and reopens its window |
-| Open the admin page | Tray icon → **Open Fairlead** (double-click works too; it opens an Edge or Chrome app window with its own profile, or your default browser when neither is installed), or `Launch-Fairlead.bat` again |
+| Open the admin page | Tray icon → **Open Fairlead** (double-click works too; it opens an Edge or Chrome app window with its own profile, or your default browser when neither is installed), or `Launch-Fairlead.bat` again. A bookmark of the port has no session token, so that page refuses requests |
 | Start with Windows | `scripts\Register-FairleadStartup.ps1` (a shortcut in your Startup folder; `-Remove` undoes it) |
 | Stop | Tray → **Quit Fairlead** (asks first: tools that use Fairlead stop working), the **End session** button in the admin page, or `scripts\Stop-Fairlead.ps1` |
 | Restart | `Launch-Fairlead.bat --replace` |
@@ -31,6 +31,23 @@ exception; every other lifecycle rule applies (runtime file, single instance, St
 `fairlead.json` moves between machines only for routes and rules: DPAPI keys can be read only by the Windows user
 that saved them, so re-enter keys on a new machine (or use environment variables).
 
+## Client keys for Fleet apps
+
+PacketRat, Gangplank, and the other Fleet apps read their key from Windows Credential Manager, generic credential
+`Fairlead/<App>` (for example `Fairlead/PacketRat` and `Fairlead/Gangplank`). Fairlead writes that credential and does
+not print the key:
+
+```
+fairlead clients install PacketRat
+fairlead clients install Gangplank
+```
+
+`fairlead clients install` with no name lists the registry (`Get-ClientKeyRegistry` in `scripts\fairlead.ps1`, the same
+names as the Clients page). Optional `--routes a,b` limits the key. Revoke an existing key first with
+`fairlead clients remove <name> --yes`. Any other app name is accepted when it starts with a letter and then uses
+letters, digits, and hyphens (up to 40). A tool on this Windows account can also use the local token when no
+credential is installed (`%LOCALAPPDATA%\Fairlead\local-token`).
+
 ## The hackathon network
 
 - Fairlead listens on this machine only (127.0.0.1, a Fleet rule), so tools must run on the same PC. Containers and other
@@ -49,5 +66,6 @@ that saved them, so re-enter keys on a new machine (or use environment variables
 | Everything goes local | Kedge mode: Diagnostics shows the probe results; a corporate firewall may block the probe hosts (edit them in Settings). |
 | A cloud provider is skipped | Diagnostics → circuit breakers: reset it after fixing the key or once the outage is over. |
 | Empty answers from a local thinking model | The model spent `max_tokens` on reasoning; raise the limit or route to a non-thinking model. |
+| Ollama is running but the `local` route fails or Kedge mode has nothing to use | No model is installed. The Providers page, `fairlead status` and the request error all say so. Install a small one, `ollama pull llama3.2:1b` (about 1.3 GB, runs on a CPU), then press Fetch model list (or `fairlead providers discover ollama`), which also drops entries for models the server no longer has. Set `fairlead routes set local --targets ollama/llama3.2:1b` to pin it; without a target Fairlead picks any model a local server lists. |
 | Ollama answers slowly the first time | Model load. Fairlead prefers models already in memory when it picks one itself. |
 | Long prompts look truncated on Ollama | Ollama's own context default (`num_ctx`) is smaller than the model's maximum; raise it in a Modelfile. |
