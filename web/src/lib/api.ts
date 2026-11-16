@@ -1,7 +1,9 @@
-// Thin client for the Fairlead host. Every /api call carries the per-session token the launcher
-// put in the URL once; nothing else on the machine can talk to the host without it.
+// Thin client for the Fairlead host. Every /api call carries the per-session token.
+// The launcher puts a single-use ticket in the URL. The page claims it once, keeps the
+// session token in sessionStorage, and never writes that token to disk.
 
 const TOKEN_KEY = 'fairlead.session';
+let heldToken: string | null = null;
 
 export class ApiError extends Error {
   constructor(public status: number, public code: string, message: string, public requestId?: string) {
@@ -10,25 +12,69 @@ export class ApiError extends Error {
   }
 }
 
-export function captureSessionToken(): string | null {
+/**
+ * The launch ticket in `/s/<ticket>/`, and the address to show after it is claimed.
+ * A `?session=` or `#session=` value is removed and is not a session token: that would put the
+ * long-lived token in history. A route hash such as `#/setup` is left alone.
+ */
+export function locateLaunchTicket(href: string): { ticket: string | null; next: string } {
+  const url = new URL(href);
+  url.searchParams.delete('session');
+  const segments = url.pathname.split('/');
+  const rawPath = segments[2] ?? '';
+  const ticket = segments[1] === 's' && /^[0-9a-f]{48}$/i.test(rawPath) ? rawPath : null;
+  let hash = url.hash;
+  if (/^#session=/i.test(hash)) hash = '';
+  const pathname = ticket ? '/' : url.pathname || '/';
+  return { ticket, next: pathname + url.search + hash };
+}
+
+function remember(token: string): string {
+  heldToken = token;
+  try { sessionStorage.setItem(TOKEN_KEY, token); } catch { /* this load still uses the token */ }
+  return token;
+}
+
+/** POSTs the launch ticket once. The host returns the session token and forgets the ticket. */
+export async function claimLaunchTicket(): Promise<string | null> {
   try {
-    const url = new URL(window.location.href);
-    const fromUrl = url.searchParams.get('session');
-    if (fromUrl) {
-      sessionStorage.setItem(TOKEN_KEY, fromUrl);
-      url.searchParams.delete('session');
-      window.history.replaceState({}, '', url.pathname + (url.search || '') + url.hash);
-      return fromUrl;
+    const here = window.location.pathname + window.location.search + window.location.hash;
+    const found = locateLaunchTicket(window.location.href);
+    if (found.ticket) {
+      let token: string | null = null;
+      try {
+        const response = await fetch('/api/session/claim', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify({ ticket: found.ticket }),
+          cache: 'no-store',
+        });
+        if (response.ok) {
+          const data = (await response.json()) as { token?: unknown };
+          if (typeof data.token === 'string' && data.token.trim()) token = data.token.trim();
+        }
+      } catch {
+        token = null;
+      }
+      try { window.history.replaceState({}, '', found.next); } catch { /* leave the ticket in the address */ }
+      if (token) return remember(token);
+      return sessionToken();
     }
-    return sessionStorage.getItem(TOKEN_KEY);
+    if (found.next !== here) {
+      try { window.history.replaceState({}, '', found.next); } catch { /* leave the address */ }
+    }
+    return sessionToken();
   } catch {
     return null;
   }
 }
 
 export function sessionToken(): string | null {
+  if (heldToken) return heldToken;
   try {
-    return sessionStorage.getItem(TOKEN_KEY);
+    const stored = sessionStorage.getItem(TOKEN_KEY);
+    if (stored) heldToken = stored;
+    return stored;
   } catch {
     return null;
   }

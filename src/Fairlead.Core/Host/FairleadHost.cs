@@ -48,6 +48,8 @@ namespace Fairlead.Core.Host
         public string ProcessPath { get; set; }
         /// <summary>The local token file (Gateway.LocalToken). Null: the default file for a real host, none for a test host built from a given config; "" turns it off.</summary>
         public string LocalTokenFile { get; set; }
+        /// <summary>When set, launch-ticket expiry uses this clock instead of UTC now. Tests move it forward.</summary>
+        public Func<DateTimeOffset> Clock { get; set; }
 
         public HostOptions()
         {
@@ -64,7 +66,7 @@ namespace Fairlead.Core.Host
         /// <summary>Base URL tools use: http://127.0.0.1:port/v1</summary>
         public string GatewayUrl { get; set; }
         public string SessionToken { get; set; }
-        /// <summary>URL with the session token, for opening the admin page once.</summary>
+        /// <summary>Opens the admin page once: /s/&lt;ticket&gt;/. The ticket lasts about 60 seconds and is not the session token.</summary>
         public string LaunchUrl { get; set; }
         public bool PortIsRegistry { get; set; }
         public string LogFile { get; set; }
@@ -93,6 +95,8 @@ namespace Fairlead.Core.Host
         private readonly object _gatewayLock = new object();
         private HttpServer _server;
         private string _runtimeFile;
+        private readonly object _launchTicketsLock = new object();
+        private readonly Dictionary<string, DateTimeOffset> _launchTickets = new Dictionary<string, DateTimeOffset>(StringComparer.Ordinal);
 
         public FairleadHost(HostOptions options)
         {
@@ -273,7 +277,8 @@ namespace Fairlead.Core.Host
                 Url = "http://127.0.0.1:" + port + "/",
                 GatewayUrl = "http://127.0.0.1:" + port + "/v1",
                 SessionToken = SessionToken,
-                LaunchUrl = "http://127.0.0.1:" + port + "/?session=" + SessionToken,
+                // A single-use ticket in the path. The session token stays off the command line and out of browser history.
+                LaunchUrl = NewLaunchUrl(),
                 PortIsRegistry = port == preferred,
                 LogFile = Log.FilePath,
                 ConfigFile = Config.FilePath,
@@ -362,6 +367,85 @@ namespace Fairlead.Core.Host
             return BitConverter.ToString(bytes).Replace("-", string.Empty).ToLowerInvariant();
         }
 
+        /// <summary>How long a launch ticket stays valid. The page claims it immediately; this covers a slow browser start.</summary>
+        public const int LaunchTicketSeconds = 60;
+
+        /// <summary>A new /s/&lt;ticket&gt;/ URL. Each open needs its own ticket, because a ticket works once.</summary>
+        public string NewLaunchUrl()
+        {
+            return CreateLaunchUrl(TimeSpan.FromSeconds(LaunchTicketSeconds));
+        }
+
+        /// <summary>A launch URL that expires after the given lifetime. Zero or less is already expired.</summary>
+        internal string CreateLaunchUrl(TimeSpan lifetime)
+        {
+            if (_server == null || Port <= 0) throw new InvalidOperationException("The host is not listening, so there is no launch URL yet.");
+            var ticket = NewToken();
+            var now = Now();
+            var expires = now.Add(lifetime);
+            lock (_launchTicketsLock)
+            {
+                ForgetExpiredLaunchTickets(now);
+                if (expires > now) _launchTickets[ticket] = expires;
+            }
+            return "http://127.0.0.1:" + Port + "/s/" + ticket + "/";
+        }
+
+        private DateTimeOffset Now()
+        {
+            var clock = Options.Clock;
+            if (clock != null) return clock();
+            return DateTimeOffset.UtcNow;
+        }
+
+        // Caller holds _launchTicketsLock.
+        private void ForgetExpiredLaunchTickets(DateTimeOffset now)
+        {
+            List<string> dead = null;
+            foreach (var pair in _launchTickets)
+            {
+                if (pair.Value <= now)
+                {
+                    if (dead == null) dead = new List<string>();
+                    dead.Add(pair.Key);
+                }
+            }
+            if (dead == null) return;
+            foreach (var key in dead) _launchTickets.Remove(key);
+        }
+
+        private bool LaunchTicketIsLive(string presented)
+        {
+            if (string.IsNullOrEmpty(presented)) return false;
+            lock (_launchTicketsLock)
+            {
+                ForgetExpiredLaunchTickets(Now());
+                foreach (var pair in _launchTickets)
+                {
+                    if (FixedTimeEquals(pair.Key, presented)) return true;
+                }
+                return false;
+            }
+        }
+
+        /// <summary>Forgets the ticket and reports whether it was still valid. A second call fails.</summary>
+        private bool TryTakeLaunchTicket(string presented)
+        {
+            if (string.IsNullOrEmpty(presented)) return false;
+            lock (_launchTicketsLock)
+            {
+                ForgetExpiredLaunchTickets(Now());
+                string matched = null;
+                foreach (var pair in _launchTickets)
+                {
+                    if (FixedTimeEquals(pair.Key, presented)) matched = pair.Key;
+                }
+                if (matched == null) return false;
+                _launchTickets.Remove(matched);
+                return true;
+            }
+        }
+
         // ---- request pipeline ----
 
         private async Task<HttpResponse> HandleAsync(HttpRequest request)
@@ -386,7 +470,9 @@ namespace Fairlead.Core.Host
 
             if (request.Path.StartsWith("/api/", StringComparison.Ordinal) || request.Path == "/api")
             {
-                if (request.Path != "/api/health" && !TokenMatches(request) && !BeaconTokenMatches(request))
+                // Claiming a launch ticket is how the page obtains the session token, so this one route cannot require it.
+                var claiming = request.Method == "POST" && string.Equals(request.Path, "/api/session/claim", StringComparison.Ordinal);
+                if (request.Path != "/api/health" && !claiming && !TokenMatches(request) && !BeaconTokenMatches(request))
                     return Json.Error(401, "SESSION_REQUIRED", "Missing or invalid X-Fairlead-Session token. Open Fairlead from the launcher or the tray icon.", request.RequestId);
                 var origin = request.Header("Origin");
                 if (origin != null && !IsOwnOrigin(origin))
@@ -405,11 +491,27 @@ namespace Fairlead.Core.Host
                 catch (InvalidOperationException ex) { return Json.Error(409, "CONFLICT", ex.Message, request.RequestId); }
             }
 
+            // /s/<ticket>/ is the admin page for one launch. The ticket is not the session token.
+            // A wrong or expired ticket is a bare 404: the body must not contain the real token.
+            var openedWithTicket = false;
+            if (request.Path.StartsWith("/s/", StringComparison.Ordinal))
+            {
+                string rest;
+                if (!TrySessionShell(request.Path, out rest)) return HttpResponse.Text(404, "Not found");
+                request.Path = rest;
+                openedWithTicket = true;
+            }
+
             var webRoot = Options.WebRoot ?? Settings.WebRootDirectory;
             if (!string.IsNullOrEmpty(webRoot))
             {
                 var served = new StaticFiles(webRoot).Serve(request);
-                if (served != null) return served;
+                if (served != null)
+                {
+                    // Anything fetched through /s/<ticket>/ would otherwise be cached under a URL that holds the ticket.
+                    if (openedWithTicket) served.Headers["Cache-Control"] = "no-store";
+                    return served;
+                }
             }
             if (request.Path == "/" || request.Path == "/index.html")
                 return HttpResponse.Text(200, "Fairlead is running. The gateway is at " + BaseUrl + "/v1, but no built admin UI was found" + (string.IsNullOrEmpty(webRoot) ? "." : " at " + webRoot + ".") + " Build it with build/Build-Fairlead.ps1 and relaunch.", "text/plain; charset=utf-8");
@@ -452,6 +554,21 @@ namespace Fairlead.Core.Host
             r.Headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type, x-api-key, anthropic-version, anthropic-beta, X-Fairlead-Route, X-Fairlead-Privacy, X-Fairlead-Label, X-Fairlead-Bearing, X-Fairlead-Bearing-Top";
             r.Headers["Access-Control-Expose-Headers"] = "X-Fairlead-Bearing, X-Fairlead-Route, X-Fairlead-Target, X-Fairlead-Mode, X-Fairlead-Attempts, X-Fairlead-Request-Id, X-Fairlead-Private, X-Fairlead-Fallback, X-Fairlead-Fallback-Reason";
             r.Headers["Access-Control-Max-Age"] = "600";
+        }
+
+        /// <summary>/s/&lt;ticket&gt; and /s/&lt;ticket&gt;/... become the static path under them while that launch ticket is still live.</summary>
+        private bool TrySessionShell(string path, out string rest)
+        {
+            rest = null;
+            const string marker = "/s/";
+            if (path == null || !path.StartsWith(marker, StringComparison.Ordinal)) return false;
+            var after = path.Substring(marker.Length);
+            if (after.Length == 0) return false;
+            var cut = after.IndexOf('/');
+            var ticket = cut < 0 ? after : after.Substring(0, cut);
+            if (!LaunchTicketIsLive(ticket)) return false;
+            rest = (cut < 0 || cut == after.Length - 1) ? "/" : after.Substring(cut);
+            return true;
         }
 
         private bool BeaconTokenMatches(HttpRequest request)

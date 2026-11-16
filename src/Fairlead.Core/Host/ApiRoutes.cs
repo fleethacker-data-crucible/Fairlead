@@ -191,6 +191,7 @@ namespace Fairlead.Core.Host
                 // Accepted and ignored: Fairlead serves other tools, so a closed tab never stops it.
                 return Task.FromResult(Json.Ok(new { ok = true }));
             });
+            Admin.Post("/api/session/claim", ClaimLaunchTicket);
             Admin.Post("/api/session/stop", r =>
             {
                 if (!string.Equals(r.Header(IntentHeader), "end-session", StringComparison.Ordinal))
@@ -406,6 +407,15 @@ namespace Fairlead.Core.Host
                 return Task.FromResult(Json.Ok(Engine.Explain(request, Dialect.OpenAi, Json.Read<string>(body, "route"), Json.Read<bool?>(body, "private") == true, Json.Read<string>(body, "client"))));
             });
             Admin.Post("/api/playground", Playground);
+        }
+
+        /// <summary>Trades a single-use launch ticket for the session token, then forgets the ticket. No session header: the page does not have one yet.</summary>
+        private Task<HttpResponse> ClaimLaunchTicket(HttpRequest request)
+        {
+            var ticket = request.Body.Length == 0 ? null : Json.Read<string>(Json.Body(request), "ticket");
+            if (!TryTakeLaunchTicket(ticket))
+                return Task.FromResult(Json.Error(401, "TICKET_INVALID", "This launch link has already been used or has expired. Open Fairlead from the tray again.", request.RequestId));
+            return Task.FromResult(Json.Ok(new { token = SessionToken }));
         }
 
         /// <summary>

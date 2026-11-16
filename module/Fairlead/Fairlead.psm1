@@ -178,7 +178,7 @@ function Start-Fairlead {
     Write-Host ''
     Write-Host ('Fairlead is running. Point tools at ' + $info.GatewayUrl) -ForegroundColor Cyan
     if (-not $info.PortIsRegistry) { Write-Host ('  Port ' + $preferred + ' was busy, so Fairlead took ' + $info.Port + '. Tools configured for ' + $preferred + ' will not reach it.') -ForegroundColor Yellow }
-    Write-Host ('  Admin: ' + $info.Url + '   Config: ' + $info.ConfigFile) -ForegroundColor DarkGray
+    Write-Host ('  Admin page: tray icon, Open Fairlead (port ' + $info.Port + '). A bookmark of that port has no session token. Config: ' + $info.ConfigFile) -ForegroundColor DarkGray
     $gw = $hostObj.GatewayModels
     if ($gw) {
         if ($gw.Ok) { Write-Host ('  AI gateway: ' + $gw.Providers.Count + ' endpoint(s), ' + $gw.EnabledModels + ' enabled model(s) from ' + $gw.Path) -ForegroundColor DarkGray }
@@ -188,6 +188,7 @@ function Start-Fairlead {
         }
     }
     Write-Host '  It keeps running after the browser closes. Stop it from the tray icon (Quit Fairlead), "End session", or scripts\Stop-Fairlead.ps1.' -ForegroundColor DarkGray
+    # The link is a single-use launch ticket, not the session token. It works for about a minute.
     if ($NoBrowser) { Write-Host ('  Admin link (open once): ' + $info.LaunchUrl) -ForegroundColor DarkGray }
     elseif ($Open -or -not $setupDone) { [void](Open-FairleadWindow -Url $info.LaunchUrl -ProfileDir $profileDir) }
     $useTray = -not $NoTray -and (Test-FairleadTraySupported)
@@ -198,7 +199,7 @@ function Start-Fairlead {
     try {
         if ($useTray) {
             $iconPath = Join-Path $Root 'assets\brand\tray.ico'
-            Invoke-FairleadTray -HostObject $hostObj -LaunchUrl $info.LaunchUrl -GatewayUrl $info.GatewayUrl -IconPath $iconPath -ProfileDir $profileDir
+            Invoke-FairleadTray -HostObject $hostObj -GatewayUrl $info.GatewayUrl -IconPath $iconPath -ProfileDir $profileDir
         } else {
             # Poll so Ctrl+C in a visible console still works.
             while (-not $hostObj.WaitForStop(500)) { }

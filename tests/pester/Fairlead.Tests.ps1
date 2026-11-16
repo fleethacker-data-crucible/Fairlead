@@ -179,9 +179,17 @@ Describe 'App window and single instance' {
     }
     It 'builds an --app= command line with its own profile and the background features off' {
         $a = Get-FairleadBrowserArguments -Url 'http://127.0.0.1:8776/?session=abc' -ProfileDir 'C:\Data Dir\app-window'
-        $a | Should -Contain '--app=http://127.0.0.1:8776/?session=abc'
+        $a | Should -Contain '--app="http://127.0.0.1:8776/?session=abc"'
         $a | Should -Contain '--user-data-dir="C:\Data Dir\app-window"'
         foreach ($f in @('--disable-extensions', '--disable-sync', '--disable-background-networking', '--disable-component-update', '--no-first-run')) { $a | Should -Contain $f }
+        $win = Get-Content (Join-Path $script:Root 'module\Fairlead\Window.ps1') -Raw
+        $win | Should -Match 'UseShellExecute = \$false'
+    }
+    It 'Open Fairlead asks the host for a fresh launch ticket each time' {
+        $body = Get-Content (Join-Path $script:Root 'module\Fairlead\Tray.ps1') -Raw
+        $body | Should -Match '\$script:FairleadTrayHost\.NewLaunchUrl\(\)'
+        $body | Should -Not -Match 'FairleadOpenUrl'
+        ([regex]::Matches($body, 'Open-FairleadTrayWindow')).Count | Should -Be 4
     }
     It 'a second launch signals the running instance once, and reports false when nobody is listening' {
         $name = 'Local\Fairlead.Test.' + [guid]::NewGuid().ToString('N')

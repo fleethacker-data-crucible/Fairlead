@@ -37,7 +37,7 @@ models. Response headers: `X-Fairlead-Route`, `-Target`, `-Mode` (`normal` or `k
 
 Auth: `X-Fairlead-Session: <token>`, plus a loopback `Host` and no foreign `Origin`.
 
-- **The browser** gets the session token once, in the URL the launcher opens. It is never written to disk.
+- **The browser** never receives the session token in a URL. The launcher opens `/s/<ticket>/`, a random single-use ticket that lasts about 60 seconds. The page POSTs that ticket once to `POST /api/session/claim`, which returns the session token and invalidates the ticket. The page stores the token in sessionStorage and strips the ticket from the address. A ticket left on a command line, in history, or in a cache is worthless after that. The token is never written to disk. A visit to the bare port has no token, and the page says so.
 - **The CLI** reads a separate token from `%LOCALAPPDATA%\Fairlead\fairlead-cli.json`, encrypted with DPAPI for the
   user who started Fairlead (see [CLI.md](CLI.md)).
 
@@ -53,6 +53,7 @@ config view, unless noted.
 | `GET /api/health` | | `{ ok, version }` (no auth) |
 | `GET /api/status` | | version, port, gateway URL, connectivity, providers with health, routes with target counts, metrics |
 | `POST /api/heartbeat` | `{ leaving }` | accepted and ignored: Fairlead never stops because a tab closed |
+| `POST /api/session/claim` | `{ ticket }` | `{ token }` once. No session header. A second claim, or a ticket older than about 60 seconds, is 401 and does not return the token |
 | `POST /api/session/stop` | header `X-Fairlead-Intent: end-session` | `{ stopping }` |
 
 ### Config, providers and models
