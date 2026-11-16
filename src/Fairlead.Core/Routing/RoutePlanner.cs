@@ -135,7 +135,7 @@ namespace Fairlead.Core.Routing
             if (ordered.Count == 0)
             {
                 plan.Error = plan.LocalOnly
-                    ? "No local model can take this request" + (plan.Kedge ? " and the cloud is unreachable (Kedge mode)" : string.Empty) + ". Start Ollama or another local server, or add a target to the 'local' route."
+                    ? "No local model can take this request" + (plan.Kedge ? " and the cloud is unreachable (Kedge mode)" : string.Empty) + ". Start Ollama and install a small model (for example: ollama pull llama3.2:1b), or add a target to the 'local' route."
                     : "Route '" + route.Id + "' has no target that can take this request. Add one in Fairlead's Routes page.";
                 // A prompt longer than every window is the caller's to fix (400), not an outage (503).
                 if (plan.ContextRejected > 0)
