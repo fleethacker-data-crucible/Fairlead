@@ -24,7 +24,8 @@ function Get-FairleadBrowserArguments {
        update features switched off. #>
     [CmdletBinding()]
     param([Parameter(Mandatory = $true)][string]$Url, [Parameter(Mandatory = $true)][string]$ProfileDir)
-    # Quote the URL. Unquoted, Start-Process / ShellExecute can cut it at '?' and the page loads with no session.
+    # Quote the URL. Unquoted, Start-Process / ShellExecute can cut it at '?'.
+    # The URL is /s/<ticket>/: a single-use launch ticket, not the session token.
     return @(
         ('--app="' + ($Url -replace '"', '') + '"'),
         ('--user-data-dir="' + ($ProfileDir -replace '"', '') + '"'),
@@ -50,7 +51,8 @@ function Open-FairleadWindow {
             [void][System.Diagnostics.Process]::Start($start)
             return $true
         }
-        # No Edge or Chrome: the path /s/<token>/ still carries the session if the query string is stripped.
+        # No Edge or Chrome: the path /s/<ticket>/ still opens the page if the query string is stripped.
+        # That path is a launch ticket. The page trades it once for the session token.
         $open = New-Object System.Diagnostics.ProcessStartInfo
         $open.FileName = $Url
         $open.UseShellExecute = $true

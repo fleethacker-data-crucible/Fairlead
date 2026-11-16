@@ -185,10 +185,11 @@ Describe 'App window and single instance' {
         $win = Get-Content (Join-Path $script:Root 'module\Fairlead\Window.ps1') -Raw
         $win | Should -Match 'UseShellExecute = \$false'
     }
-    It 'the tray keeps the launch URL in script scope so Open Fairlead still has the session' {
+    It 'Open Fairlead asks the host for a fresh launch ticket each time' {
         $body = Get-Content (Join-Path $script:Root 'module\Fairlead\Tray.ps1') -Raw
-        $body | Should -Match '\$script:FairleadOpenUrl = \$LaunchUrl'
-        $body | Should -Match 'Open-FairleadWindow -Url \$script:FairleadOpenUrl -ProfileDir \$script:FairleadOpenProfile'
+        $body | Should -Match '\$script:FairleadTrayHost\.NewLaunchUrl\(\)'
+        $body | Should -Not -Match 'FairleadOpenUrl'
+        ([regex]::Matches($body, 'Open-FairleadTrayWindow')).Count | Should -Be 4
     }
     It 'a second launch signals the running instance once, and reports false when nobody is listening' {
         $name = 'Local\Fairlead.Test.' + [guid]::NewGuid().ToString('N')

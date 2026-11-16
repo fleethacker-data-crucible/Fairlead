@@ -1,26 +1,26 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { locateSession } from '../src/lib/api';
+import { locateLaunchTicket } from '../src/lib/api';
 
-const token = 'ab'.repeat(24);
+const ticket = 'ab'.repeat(24);
 
-test('a path token survives a dropped query string, and the address is cleaned', () => {
-  const found = locateSession(`http://127.0.0.1:8776/s/${token}/`);
-  assert.equal(found.token, token);
+test('the path holds a launch ticket, and the address is cleaned', () => {
+  const found = locateLaunchTicket(`http://127.0.0.1:8776/s/${ticket}/`);
+  assert.equal(found.ticket, ticket);
   assert.equal(found.next, '/');
 });
 
-test('query and hash tokens still count, and a route hash is kept', () => {
-  const query = locateSession(`http://127.0.0.1:8776/?session=${token}#/setup`);
-  assert.equal(query.token, token);
+test('a query or hash session value is stripped and is not a ticket', () => {
+  const query = locateLaunchTicket(`http://127.0.0.1:8776/?session=${ticket}#/setup`);
+  assert.equal(query.ticket, null);
   assert.equal(query.next, '/#/setup');
-  const hash = locateSession(`http://127.0.0.1:8776/#session=${token}`);
-  assert.equal(hash.token, token);
+  const hash = locateLaunchTicket(`http://127.0.0.1:8776/#session=${ticket}`);
+  assert.equal(hash.ticket, null);
   assert.equal(hash.next, '/');
 });
 
-test('a short or missing token is not invented from the path', () => {
-  assert.equal(locateSession('http://127.0.0.1:8776/').token, null);
-  assert.equal(locateSession('http://127.0.0.1:8776/s/abc/').token, null);
-  assert.equal(locateSession('http://127.0.0.1:8776/?session=abc').token, 'abc');
+test('a short path segment is not a ticket', () => {
+  assert.equal(locateLaunchTicket('http://127.0.0.1:8776/').ticket, null);
+  assert.equal(locateLaunchTicket('http://127.0.0.1:8776/s/abc/').ticket, null);
+  assert.equal(locateLaunchTicket('http://127.0.0.1:8776/?session=abc').ticket, null);
 });

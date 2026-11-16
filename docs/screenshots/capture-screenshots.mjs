@@ -201,7 +201,11 @@ async function shoot(browser, { file, scheme = 'dark', state, hash, act }) {
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, colorScheme: scheme, timezoneId: 'America/New_York', locale: 'en-US' });
   const page = await context.newPage();
   await attach(page, state);
-  await page.goto(`${BASE}/?session=${TOKEN}${hash ? '#/' + hash : ''}`);
+  // The page claims a launch ticket; it does not read a session token from the URL. Seed the tab instead.
+  await page.addInitScript((token) => {
+    sessionStorage.setItem('fairlead.session', token);
+  }, TOKEN);
+  await page.goto(`${BASE}/${hash ? '#/' + hash : ''}`);
   await page.getByText('Fairlead 0.1.0').waitFor();
   if (act) await act(page);
   await page.waitForTimeout(600);

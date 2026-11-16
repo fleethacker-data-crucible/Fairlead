@@ -38,17 +38,24 @@ function Set-FairleadTrayIcon {
     if ($old -and -not [object]::ReferenceEquals($old, $Icon) -and -not [object]::ReferenceEquals($old, [System.Drawing.SystemIcons]::Application)) { $old.Dispose() }
 }
 
+function Open-FairleadTrayWindow {
+    <# A new launch ticket on every open. The previous URL is spent after one claim, or after about 60 seconds. #>
+    try {
+        [void](Open-FairleadWindow -Url ($script:FairleadTrayHost.NewLaunchUrl()) -ProfileDir $script:FairleadOpenProfile)
+    } catch {
+        Write-Warning ('Could not open the Fairlead window: ' + $_.Exception.Message)
+    }
+}
+
 function Invoke-FairleadTray {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]$HostObject,
-        [Parameter(Mandatory = $true)][string]$LaunchUrl,
         [Parameter(Mandatory = $true)][string]$GatewayUrl,
         [string]$IconPath,
         [string]$ProfileDir
     )
-    # Click and timer handlers run outside this function's locals. Keep the launch URL (it holds the session) in script scope.
-    $script:FairleadOpenUrl = $LaunchUrl
+    # Click and timer handlers run outside this function's locals. The host mints a fresh ticket when they open the page.
     $script:FairleadOpenProfile = $ProfileDir
     $script:FairleadTrayGateway = $GatewayUrl
     $script:FairleadTrayHost = $HostObject
@@ -73,7 +80,7 @@ function Invoke-FairleadTray {
     [void]$menu.Items.Add('-')
     $openItem = $menu.Items.Add('&Open Fairlead')
     $openItem.Font = New-Object System.Drawing.Font($openItem.Font, [System.Drawing.FontStyle]::Bold)
-    $openItem.add_Click({ [void](Open-FairleadWindow -Url $script:FairleadOpenUrl -ProfileDir $script:FairleadOpenProfile) })
+    $openItem.add_Click({ Open-FairleadTrayWindow })
     $copyItem = $menu.Items.Add('&Copy gateway URL')
     $copyItem.add_Click({ [System.Windows.Forms.Clipboard]::SetText($script:FairleadTrayGateway); $script:FairleadTrayIcon.ShowBalloonTip(2000, 'Fairlead', ('Copied ' + $script:FairleadTrayGateway), [System.Windows.Forms.ToolTipIcon]::Info) })
     $kedgeMenu = New-Object System.Windows.Forms.ToolStripMenuItem('&Kedge mode')
@@ -93,7 +100,7 @@ function Invoke-FairleadTray {
         if ($answer -eq [System.Windows.Forms.DialogResult]::Yes) { $script:FairleadTrayHost.Stop() }
     })
     $icon.ContextMenuStrip = $menu
-    $icon.add_DoubleClick({ [void](Open-FairleadWindow -Url $script:FairleadOpenUrl -ProfileDir $script:FairleadOpenProfile) })
+    $icon.add_DoubleClick({ Open-FairleadTrayWindow })
 
     $script:FairleadLastKedge = $HostObject.Health.KedgeActive
     $script:FairleadTrayIcon = $icon
@@ -111,7 +118,7 @@ function Invoke-FairleadTray {
             [System.Windows.Forms.Application]::ExitThread()
             return
         }
-        if ($script:FairleadTrayListener -and (Test-FairleadOpenRequested -Listener $script:FairleadTrayListener)) { [void](Open-FairleadWindow -Url $script:FairleadOpenUrl -ProfileDir $script:FairleadOpenProfile) }
+        if ($script:FairleadTrayListener -and (Test-FairleadOpenRequested -Listener $script:FairleadTrayListener)) { Open-FairleadTrayWindow }
         $script:FairleadTrayIcon.Text = [Fairlead.Core.Facade]::TrayText($script:FairleadTrayHost)
         $script:FairleadTrayState.Text = [Fairlead.Core.Facade]::TrayStatus($script:FairleadTrayHost)
         $mode = $script:FairleadTrayHost.Config.Snapshot().Kedge.ToString()
