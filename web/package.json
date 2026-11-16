@@ -9,7 +9,8 @@
     "dev": "node build.mjs --watch",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "node --import tsx --test test/*.test.ts",
-    "test:setup": "node test/setup-navigation.browser.mjs"
+    "test:setup": "node test/setup-navigation.browser.mjs",
+    "test:tabs": "node test/tabs.browser.mjs"
   },
   "dependencies": {
     "class-variance-authority": "0.7.1",

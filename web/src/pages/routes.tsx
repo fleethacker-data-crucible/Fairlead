@@ -20,12 +20,13 @@ export function RoutesPage() {
     <Page title="Routes" lede="Routes are the model names your tools use. Rules decide what auto picks; aliases catch model names tools hard-code.">
       {config.error ? <Notice tone="err">{config.error}</Notice> : null}
       <section className="panel">
-        <Tabs value={tab} onChange={setTab} items={[
+        <Tabs id="route-sections" label="Route settings" value={tab} onChange={setTab} items={[
           { value: 'routes', label: 'Routes', count: config.data?.routes.length },
           { value: 'rules', label: 'Auto rules', count: config.data?.rules.length },
           { value: 'aliases', label: 'Aliases', count: config.data ? Object.keys(config.data.aliases).length : undefined },
-        ]} />
+        ]}>
         {config.data ? (tab === 'routes' ? <RoutesTab config={config.data} /> : tab === 'rules' ? <RulesTab config={config.data} /> : <AliasesTab config={config.data} />) : <div className="h-40" />}
+        </Tabs>
       </section>
     </Page>
   );

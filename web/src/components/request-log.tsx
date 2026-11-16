@@ -60,7 +60,7 @@ export function RequestLogView() {
             <Stat label="Tokens out" value={count(sum.outputTokens)} />
             <Stat label="Cost" value={usd(sum.cost)} hint={sum.cost === null || sum.cost === undefined ? 'no prices entered' : undefined} />
           </div>
-          <Tabs value={group} onChange={setGroup} items={(Object.keys(GROUP_TITLES) as GroupBy[]).map((g) => ({ value: g, label: GROUP_TITLES[g], count: sum[g].length }))} />
+          <Tabs id="request-totals" label="Request totals" value={group} onChange={setGroup} items={(Object.keys(GROUP_TITLES) as GroupBy[]).map((g) => ({ value: g, label: GROUP_TITLES[g], count: sum[g].length }))}>
           {groups.length === 0 ? (
             <Empty title={group === 'byLabel' ? 'No labels in this period' : 'Nothing to total'}>{group === 'byLabel' ? 'A caller adds one with the X-Fairlead-Label header.' : undefined}</Empty>
           ) : (
@@ -85,6 +85,7 @@ export function RequestLogView() {
               </table>
             </div>
           )}
+          </Tabs>
         </>
       ) : null}
       {rows.length === 0 ? (

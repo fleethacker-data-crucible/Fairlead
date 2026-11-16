@@ -90,7 +90,7 @@ export function ClientsPage({ status }: { status: Status | undefined }) {
           </Section>
         </div>
         <section className="panel flex min-w-0 flex-col">
-          <Tabs value={current.id} onChange={setTool} items={list.map((s) => ({ value: s.id, label: s.tool }))} />
+          <Tabs id="client-tools" label="Tool setup" value={current.id} onChange={setTool} items={list.map((s) => ({ value: s.id, label: s.tool }))} panelClassName="min-w-0">
           <div className="flex flex-col gap-2 px-4 py-3">
             <div className="flex items-start justify-between gap-3">
               <p className="text-ink-2">{current.note}</p>
@@ -99,6 +99,7 @@ export function ClientsPage({ status }: { status: Status | undefined }) {
             <div className="panel"><div className="flex justify-end px-2 py-1"><CopyButton text={current.code} /></div><pre className="snippet hairline m-0 bg-surface-2 px-3 py-2">{current.code}</pre></div>
             {!fresh ? <p className="text-[12.5px] text-ink-3">Shown with a placeholder key. Create a key to fill it in; existing keys cannot be shown again.</p> : null}
           </div>
+          </Tabs>
         </section>
       </div>
       <ConfirmDialog open={remove !== null} danger title={`Revoke ${remove?.name}?`} confirmLabel="Revoke key" onCancel={() => setRemove(null)}

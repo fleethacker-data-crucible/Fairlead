@@ -20,9 +20,9 @@ export function ActivityPage() {
   return (
     <Page title="Activity" lede="Every gateway request: what was asked for, how the route was chosen, which targets were tried. Prompts are not kept unless content logging is on (Settings).">
       <section className="panel flex min-h-0 flex-col">
-        <Tabs value={view} onChange={setView} items={[{ value: 'run', label: 'This run' }, { value: 'log', label: 'Log on disk' }]} />
+        <Tabs id="activity-source" label="Activity source" value={view} onChange={setView} items={[{ value: 'run', label: 'This run' }, { value: 'log', label: 'Log on disk' }]} panelClassName="flex min-h-0 min-w-0 flex-col">
         {view === 'log' ? <RequestLogView /> : <>
-        <Tabs value={filter} onChange={setFilter} items={(['all', 'failed', 'failover', 'kedge', 'private'] as Filter[]).map((f) => ({ value: f, label: f === 'all' ? 'All' : f === 'kedge' ? 'Kedge mode' : f[0]!.toUpperCase() + f.slice(1), count: all.filter(pick(f)).length }))} />
+        <Tabs id="activity-filter" label="Request filter" value={filter} onChange={setFilter} items={(['all', 'failed', 'failover', 'kedge', 'private'] as Filter[]).map((f) => ({ value: f, label: f === 'all' ? 'All' : f === 'kedge' ? 'Kedge mode' : f[0]!.toUpperCase() + f.slice(1), count: all.filter(pick(f)).length }))} panelClassName="min-w-0">
         {rows.length === 0 ? <Empty title={all.length ? 'Nothing matches this filter' : 'No requests yet'} /> : (
           <div className="grid min-h-0 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
             <div className="scroll-y max-h-[70vh]">
@@ -48,7 +48,9 @@ export function ActivityPage() {
             </div>
           </div>
         )}
+        </Tabs>
         </>}
+        </Tabs>
       </section>
     </Page>
   );
